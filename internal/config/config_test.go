@@ -1,0 +1,286 @@
+package config
+
+import (
+	"testing"
+	"time"
+)
+
+func TestNewSettingTypeDefaults(t *testing.T) {
+	s := NewSettingType(false)
+
+	if got := s.GetString(LDAP_URL); got != "ldaps://ldap:389" {
+		t.Fatalf("expected default LDAP_URL, got %q", got)
+	}
+	if got := s.GetString(LDAP_BASE_DN); got != "dc=glauth,dc=com" {
+		t.Fatalf("expected default LDAP_BASE_DN, got %q", got)
+	}
+	if got := s.GetBool(ACME_ENABLE); got != false {
+		t.Fatalf("expected default ACME_ENABLE=false, got %v", got)
+	}
+	if got := s.GetDuration(TIMEOUT); got != 10*time.Second {
+		t.Fatalf("expected default TIMEOUT=10s, got %v", got)
+	}
+}
+
+func TestNewSettingTypePrint(t *testing.T) {
+	// Exercise the print=true path; just ensure it doesn't panic.
+	s := NewSettingType(true)
+	if s == nil {
+		t.Fatal("expected non-nil SettingsType")
+	}
+}
+
+func TestSetStringDefault(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("TEST_KEY", "test description", "default_value")
+
+	if got := s.GetString("TEST_KEY"); got != "default_value" {
+		t.Fatalf("expected %q, got %q", "default_value", got)
+	}
+}
+
+func TestSetStringFromEnv(t *testing.T) {
+	t.Setenv("TEST_KEY_ENV", "  from_env  ")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("TEST_KEY_ENV", "test", "fallback")
+
+	if got := s.GetString("TEST_KEY_ENV"); got != "from_env" {
+		t.Fatalf("expected trimmed env value %q, got %q", "from_env", got)
+	}
+}
+
+func TestSetIntDefault(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetInt("MY_INT", "an integer", 42)
+
+	if got := s.GetInt("MY_INT"); got != 42 {
+		t.Fatalf("expected 42, got %d", got)
+	}
+}
+
+func TestSetIntFromEnv(t *testing.T) {
+	t.Setenv("MY_INT_ENV", " 99 ")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetInt("MY_INT_ENV", "integer from env", 0)
+
+	if got := s.GetInt("MY_INT_ENV"); got != 99 {
+		t.Fatalf("expected 99, got %d", got)
+	}
+}
+
+func TestSetIntInvalidEnv(t *testing.T) {
+	t.Setenv("MY_INT_BAD", "not_a_number")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetInt("MY_INT_BAD", "bad integer", 7)
+
+	if got := s.GetInt("MY_INT_BAD"); got != 7 {
+		t.Fatalf("expected default 7 for invalid env, got %d", got)
+	}
+}
+
+func TestSetBoolDefault(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetBool("MY_BOOL", "a boolean", true)
+
+	if got := s.GetBool("MY_BOOL"); got != true {
+		t.Fatalf("expected true, got %v", got)
+	}
+}
+
+func TestSetBoolFromEnv(t *testing.T) {
+	t.Setenv("MY_BOOL_ENV", " true ")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetBool("MY_BOOL_ENV", "bool from env", false)
+
+	if got := s.GetBool("MY_BOOL_ENV"); got != true {
+		t.Fatalf("expected true, got %v", got)
+	}
+}
+
+func TestSetBoolInvalidEnv(t *testing.T) {
+	t.Setenv("MY_BOOL_BAD", "nope")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetBool("MY_BOOL_BAD", "bad bool", true)
+
+	if got := s.GetBool("MY_BOOL_BAD"); got != true {
+		t.Fatalf("expected default true for invalid env, got %v", got)
+	}
+}
+
+func TestSetDurationDefault(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetDuration("MY_DUR", "a duration", 5*time.Minute)
+
+	if got := s.GetDuration("MY_DUR"); got != 5*time.Minute {
+		t.Fatalf("expected 5m, got %v", got)
+	}
+}
+
+func TestSetDurationFromEnv(t *testing.T) {
+	t.Setenv("MY_DUR_ENV", " 30s ")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetDuration("MY_DUR_ENV", "dur from env", time.Second)
+
+	if got := s.GetDuration("MY_DUR_ENV"); got != 30*time.Second {
+		t.Fatalf("expected 30s, got %v", got)
+	}
+}
+
+func TestSetDurationInvalidEnv(t *testing.T) {
+	t.Setenv("MY_DUR_BAD", "nope")
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetDuration("MY_DUR_BAD", "bad dur", 2*time.Hour)
+
+	if got := s.GetDuration("MY_DUR_BAD"); got != 2*time.Hour {
+		t.Fatalf("expected default 2h for invalid env, got %v", got)
+	}
+}
+
+func TestHas(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("EXISTS", "exists", "v")
+
+	if !s.Has("EXISTS") {
+		t.Fatal("expected Has to return true for existing key")
+	}
+	if s.Has("NOT_EXISTS") {
+		t.Fatal("expected Has to return false for missing key")
+	}
+}
+
+func TestGetMissing(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+
+	if got := s.GetString("MISSING"); got != "" {
+		t.Fatalf("expected empty string for missing key, got %q", got)
+	}
+	if got := s.GetInt("MISSING"); got != 0 {
+		t.Fatalf("expected 0 for missing key, got %d", got)
+	}
+	if got := s.GetBool("MISSING"); got != false {
+		t.Fatalf("expected false for missing key, got %v", got)
+	}
+	if got := s.GetDuration("MISSING"); got != 0 {
+		t.Fatalf("expected 0 for missing key, got %v", got)
+	}
+}
+
+func TestGetStringReturnsFormattedValues(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetInt("INT_KEY", "int", 42)
+	s.SetBool("BOOL_KEY", "bool", true)
+	s.SetDuration("DUR_KEY", "dur", 5*time.Second)
+
+	if got := s.GetString("INT_KEY"); got != "42" {
+		t.Fatalf("expected %q, got %q", "42", got)
+	}
+	if got := s.GetString("BOOL_KEY"); got != "true" {
+		t.Fatalf("expected %q, got %q", "true", got)
+	}
+	if got := s.GetString("DUR_KEY"); got != "5s" {
+		t.Fatalf("expected %q, got %q", "5s", got)
+	}
+}
+
+func TestGetIntFromStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_INT", "string that is int", "123")
+
+	if got := s.GetInt("STR_INT"); got != 123 {
+		t.Fatalf("expected 123, got %d", got)
+	}
+}
+
+func TestGetIntFromStringKindInvalid(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_BAD", "not an int string", "abc")
+
+	if got := s.GetInt("STR_BAD"); got != 0 {
+		t.Fatalf("expected 0, got %d", got)
+	}
+}
+
+func TestGetIntFromEmptyStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_EMPTY", "empty string", "")
+
+	if got := s.GetInt("STR_EMPTY"); got != 0 {
+		t.Fatalf("expected 0, got %d", got)
+	}
+}
+
+func TestGetBoolFromStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_BOOL", "string that is bool", "true")
+
+	if got := s.GetBool("STR_BOOL"); got != true {
+		t.Fatalf("expected true, got %v", got)
+	}
+}
+
+func TestGetBoolFromEmptyStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_EMPTY", "empty string", "")
+
+	if got := s.GetBool("STR_EMPTY"); got != false {
+		t.Fatalf("expected false, got %v", got)
+	}
+}
+
+func TestGetBoolFromInvalidStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_BAD", "not a bool string", "maybe")
+
+	if got := s.GetBool("STR_BAD"); got != false {
+		t.Fatalf("expected false, got %v", got)
+	}
+}
+
+func TestGetDurationFromStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_DUR", "string that is dur", "15s")
+
+	if got := s.GetDuration("STR_DUR"); got != 15*time.Second {
+		t.Fatalf("expected 15s, got %v", got)
+	}
+}
+
+func TestGetDurationFromEmptyStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_EMPTY", "empty string", "")
+
+	if got := s.GetDuration("STR_EMPTY"); got != 0 {
+		t.Fatalf("expected 0, got %v", got)
+	}
+}
+
+func TestGetDurationFromInvalidStringKind(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("STR_BAD", "bad dur string", "nope")
+
+	if got := s.GetDuration("STR_BAD"); got != 0 {
+		t.Fatalf("expected 0, got %v", got)
+	}
+}
+
+func TestGetAlias(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetString("ALIAS", "alias test", "hello")
+
+	if got := s.Get("ALIAS"); got != "hello" {
+		t.Fatalf("expected %q, got %q", "hello", got)
+	}
+}
+
+func TestIsTrue(t *testing.T) {
+	s := &SettingsType{m: make(map[string]*Setting)}
+	s.SetBool("TRUE_KEY", "true bool", true)
+	s.SetBool("FALSE_KEY", "false bool", false)
+
+	if !s.IsTrue("TRUE_KEY") {
+		t.Fatal("expected IsTrue to return true")
+	}
+	if s.IsTrue("FALSE_KEY") {
+		t.Fatal("expected IsTrue to return false")
+	}
+}
