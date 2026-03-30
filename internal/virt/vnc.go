@@ -56,29 +56,7 @@ func vncSocketPath(settings *config.SettingsType, name string) string {
 }
 
 func ensureVNCSocketDir(settings *config.SettingsType) (string, error) {
-	dir := filepath.Clean(strings.TrimSpace(vncSocketDir(settings)))
-	if dir == "" || dir == "." {
-		return "", fmt.Errorf("vnc socket directory cannot be empty")
-	}
-
-	if err := os.MkdirAll(dir, 0o777); err != nil {
-		return "", fmt.Errorf("create vnc socket directory %s: %w", dir, err)
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
-		return "", fmt.Errorf("chmod vnc socket directory %s: %w", dir, err)
-	}
-
-	owner, group, hasOwnership, err := serialSocketOwnership()
-	if err != nil {
-		return "", err
-	}
-	if hasOwnership {
-		if err := os.Chown(dir, owner, group); err != nil {
-			return "", fmt.Errorf("chown vnc socket directory %s: %w", dir, err)
-		}
-	}
-
-	return dir, nil
+	return ensureSocketDir(vncSocketDir(settings), "vnc")
 }
 
 func removeVNCSocket(settings *config.SettingsType, name string) error {

@@ -55,29 +55,7 @@ func serialSocketPath(settings *config.SettingsType, name string) string {
 }
 
 func ensureSerialSocketDir(settings *config.SettingsType) (string, error) {
-	dir := filepath.Clean(strings.TrimSpace(serialSocketDir(settings)))
-	if dir == "" || dir == "." {
-		return "", fmt.Errorf("serial socket directory cannot be empty")
-	}
-
-	if err := os.MkdirAll(dir, 0o777); err != nil {
-		return "", fmt.Errorf("create serial socket directory %s: %w", dir, err)
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
-		return "", fmt.Errorf("chmod serial socket directory %s: %w", dir, err)
-	}
-
-	owner, group, hasOwnership, err := serialSocketOwnership()
-	if err != nil {
-		return "", err
-	}
-	if hasOwnership {
-		if err := os.Chown(dir, owner, group); err != nil {
-			return "", fmt.Errorf("chown serial socket directory %s: %w", dir, err)
-		}
-	}
-
-	return dir, nil
+	return ensureSocketDir(serialSocketDir(settings), "serial")
 }
 
 func removeSerialSocket(settings *config.SettingsType, name string) error {
@@ -167,7 +145,7 @@ func DialSerialSocket(name string, timeout time.Duration) (net.Conn, error) {
 	return serialConn, nil
 }
 
-func serialSocketOwnership() (int, int, bool, error) {
+func socketOwnership() (int, int, bool, error) {
 	owner, hasOwner, err := parseSocketOwnershipEnv(volumeOwnerEnv)
 	if err != nil {
 		return 0, 0, false, err
