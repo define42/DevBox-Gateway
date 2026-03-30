@@ -122,6 +122,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	apiCfg.SchemasPath = ""
 	api := humachi.New(router, apiCfg)
 	registerAPI(api, sessionManager, settings)
+	router.Get("/api/dashboard/console/{name}/ws", handleDashboardConsoleWS(sessionManager, settings))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)

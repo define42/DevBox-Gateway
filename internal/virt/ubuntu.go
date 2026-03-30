@@ -4,8 +4,7 @@ import (
 	"fmt"
 )
 
-func UbuntuDomain(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) string {
-
+func UbuntuDomain(name, seedIso, storagePoolName, serialSocketPath string, vcpu int, memoryMiB int) string {
 	return fmt.Sprintf(`<domain type='kvm'>
   <name>%s</name>
   <memory unit='MiB'>%d</memory>
@@ -59,8 +58,11 @@ func UbuntuDomain(name, seedIso, storagePoolName string, vcpu int, memoryMiB int
       <model type='virtio' heads='1' primary='yes'/>
     </video>
 
-    <!-- Console -->
-    <console type='pty'/>
+    <!-- Serial console -->
+    <serial type='unix'>
+      <source mode='bind' path='%s'/>
+      <target port='0'/>
+    </serial>
 
     <!-- Input -->
     <input type='tablet' bus='usb'/>
@@ -70,5 +72,5 @@ func UbuntuDomain(name, seedIso, storagePoolName string, vcpu int, memoryMiB int
       <backend model='random'>/dev/urandom</backend>
     </rng>
   </devices>
-</domain>`, name, memoryMiB, memoryMiB, vcpu, storagePoolName, name, storagePoolName, seedIso)
+</domain>`, name, memoryMiB, memoryMiB, vcpu, storagePoolName, name, storagePoolName, seedIso, serialSocketPath)
 }

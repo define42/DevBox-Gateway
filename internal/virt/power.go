@@ -28,6 +28,9 @@ func StartExistingVM(name string) error {
 	if active {
 		return nil
 	}
+	if err := cleanupDomainSerialSocket(dom); err != nil {
+		return fmt.Errorf("cleanup serial socket for %s: %w", name, err)
+	}
 	if err := dom.Create(); err != nil {
 		return fmt.Errorf("start domain %s: %w", name, err)
 	}
@@ -86,6 +89,9 @@ func RestartVM(name string) error {
 			return fmt.Errorf("reboot domain %s: %w", name, err)
 		}
 		return nil
+	}
+	if err := cleanupDomainSerialSocket(dom); err != nil {
+		return fmt.Errorf("cleanup serial socket for %s: %w", name, err)
 	}
 	if err := dom.Create(); err != nil {
 		return fmt.Errorf("start domain %s: %w", name, err)

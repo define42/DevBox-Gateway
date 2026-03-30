@@ -32,6 +32,8 @@ users:
     lock_passwd: false
     passwd: ` + cloudInitPasswordHash + `
 ssh_pwauth: true
+runcmd:
+  - systemctl enable --now serial-getty@ttyS0.service
 `)
 
 	fmt.Println("userData:", string(userData))

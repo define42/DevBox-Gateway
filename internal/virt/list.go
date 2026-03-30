@@ -19,6 +19,7 @@ type vmInfo struct {
 	VolumeGB  int
 	IP        string
 	PrimaryIP string
+	TTYReady  bool
 }
 
 func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
@@ -52,6 +53,7 @@ func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
 		}
 		mem, vcpu := domainResources(d)
 		volGB := domainDiskGB(d)
+		ttyReady := domainTTYReady(&d)
 		ip := ""
 		primaryIP := ""
 		if state == libvirt.DOMAIN_RUNNING || state == libvirt.DOMAIN_PAUSED || state == libvirt.DOMAIN_PMSUSPENDED {
@@ -69,9 +71,19 @@ func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
 			VolumeGB:  volGB,
 			IP:        ip,
 			PrimaryIP: primaryIP,
+			TTYReady:  ttyReady,
 		})
 	}
 	return result, nil
+}
+
+func domainTTYReady(d *libvirt.Domain) bool {
+	_, ok, err := domainSerialSocketPath(d)
+	if err != nil {
+		log.Printf("domain tty readiness: %v", err)
+		return false
+	}
+	return ok
 }
 
 func domainResources(d libvirt.Domain) (int, int) {

@@ -5,3 +5,68 @@
 .vm-resource-select {
   min-width: 140px;
 }
+
+.terminal-modal[hidden] {
+  display: none !important;
+}
+
+.terminal-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+}
+
+.terminal-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.terminal-modal__dialog {
+  position: relative;
+  z-index: 1;
+  width: min(960px, calc(100vw - 2rem));
+  margin: 2rem auto;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 1rem;
+  background: #10161f;
+  box-shadow: 0 1.25rem 4rem rgba(0, 0, 0, 0.45);
+}
+
+.terminal-modal__body {
+  padding: 1rem;
+}
+
+.terminal-modal__surface {
+  min-height: 420px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.75rem;
+  background: #020617;
+  overflow: hidden;
+}
+
+.terminal-modal__surface .xterm {
+  padding: 1rem;
+  height: 100%;
+}
+
+.terminal-modal__surface .xterm-viewport {
+  overflow-y: auto;
+}
+
+.terminal-hint {
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+}
+
+@media (max-width: 768px) {
+  .terminal-modal__dialog {
+    width: calc(100vw - 1rem);
+    margin: 0.5rem auto;
+  }
+
+  .terminal-modal__surface {
+    min-height: 300px;
+  }
+}

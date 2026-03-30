@@ -24,6 +24,7 @@ type dashboardVM struct {
 	MemoryMiB   int    `json:"memoryMiB"`
 	VCPU        int    `json:"vcpu"`
 	VolumeGB    int    `json:"volumeGB"`
+	TTYReady    bool   `json:"ttyReady"`
 }
 
 type dashboardDataResponse struct {
@@ -84,6 +85,7 @@ func listDashboardVMs(settings *config.SettingsType, user string) ([]dashboardVM
 			MemoryMiB:   vm.MemoryMiB,
 			VCPU:        vm.VCPU,
 			VolumeGB:    vm.VolumeGB,
+			TTYReady:    vm.TTYReady,
 		})
 	}
 	return rows, nil

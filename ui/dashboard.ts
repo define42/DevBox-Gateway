@@ -7,6 +7,40 @@ const DEFAULT_MEMORY_MIB = "4096";
 const VCPU_OPTIONS = ["1", "2", "4", "8"];
 const MEMORY_OPTIONS = ["4096", "8192", "16384", "32768"];
 
+type Disposable = {
+    dispose(): void;
+};
+
+type XTermConstructorOptions = {
+    convertEol?: boolean;
+    cursorBlink?: boolean;
+    fontFamily?: string;
+    fontSize?: number;
+    theme?: Record<string, string>;
+};
+
+type XTermFitAddon = {
+    fit(): void;
+};
+
+type XTermTerminal = {
+    clear(): void;
+    dispose(): void;
+    focus(): void;
+    loadAddon(addon: XTermFitAddon): void;
+    onData(listener: (data: string) => void): Disposable;
+    open(parent: HTMLElement): void;
+    write(data: string | Uint8Array): void;
+};
+
+declare const Terminal: {
+    new(options?: XTermConstructorOptions): XTermTerminal;
+};
+
+declare const FitAddon: {
+    FitAddon: new() => XTermFitAddon;
+};
+
 type DashboardVM = {
     name: string;
     displayName: string;
@@ -16,6 +50,7 @@ type DashboardVM = {
     memoryMiB: number;
     vcpu: number;
     volumeGB: number;
+    ttyReady: boolean;
 };
 
 type DashboardDataResponse = {
@@ -30,6 +65,14 @@ type DashboardActionResponse = {
     error?: string;
 };
 
+type DashboardTerminalState = {
+    open: boolean;
+    vmName: string;
+    vmDisplayName: string;
+    status: string;
+    error: string;
+};
+
 type DashboardState = {
     vms: DashboardVM[];
     filename: string;
@@ -38,6 +81,7 @@ type DashboardState = {
     actionError: string;
     loading: boolean;
     busy: boolean;
+    terminal: DashboardTerminalState;
 };
 
 type RequestResult<T> = {
@@ -58,6 +102,13 @@ const state: DashboardState = {
     actionError: "",
     loading: true,
     busy: false,
+    terminal: {
+        open: false,
+        vmName: "",
+        vmDisplayName: "",
+        status: "",
+        error: "",
+    },
 };
 
 let loadInFlight = false;
@@ -92,6 +143,11 @@ function buildSelect<T extends string | number>(
         select.appendChild(option);
     }
     return select;
+}
+
+function terminalWebSocketURL(name: string): string {
+    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${window.location.host}/api/dashboard/console/${encodeURIComponent(name)}/ws`;
 }
 
 function bootstrap(): void {
@@ -143,6 +199,23 @@ function bootstrap(): void {
         </div>
       </div>
     </main>
+    <div id="terminal-modal" class="terminal-modal" hidden aria-hidden="true">
+      <div class="terminal-modal__backdrop" id="terminal-backdrop"></div>
+      <div class="terminal-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="terminal-title">
+        <div class="terminal-modal__body">
+          <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1" id="terminal-title">Serial Terminal</h2>
+              <p class="text-body-secondary mb-0" id="terminal-subtitle"></p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="terminal-close" type="button">Close</button>
+          </div>
+          <div class="terminal-hint mb-2" id="terminal-status" aria-live="polite"></div>
+          <div class="alert alert-danger mb-3 d-none" id="terminal-error" role="alert"></div>
+          <div class="terminal-modal__surface" id="terminal-surface"></div>
+        </div>
+      </div>
+    </div>
   `;
 
     const form = root.querySelector<HTMLFormElement>("#create-form");
@@ -152,8 +225,30 @@ function bootstrap(): void {
     const createButton = root.querySelector<HTMLButtonElement>("#create-button");
     const actionArea = root.querySelector<HTMLDivElement>("#action-area");
     const listArea = root.querySelector<HTMLDivElement>("#vm-list");
+    const terminalModal = root.querySelector<HTMLDivElement>("#terminal-modal");
+    const terminalBackdrop = root.querySelector<HTMLDivElement>("#terminal-backdrop");
+    const terminalSubtitle = root.querySelector<HTMLParagraphElement>("#terminal-subtitle");
+    const terminalStatus = root.querySelector<HTMLDivElement>("#terminal-status");
+    const terminalError = root.querySelector<HTMLDivElement>("#terminal-error");
+    const terminalSurface = root.querySelector<HTMLDivElement>("#terminal-surface");
+    const terminalClose = root.querySelector<HTMLButtonElement>("#terminal-close");
 
-    if (!form || !input || !cpuSelect || !memorySelect || !createButton || !actionArea || !listArea) {
+    if (
+        !form ||
+        !input ||
+        !cpuSelect ||
+        !memorySelect ||
+        !createButton ||
+        !actionArea ||
+        !listArea ||
+        !terminalModal ||
+        !terminalBackdrop ||
+        !terminalSubtitle ||
+        !terminalStatus ||
+        !terminalError ||
+        !terminalSurface ||
+        !terminalClose
+    ) {
         return;
     }
 
@@ -164,6 +259,19 @@ function bootstrap(): void {
     const createButtonEl = createButton;
     const actionAreaEl = actionArea;
     const listAreaEl = listArea;
+    const terminalModalEl = terminalModal;
+    const terminalBackdropEl = terminalBackdrop;
+    const terminalSubtitleEl = terminalSubtitle;
+    const terminalStatusEl = terminalStatus;
+    const terminalErrorEl = terminalError;
+    const terminalSurfaceEl = terminalSurface;
+    const terminalCloseEl = terminalClose;
+
+    let terminalSocket: WebSocket | null = null;
+    let terminalInstance: XTermTerminal | null = null;
+    let terminalFitAddon: XTermFitAddon | null = null;
+    let terminalInputDisposable: Disposable | null = null;
+    let terminalClosing = false;
 
     function renderAction(): void {
         actionAreaEl.innerHTML = "";
@@ -181,6 +289,177 @@ function bootstrap(): void {
             message.textContent = state.actionMessage;
             actionAreaEl.appendChild(message);
         }
+    }
+
+    function renderTerminal(): void {
+        terminalModalEl.hidden = !state.terminal.open;
+        terminalModalEl.setAttribute("aria-hidden", state.terminal.open ? "false" : "true");
+        terminalSubtitleEl.textContent = state.terminal.vmDisplayName || state.terminal.vmName;
+        terminalStatusEl.textContent = state.terminal.status;
+        if (state.terminal.error) {
+            terminalErrorEl.textContent = state.terminal.error;
+            terminalErrorEl.classList.remove("d-none");
+        } else {
+            terminalErrorEl.textContent = "";
+            terminalErrorEl.classList.add("d-none");
+        }
+        if (!state.terminal.open) {
+            terminalSurfaceEl.innerHTML = "";
+        }
+    }
+
+    function teardownTerminalRuntime(): void {
+        terminalClosing = true;
+        if (terminalInputDisposable) {
+            terminalInputDisposable.dispose();
+            terminalInputDisposable = null;
+        }
+        if (terminalSocket) {
+            try {
+                terminalSocket.close();
+            } catch {
+                // Ignore close errors during teardown.
+            }
+            terminalSocket = null;
+        }
+        if (terminalInstance) {
+            terminalInstance.dispose();
+            terminalInstance = null;
+        }
+        terminalFitAddon = null;
+        terminalSurfaceEl.innerHTML = "";
+    }
+
+    function closeTerminal(): void {
+        teardownTerminalRuntime();
+        state.terminal.open = false;
+        state.terminal.vmName = "";
+        state.terminal.vmDisplayName = "";
+        state.terminal.status = "";
+        state.terminal.error = "";
+        renderTerminal();
+    }
+
+    function handleTerminalMessage(data: unknown): void {
+        if (!terminalInstance) {
+            return;
+        }
+        if (data instanceof ArrayBuffer) {
+            terminalInstance.write(new Uint8Array(data));
+            return;
+        }
+        if (data instanceof Blob) {
+            void data.arrayBuffer().then((buffer) => {
+                if (terminalInstance) {
+                    terminalInstance.write(new Uint8Array(buffer));
+                }
+            });
+            return;
+        }
+        if (typeof data === "string") {
+            terminalInstance.write(data);
+        }
+    }
+
+    function openTerminal(vm: DashboardVM): void {
+        teardownTerminalRuntime();
+
+        state.terminal.open = true;
+        state.terminal.vmName = vm.name;
+        state.terminal.vmDisplayName = vm.displayName || vm.name;
+        state.terminal.status = "Connecting to guest serial console...";
+        state.terminal.error = "";
+        renderTerminal();
+
+        if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+            state.terminal.status = "";
+            state.terminal.error = "Terminal assets failed to load.";
+            renderTerminal();
+            return;
+        }
+
+        terminalClosing = false;
+        terminalInstance = new Terminal({
+            convertEol: true,
+            cursorBlink: true,
+            fontFamily: "'SFMono-Regular', 'Menlo', 'Monaco', monospace",
+            fontSize: 14,
+            theme: {
+                background: "#020617",
+                foreground: "#e2e8f0",
+                cursor: "#38bdf8",
+            },
+        });
+        terminalFitAddon = new FitAddon.FitAddon();
+        terminalInstance.loadAddon(terminalFitAddon);
+        terminalInstance.open(terminalSurfaceEl);
+        terminalFitAddon.fit();
+        terminalInstance.focus();
+
+        const socket = new WebSocket(terminalWebSocketURL(vm.name));
+        socket.binaryType = "arraybuffer";
+        terminalSocket = socket;
+
+        const encoder = new TextEncoder();
+        const inputDisposable = terminalInstance.onData((data) => {
+            if (terminalSocket !== socket || socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            socket.send(encoder.encode(data));
+        });
+        terminalInputDisposable = inputDisposable;
+
+        socket.onopen = () => {
+            if (terminalSocket !== socket) {
+                return;
+            }
+            state.terminal.status = "Connected to guest serial console.";
+            state.terminal.error = "";
+            renderTerminal();
+            window.requestAnimationFrame(() => {
+                if (terminalFitAddon) {
+                    terminalFitAddon.fit();
+                }
+                if (terminalInstance) {
+                    terminalInstance.focus();
+                }
+            });
+        };
+
+        socket.onmessage = (event: MessageEvent) => {
+            if (terminalSocket !== socket) {
+                return;
+            }
+            handleTerminalMessage(event.data);
+        };
+
+        socket.onerror = () => {
+            if (terminalSocket !== socket) {
+                return;
+            }
+            state.terminal.status = "";
+            state.terminal.error = "Terminal connection failed.";
+            renderTerminal();
+        };
+
+        socket.onclose = () => {
+            if (terminalSocket === socket) {
+                terminalSocket = null;
+            }
+            if (terminalInputDisposable === inputDisposable) {
+                terminalInputDisposable.dispose();
+                terminalInputDisposable = null;
+            }
+            if (terminalClosing || !state.terminal.open) {
+                terminalClosing = false;
+                return;
+            }
+            state.terminal.status = "Disconnected.";
+            if (!state.terminal.error) {
+                state.terminal.error = "Terminal connection closed.";
+            }
+            renderTerminal();
+        };
     }
 
     function renderVMList(): void {
@@ -248,6 +527,7 @@ function bootstrap(): void {
             const normalizedState = (vm.state || "").trim().toLowerCase();
             const ipValue = (vm.ip || "").trim();
             const hasIP = ipValue !== "" && ipValue.toLowerCase() !== "n/a";
+            const ttyReady = Boolean(vm.ttyReady);
 
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
@@ -322,6 +602,16 @@ function bootstrap(): void {
             const actions = document.createElement("div");
             actions.className = "d-flex flex-wrap gap-2";
 
+            const terminalButton = document.createElement("button");
+            terminalButton.type = "button";
+            terminalButton.className = "btn btn-sm btn-outline-info";
+            terminalButton.textContent = "Terminal";
+            terminalButton.disabled = state.busy || !hasName || !ttyReady || !isActive;
+            terminalButton.addEventListener("click", () => {
+                openTerminal(vm);
+            });
+            actions.appendChild(terminalButton);
+
             const startButton = document.createElement("button");
             startButton.type = "button";
             startButton.className = "btn btn-sm btn-outline-success";
@@ -366,6 +656,7 @@ function bootstrap(): void {
             actions.appendChild(removeButton);
 
             actionStack.appendChild(actions);
+
             if (hasName && !isActive) {
                 const resourceRow = document.createElement("div");
                 resourceRow.className = "d-flex flex-nowrap gap-2 align-items-center";
@@ -393,15 +684,30 @@ function bootstrap(): void {
                 resourceRow.appendChild(memorySelect);
                 resourceRow.appendChild(applyButton);
                 actionStack.appendChild(resourceRow);
-            } else if (hasName && isActive) {
+            }
+
+            if (hasName && isActive) {
                 const note = document.createElement("div");
                 note.className = "text-body-secondary small";
                 note.textContent = "Stop VM to edit resources.";
                 actionStack.appendChild(note);
             }
 
-            actionCell.appendChild(actionStack);
+            if (hasName && ttyReady && !isActive) {
+                const note = document.createElement("div");
+                note.className = "text-body-secondary small";
+                note.textContent = "Start VM to open terminal.";
+                actionStack.appendChild(note);
+            }
 
+            if (hasName && !ttyReady) {
+                const note = document.createElement("div");
+                note.className = "text-body-secondary small";
+                note.textContent = "TTY available only for newly created VMs.";
+                actionStack.appendChild(note);
+            }
+
+            actionCell.appendChild(actionStack);
             row.appendChild(actionCell);
             tbody.appendChild(row);
         }
@@ -675,9 +981,30 @@ function bootstrap(): void {
         void createVM(inputEl.value.trim(), cpuSelectEl.value, memorySelectEl.value);
     });
 
+    terminalBackdropEl.addEventListener("click", () => {
+        closeTerminal();
+    });
+
+    terminalCloseEl.addEventListener("click", () => {
+        closeTerminal();
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.terminal.open) {
+            closeTerminal();
+        }
+    });
+
+    window.addEventListener("resize", () => {
+        if (state.terminal.open && terminalFitAddon) {
+            terminalFitAddon.fit();
+        }
+    });
+
     applyInitialMessage();
     renderAction();
     renderVMList();
+    renderTerminal();
     void loadVMs();
 
     const refreshHandle = window.setInterval(() => {
@@ -695,6 +1022,7 @@ function bootstrap(): void {
 
     window.addEventListener("beforeunload", () => {
         window.clearInterval(refreshHandle);
+        teardownTerminalRuntime();
     });
 }
 
