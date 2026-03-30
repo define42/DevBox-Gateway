@@ -2,7 +2,7 @@ services:
   gateway:
     build: ./
     restart: always
-    privileged: true
+      #    privileged: true
     ports:
       - "443:443"
     volumes:

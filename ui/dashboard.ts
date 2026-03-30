@@ -684,6 +684,8 @@ function bootstrap(): void {
             const hasIP = ipValue !== "" && ipValue.toLowerCase() !== "n/a";
             const ttyReady = Boolean(vm.ttyReady);
             const vncReady = Boolean(vm.vncReady);
+            const hasName = rawName.trim() !== "";
+            const isActive = isActiveState(normalizedState);
 
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
@@ -691,24 +693,84 @@ function bootstrap(): void {
             row.appendChild(nameCell);
 
             const connectCell = document.createElement("td");
-            if (vm.rdpConnect && displayName.trim() !== "") {
-                if (hasIP) {
-                    const connectButton = document.createElement("a");
-                    connectButton.className = "btn btn-sm btn-success";
-                    connectButton.href = vm.rdpConnect;
-                    connectButton.textContent = "Connect";
-                    connectButton.setAttribute("download", state.filename);
-                    connectCell.appendChild(connectButton);
-                } else {
-                    const offlineBadge = document.createElement("span");
-                    offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
-                    offlineBadge.textContent = "Offline";
-                    offlineBadge.setAttribute("aria-disabled", "true");
-                    connectCell.appendChild(offlineBadge);
+            connectCell.className = "align-top";
+            if (hasName) {
+                const connectStack = document.createElement("div");
+                connectStack.className = "d-flex flex-column gap-2";
+                const connectActions = document.createElement("div");
+                connectActions.className = "d-flex flex-wrap gap-2";
+
+                if (vm.rdpConnect && displayName.trim() !== "") {
+                    if (hasIP) {
+                        const connectButton = document.createElement("a");
+                        connectButton.className = "btn btn-sm btn-success";
+                        connectButton.href = vm.rdpConnect;
+                        connectButton.textContent = "RDP";
+                        connectButton.setAttribute("download", state.filename);
+                        connectActions.appendChild(connectButton);
+                    } else {
+                        const offlineBadge = document.createElement("span");
+                        offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
+                        offlineBadge.textContent = "Offline";
+                        offlineBadge.setAttribute("aria-disabled", "true");
+                        connectActions.appendChild(offlineBadge);
+                    }
                 }
+
+                const terminalButton = document.createElement("button");
+                terminalButton.type = "button";
+                terminalButton.className = "btn btn-sm btn-outline-info";
+                terminalButton.textContent = "Terminal";
+                terminalButton.disabled = state.busy || !ttyReady || !isActive;
+                terminalButton.addEventListener("click", () => {
+                    openTerminal(vm);
+                });
+                connectActions.appendChild(terminalButton);
+
+                const vncButton = document.createElement("button");
+                vncButton.type = "button";
+                vncButton.className = "btn btn-sm btn-outline-primary";
+                vncButton.textContent = "NoVNC";
+                vncButton.disabled = state.busy || !vncReady || !isActive;
+                vncButton.addEventListener("click", () => {
+                    openVNC(vm);
+                });
+                connectActions.appendChild(vncButton);
+
+                connectStack.appendChild(connectActions);
+
+                if (ttyReady && !isActive) {
+                    const note = document.createElement("div");
+                    note.className = "text-body-secondary small";
+                    note.textContent = "Start VM to open terminal.";
+                    connectStack.appendChild(note);
+                }
+
+                if (!ttyReady) {
+                    const note = document.createElement("div");
+                    note.className = "text-body-secondary small";
+                    note.textContent = "TTY available only for newly created VMs.";
+                    connectStack.appendChild(note);
+                }
+
+                if (vncReady && !isActive) {
+                    const note = document.createElement("div");
+                    note.className = "text-body-secondary small";
+                    note.textContent = "Start VM to open NoVNC.";
+                    connectStack.appendChild(note);
+                }
+
+                if (!vncReady) {
+                    const note = document.createElement("div");
+                    note.className = "text-body-secondary small";
+                    note.textContent = "NoVNC available only for newly created VMs.";
+                    connectStack.appendChild(note);
+                }
+
+                connectCell.appendChild(connectStack);
             } else {
                 connectCell.textContent = "n/a";
-                connectCell.className = "text-body-secondary";
+                connectCell.classList.add("text-body-secondary");
             }
             row.appendChild(connectCell);
 
@@ -747,9 +809,6 @@ function bootstrap(): void {
             diskCell.textContent = vm.volumeGB ? `${vm.volumeGB} GB` : "n/a";
             row.appendChild(diskCell);
 
-            const hasName = rawName.trim() !== "";
-            const isActive = isActiveState(normalizedState);
-
             const actionCell = document.createElement("td");
             actionCell.className = "align-top";
             const actionStack = document.createElement("div");
@@ -757,26 +816,6 @@ function bootstrap(): void {
 
             const actions = document.createElement("div");
             actions.className = "d-flex flex-wrap gap-2";
-
-            const terminalButton = document.createElement("button");
-            terminalButton.type = "button";
-            terminalButton.className = "btn btn-sm btn-outline-info";
-            terminalButton.textContent = "Terminal";
-            terminalButton.disabled = state.busy || !hasName || !ttyReady || !isActive;
-            terminalButton.addEventListener("click", () => {
-                openTerminal(vm);
-            });
-            actions.appendChild(terminalButton);
-
-            const vncButton = document.createElement("button");
-            vncButton.type = "button";
-            vncButton.className = "btn btn-sm btn-outline-primary";
-            vncButton.textContent = "NoVNC";
-            vncButton.disabled = state.busy || !hasName || !vncReady || !isActive;
-            vncButton.addEventListener("click", () => {
-                openVNC(vm);
-            });
-            actions.appendChild(vncButton);
 
             const startButton = document.createElement("button");
             startButton.type = "button";
@@ -856,34 +895,6 @@ function bootstrap(): void {
                 const note = document.createElement("div");
                 note.className = "text-body-secondary small";
                 note.textContent = "Stop VM to edit resources.";
-                actionStack.appendChild(note);
-            }
-
-            if (hasName && ttyReady && !isActive) {
-                const note = document.createElement("div");
-                note.className = "text-body-secondary small";
-                note.textContent = "Start VM to open terminal.";
-                actionStack.appendChild(note);
-            }
-
-            if (hasName && !ttyReady) {
-                const note = document.createElement("div");
-                note.className = "text-body-secondary small";
-                note.textContent = "TTY available only for newly created VMs.";
-                actionStack.appendChild(note);
-            }
-
-            if (hasName && vncReady && !isActive) {
-                const note = document.createElement("div");
-                note.className = "text-body-secondary small";
-                note.textContent = "Start VM to open NoVNC.";
-                actionStack.appendChild(note);
-            }
-
-            if (hasName && !vncReady) {
-                const note = document.createElement("div");
-                note.className = "text-body-secondary small";
-                note.textContent = "NoVNC available only for newly created VMs.";
                 actionStack.appendChild(note);
             }
 
