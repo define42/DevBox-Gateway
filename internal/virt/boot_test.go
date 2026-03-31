@@ -1,11 +1,14 @@
 package virt_test
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"rdptlsgateway/internal/config"
 	typesUser "rdptlsgateway/internal/types"
 	"rdptlsgateway/internal/virt"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +19,7 @@ const (
 	testVMName   = "test-vm"
 	testUsername = "testuser"
 	testPassword = "dogood"
+	testTimeout  = 30 * time.Second
 )
 
 func checkCpuAndMemory(testUsername, vmName string, vcpu, memory int, conn *libvirt.Connect) error {
@@ -54,6 +58,73 @@ func checkState(testUsername, vmName, state string, conn *libvirt.Connect) error
 	return fmt.Errorf("VM %s with state %s not found", vmName, state)
 }
 
+func waitForState(t *testing.T, username, vmName, state string, conn *libvirt.Connect, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if err := checkState(username, vmName, state, conn); err == nil {
+			return
+		} else {
+			lastErr = err
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("VM %s did not reach state %s within %s: %v", vmName, state, timeout, lastErr)
+}
+
+func waitForSerialSocket(t *testing.T, vmName string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := virt.DialSerialSocket(vmName, time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+			return
+		}
+		if errors.Is(err, virt.ErrSerialConsoleNotRunning) || errors.Is(err, virt.ErrSerialConsoleNotReady) {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		t.Fatalf("DialSerialSocket(%s) failed: %v", vmName, err)
+	}
+
+	t.Fatalf("serial socket for %s was not ready within %s: %v", vmName, timeout, lastErr)
+}
+
+func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		conn, err := virt.DialVNCSocket(vmName, time.Second)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+			return
+		}
+		if errors.Is(err, virt.ErrVNCNotRunning) || errors.Is(err, virt.ErrVNCNotReady) {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		t.Fatalf("DialVNCSocket(%s) failed: %v", vmName, err)
+	}
+
+	t.Fatalf("VNC socket for %s was not ready within %s: %v", vmName, timeout, lastErr)
+}
+
 func TestStartVM(t *testing.T) {
 
 	//tmpDir := t.TempDir()
@@ -82,21 +153,15 @@ func TestStartVM(t *testing.T) {
 	}
 	defer conn.Close()
 
-	//######################### Test StartExistingVM #########################
-	time.Sleep(20 * time.Second) // Wait for VM to boot up
-
-	if err := checkState(testUsername, vmName, "running", conn); err != nil {
-		t.Fatalf("VM %s is not running as expected: %v", vmName, err)
-	}
+	waitForState(t, testUsername, vmName, "running", conn, testTimeout)
+	waitForSerialSocket(t, vmName, testTimeout)
+	waitForVNCSocket(t, vmName, testTimeout)
 
 	//######################### Test ShutdownVM #########################
 	if err := virt.ShutdownVM(vmName); err != nil {
 		t.Fatalf("Failed to shutdown VM %s: %v", vmName, err)
 	}
-	time.Sleep(10 * time.Second) // Wait for shutdown to complete
-	if err := checkState(testUsername, vmName, "shut off", conn); err != nil {
-		t.Fatalf("VM %s is not shut off as expected: %v", vmName, err)
-	}
+	waitForState(t, testUsername, vmName, "shut off", conn, testTimeout)
 
 	//######################## Test UpdateVMResources #########################
 	if err := virt.UpdateVMResources(vmName, 2, 2048); err != nil {
@@ -107,17 +172,21 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("VM %s does not have updated CPU and Memory as expected: %v", vmName, err)
 	}
 
-	//######################### Test StartExistingVM Again #########################
-	// RewstartVM will start the VM again if it's shut off
+	//######################### Test StartExistingVM #########################
+	if err := virt.StartExistingVM(vmName); err != nil {
+		t.Fatalf("Failed to start existing VM %s: %v", vmName, err)
+	}
+	waitForState(t, testUsername, vmName, "running", conn, testTimeout)
+	waitForSerialSocket(t, vmName, testTimeout)
+	waitForVNCSocket(t, vmName, testTimeout)
+
+	//######################### Test RestartVM #########################
 	if err := virt.RestartVM(vmName); err != nil {
-		t.Fatalf("Failed to start VM %s: %v", vmName, err)
+		t.Fatalf("Failed to restart VM %s: %v", vmName, err)
 	}
-
-	time.Sleep(20 * time.Second) // Wait for startup to complete
-
-	if err := checkState(testUsername, vmName, "running", conn); err != nil {
-		t.Fatalf("VM %s is not running after restart as expected: %v", vmName, err)
-	}
+	waitForState(t, testUsername, vmName, "running", conn, testTimeout)
+	waitForSerialSocket(t, vmName, testTimeout)
+	waitForVNCSocket(t, vmName, testTimeout)
 
 	// Cleanup: Destroy the VM after test
 	// (In a real test, consider using defer to ensure cleanup)
