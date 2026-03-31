@@ -26,8 +26,9 @@ func TestIntegrationLogin(t *testing.T) {
 
 	os.Setenv("LISTEN_ADDR", ":8443")
 
-	go bootGateway()
-	time.Sleep(2 * time.Second) // wait for server to start
+	if err := bootGateway(); err != nil {
+		t.Fatalf("Failed to boot gateway: %v", err)
+	}
 
 	baseURL := "https://127.0.0.1:8443"
 

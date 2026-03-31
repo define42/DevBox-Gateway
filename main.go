@@ -24,6 +24,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -39,10 +40,15 @@ import (
 )
 
 func main() {
-	bootGateway()
+	if err := bootGateway(); err != nil {
+		log.Fatalf("Failed to boot gateway: %v", err)
+	}
+
+	// run forever
+	select {}
 }
 
-func bootGateway() {
+func bootGateway() error {
 	virt.GetInstance()
 
 	rdp.InitLogging()
@@ -50,18 +56,18 @@ func bootGateway() {
 	settings := config.NewSettingType(true)
 
 	if err := virt.InitVirt(settings); err != nil {
-		log.Fatalf("Failed to initialize virtualization: %v", err)
+		return fmt.Errorf("failed to initialize virtualization: %v", err)
 	}
 
 	mux := getRemoteGatewayRotuer(sessionManager, settings)
 
 	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
-		log.Fatalf("tls setup: %v", err)
+		return fmt.Errorf("tls setup: %v", err)
 	}
 	//go listenServer(routes, mux, frontTLS, settings, ":3389")
-	listenServer(mux, frontTLS, settings)
-
+	go listenServer(mux, frontTLS, settings)
+	return nil
 }
 
 func listenServer(mux http.Handler, frontTLS *cert.TLSManager, settings *config.SettingsType) {
