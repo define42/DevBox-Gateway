@@ -28,6 +28,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -81,8 +82,11 @@ func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager,
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			var netErr net.Error
-			if errors.As(err, &netErr) && netErr.Temporary() {
+			if errors.Is(err, net.ErrClosed) {
+				log.Printf("listener stopped: %v", err)
+				return
+			}
+			if os.IsTimeout(err) {
 				log.Printf("accept: %v", err)
 				continue
 			}
