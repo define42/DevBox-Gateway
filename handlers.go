@@ -477,13 +477,13 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 func validateVMName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("VM name is required.")
+		return "", fmt.Errorf("vm name is required")
 	}
 	if len(name) > 63 {
-		return "", fmt.Errorf("VM name must be 63 characters or fewer.")
+		return "", fmt.Errorf("vm name must be 63 characters or fewer")
 	}
 	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
-		return "", fmt.Errorf("VM name cannot start or end with a hyphen.")
+		return "", fmt.Errorf("vm name cannot start or end with a hyphen")
 	}
 	for _, r := range name {
 		switch {
@@ -491,7 +491,7 @@ func validateVMName(name string) (string, error) {
 		case r >= '0' && r <= '9':
 		case r == '-':
 		default:
-			return "", fmt.Errorf("VM name must use lowercase letters, numbers, or hyphens.")
+			return "", fmt.Errorf("vm name must use lowercase letters, numbers, or hyphens")
 		}
 	}
 	return name, nil
@@ -503,10 +503,10 @@ func parseDashboardVMName(req *http.Request) (string, error) {
 	}
 	name := strings.TrimSpace(req.FormValue("vm_name"))
 	if name == "" {
-		return "", fmt.Errorf("VM name is required.")
+		return "", fmt.Errorf("vm name is required")
 	}
 	if len(name) > 128 {
-		return "", fmt.Errorf("VM name is too long.")
+		return "", fmt.Errorf("vm name is too long")
 	}
 	return name, nil
 }
@@ -514,14 +514,14 @@ func parseDashboardVMName(req *http.Request) (string, error) {
 func parseDashboardVCPU(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return 0, fmt.Errorf("CPU selection is required.")
+		return 0, fmt.Errorf("cpu selection is required")
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, fmt.Errorf("CPU selection is invalid.")
+		return 0, fmt.Errorf("cpu selection is invalid")
 	}
 	if _, ok := allowedDashboardVCPU[value]; !ok {
-		return 0, fmt.Errorf("CPU selection is not supported.")
+		return 0, fmt.Errorf("cpu selection is not supported")
 	}
 	return value, nil
 }
@@ -529,14 +529,14 @@ func parseDashboardVCPU(raw string) (int, error) {
 func parseDashboardMemoryMiB(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return 0, fmt.Errorf("Memory selection is required.")
+		return 0, fmt.Errorf("memory selection is required")
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, fmt.Errorf("Memory selection is invalid.")
+		return 0, fmt.Errorf("memory selection is invalid")
 	}
 	if _, ok := allowedDashboardMemoryMiB[value]; !ok {
-		return 0, fmt.Errorf("Memory selection is not supported.")
+		return 0, fmt.Errorf("memory selection is not supported")
 	}
 	return value, nil
 }

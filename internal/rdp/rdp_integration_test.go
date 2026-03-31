@@ -85,7 +85,7 @@ func stubVMIPs(t *testing.T, entries map[string]string) {
 	vmIPAddressLookup = func(name string) (string, error) {
 		ip, ok := entries[name]
 		if !ok {
-			return "", fmt.Errorf("VM %s not found", name)
+			return "", fmt.Errorf("vm %s not found", name)
 		}
 		return ip, nil
 	}

@@ -46,3 +46,6 @@ Keep commits single-purpose and use short, specific commit messages. PRs should 
 
 ## Security & Configuration Tips
 Do not commit real certificates, private keys, or production LDAP endpoints. Local development uses a self-signed certificate and test LDAP credentials only.
+
+All environment-backed parameters must be defined in `internal/config/config.go`. When adding or changing env parameters, always use the configuration pattern from `config.go` instead of reading environment variables directly in feature code.
+Global parameters are not allowed. This is validated with `make lint`.

@@ -31,7 +31,7 @@ func InitLogging() {
 var vmOwnerLookup = virt.VMOwner
 
 var vmIPAddressLookup = func(hostname string) (string, error) {
-	return virt.GetInstance().GetIpOfVm(hostname)
+	return virt.GetInstance().GetIPOfVM(hostname)
 }
 
 func getSubdomain(host, root string) (string, bool) {

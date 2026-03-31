@@ -45,7 +45,7 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 		for i := 0; i < loops; i++ {
 			_ = worker.GetVMs("alice")
 			_ = worker.GetVMnames()
-			_, _ = worker.GetIpOfVm(fmt.Sprintf("alice-vm-%d", i))
+			_, _ = worker.GetIPOfVM(fmt.Sprintf("alice-vm-%d", i))
 		}
 	}()
 
@@ -128,13 +128,13 @@ func TestGetVMnames(t *testing.T) {
 	}
 }
 
-func TestGetIpOfVm(t *testing.T) {
+func TestGetIPOfVM(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]vmInfo{
 		{Name: "my-vm", PrimaryIP: "192.168.1.100"},
 	})
 
-	ip, err := worker.GetIpOfVm("my-vm")
+	ip, err := worker.GetIPOfVM("my-vm")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestGetIpOfVm(t *testing.T) {
 		t.Fatalf("expected 192.168.1.100, got %q", ip)
 	}
 
-	_, err = worker.GetIpOfVm("nonexistent")
+	_, err = worker.GetIPOfVM("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent VM")
 	}

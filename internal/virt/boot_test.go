@@ -22,7 +22,7 @@ const (
 	testTimeout  = 30 * time.Second
 )
 
-func checkCpuAndMemory(testUsername, vmName string, vcpu, memory int, conn *libvirt.Connect) error {
+func checkCPUAndMemory(testUsername, vmName string, vcpu, memory int, conn *libvirt.Connect) error {
 	vms, err := virt.ListVMs(testUsername, conn)
 	if err != nil {
 		return err
@@ -33,11 +33,11 @@ func checkCpuAndMemory(testUsername, vmName string, vcpu, memory int, conn *libv
 			if v.VCPU == vcpu && v.MemoryMiB == memory {
 				return nil
 			}
-			return fmt.Errorf("VM %s has CPU %d and Memory %dMB, expected CPU 2 and Memory 2048MB", vmName, v.VCPU, v.MemoryMiB)
+			return fmt.Errorf("vm %s has CPU %d and memory %dMB, expected CPU 2 and memory 2048MB", vmName, v.VCPU, v.MemoryMiB)
 		}
 	}
 
-	return fmt.Errorf("VM %s not found for CPU and Memory check", vmName)
+	return fmt.Errorf("vm %s not found for CPU and memory check", vmName)
 }
 
 func checkState(testUsername, vmName, state string, conn *libvirt.Connect) error {
@@ -51,11 +51,11 @@ func checkState(testUsername, vmName, state string, conn *libvirt.Connect) error
 			if v.State == state {
 				return nil
 			}
-			return fmt.Errorf("VM %s state is %s, expected %s", vmName, v.State, state)
+			return fmt.Errorf("vm %s state is %s, expected %s", vmName, v.State, state)
 		}
 	}
 
-	return fmt.Errorf("VM %s with state %s not found", vmName, state)
+	return fmt.Errorf("vm %s with state %s not found", vmName, state)
 }
 
 func waitForState(t *testing.T, username, vmName, state string, conn *libvirt.Connect, timeout time.Duration) {
@@ -168,7 +168,7 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to update VM %s resources: %v", vmName, err)
 	}
 
-	if err := checkCpuAndMemory(testUsername, vmName, 2, 2048, conn); err != nil {
+	if err := checkCPUAndMemory(testUsername, vmName, 2, 2048, conn); err != nil {
 		t.Fatalf("VM %s does not have updated CPU and Memory as expected: %v", vmName, err)
 	}
 

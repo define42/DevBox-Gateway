@@ -266,27 +266,27 @@ func (s *SettingsType) GetDuration(id string) time.Duration {
 // ---- Keys ----
 
 const (
-	ACME_DATA_DIR          = "ACME_DATA_DIR"
-	ACME_EMAIL             = "ACME_EMAIL"
-	ACME_CA                = "ACME_CA"
-	ACME_ENABLE            = "ACME_ENABLE"
-	CERT_FILE              = "CERT_FILE"
-	FRONT_DOMAIN           = "FRONT_DOMAIN"
-	KEY_FILE               = "KEY_FILE"
-	LDAP_URL               = "LDAP_URL"
-	LDAP_BASE_DN           = "LDAP_BASE_DN"
-	LDAP_USER_FILTER       = "LDAP_USER_FILTER"
-	LDAP_USER_DOMAIN       = "LDAP_USER_DOMAIN"
-	LDAP_STARTTLS          = "LDAP_STARTTLS"
-	LDAP_SKIP_TLS_VERIFY   = "LDAP_SKIP_TLS_VERIFY"
-	LISTEN_ADDR            = "LISTEN_ADDR"
-	VDI_IMAGE_DIR          = "VDI_IMAGE_DIR"
-	VIRT_STORAGE_POOL_NAME = "VIRT_STORAGE_POOL_NAME"
-	VIRT_STORAGE_POOL_PATH = "VIRT_STORAGE_POOL_PATH"
-	VIRT_SERIAL_SOCKET_DIR = "VIRT_SERIAL_SOCKET_DIR"
-	VIRT_VNC_SOCKET_DIR    = "VIRT_VNC_SOCKET_DIR"
-	BASE_IMAGE_URL         = "BASE_IMAGE_URL"
-	TIMEOUT                = "TIMEOUT"
+	ACME_DATA_DIR          = "ACME_DATA_DIR"          //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	ACME_EMAIL             = "ACME_EMAIL"             //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	ACME_CA                = "ACME_CA"                //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	ACME_ENABLE            = "ACME_ENABLE"            //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	CERT_FILE              = "CERT_FILE"              //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	FRONT_DOMAIN           = "FRONT_DOMAIN"           //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	KEY_FILE               = "KEY_FILE"               //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_URL               = "LDAP_URL"               //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_BASE_DN           = "LDAP_BASE_DN"           //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_USER_FILTER       = "LDAP_USER_FILTER"       //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_USER_DOMAIN       = "LDAP_USER_DOMAIN"       //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_STARTTLS          = "LDAP_STARTTLS"          //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LDAP_SKIP_TLS_VERIFY   = "LDAP_SKIP_TLS_VERIFY"   //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	LISTEN_ADDR            = "LISTEN_ADDR"            //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	VDI_IMAGE_DIR          = "VDI_IMAGE_DIR"          //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	VIRT_STORAGE_POOL_NAME = "VIRT_STORAGE_POOL_NAME" //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	VIRT_STORAGE_POOL_PATH = "VIRT_STORAGE_POOL_PATH" //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	VIRT_SERIAL_SOCKET_DIR = "VIRT_SERIAL_SOCKET_DIR" //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	VIRT_VNC_SOCKET_DIR    = "VIRT_VNC_SOCKET_DIR"    //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	BASE_IMAGE_URL         = "BASE_IMAGE_URL"         //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
+	TIMEOUT                = "TIMEOUT"                //nolint:stylecheck // configuration key identifiers intentionally match environment variable names
 )
 
 func (s *SettingsType) OverwriteForTestString(id, value string) error {

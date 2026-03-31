@@ -221,13 +221,13 @@ func (s *SingletonWorker) GetVMnames() []string {
 	return names
 }
 
-func (s *SingletonWorker) GetIpOfVm(vmName string) (string, error) {
+func (s *SingletonWorker) GetIPOfVM(vmName string) (string, error) {
 	for _, vm := range s.snapshotVMs() {
 		if vm.Name == vmName {
 			return vm.PrimaryIP, nil
 		}
 	}
-	return "", fmt.Errorf("VM %s not found", vmName)
+	return "", fmt.Errorf("vm %s not found", vmName)
 }
 
 func (s *SingletonWorker) snapshotVMs() []vmInfo {

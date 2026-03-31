@@ -30,7 +30,7 @@ func UpdateVMResources(name string, vcpu int, memoryMiB int) error {
 		return fmt.Errorf("check domain active %s: %w", name, err)
 	}
 	if active {
-		return fmt.Errorf("VM must be stopped before updating resources.")
+		return fmt.Errorf("vm must be stopped before updating resources")
 	}
 
 	memoryKiB := uint64(memoryMiB) * 1024

@@ -1,4 +1,4 @@
-package contextKey
+package contextkey
 
 import "context"
 

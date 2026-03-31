@@ -212,10 +212,10 @@ func sameOriginWebsocketRequest(r *http.Request) bool {
 func parseDashboardVMPathParam(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("VM name is required.")
+		return "", fmt.Errorf("vm name is required")
 	}
 	if len(name) > 128 {
-		return "", fmt.Errorf("VM name is too long.")
+		return "", fmt.Errorf("vm name is too long")
 	}
 	return name, nil
 }
