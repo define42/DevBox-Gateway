@@ -28,10 +28,12 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 			worker.setVMs([]vmInfo{
 				{
 					Name:      fmt.Sprintf("alice-vm-%d", i),
+					Owner:     "alice",
 					PrimaryIP: "10.0.0.1",
 				},
 				{
 					Name:      fmt.Sprintf("bob-vm-%d", i),
+					Owner:     "bob",
 					PrimaryIP: "10.0.0.2",
 				},
 			})
@@ -75,9 +77,9 @@ func TestFormatState(t *testing.T) {
 func TestGetVMsFiltersByUser(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]vmInfo{
-		{Name: "alice-desktop", PrimaryIP: "10.0.0.1"},
-		{Name: "alice-dev", PrimaryIP: "10.0.0.2"},
-		{Name: "bob-desktop", PrimaryIP: "10.0.0.3"},
+		{Name: "alice-desktop", Owner: "alice", PrimaryIP: "10.0.0.1"},
+		{Name: "alice-dev", Owner: "alice", PrimaryIP: "10.0.0.2"},
+		{Name: "bob-desktop", Owner: "bob", PrimaryIP: "10.0.0.3"},
 	})
 
 	aliceVMs := worker.GetVMs("alice")
@@ -93,6 +95,22 @@ func TestGetVMsFiltersByUser(t *testing.T) {
 	allVMs := worker.GetVMs("")
 	if len(allVMs) != 3 {
 		t.Fatalf("expected 3 VMs for empty user, got %d", len(allVMs))
+	}
+}
+
+func TestGetVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
+	worker := &SingletonWorker{}
+	worker.setVMs([]vmInfo{
+		{Name: "legacy-vm"},
+		{Name: "alice-desktop", Owner: "alice"},
+	})
+
+	aliceVMs := worker.GetVMs("alice")
+	if len(aliceVMs) != 1 {
+		t.Fatalf("expected 1 VM for alice, got %d", len(aliceVMs))
+	}
+	if aliceVMs[0].Name != "alice-desktop" {
+		t.Fatalf("expected owned VM to be returned, got %q", aliceVMs[0].Name)
 	}
 }
 

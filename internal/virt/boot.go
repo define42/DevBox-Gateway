@@ -17,6 +17,14 @@ import (
 // startVM starts a libvirt VM by name if it is not already running
 
 func StartVM(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath string, vcpu int, memoryMiB int) error {
+	return startVM(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath, "", vcpu, memoryMiB)
+}
+
+func StartVMWithOwner(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath, owner string, vcpu int, memoryMiB int) error {
+	return startVM(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath, owner, vcpu, memoryMiB)
+}
+
+func startVM(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath, owner string, vcpu int, memoryMiB int) error {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
 		return err
@@ -38,6 +46,12 @@ func StartVM(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath str
 	defer func() {
 		_ = dom.Free()
 	}()
+
+	if strings.TrimSpace(owner) != "" {
+		if err := setDomainOwnerMetadata(dom, owner); err != nil {
+			return fmt.Errorf("set owner metadata for %s: %w", name, err)
+		}
+	}
 
 	if err := dom.Create(); err != nil {
 		return err
@@ -386,7 +400,7 @@ func BootNewVM(name string, user *types.User, settings *config.SettingsType, vcp
 		return vmName, fmt.Errorf("Failed to create seed ISO: %v", err)
 	}
 
-	if err := StartVM(vmName, seedIso, poolName, vmSerialSocketPath, vmVNCSocketPath, vcpu, memoryMiB); err != nil {
+	if err := StartVMWithOwner(vmName, seedIso, poolName, vmSerialSocketPath, vmVNCSocketPath, user.GetName(), vcpu, memoryMiB); err != nil {
 		return vmName, fmt.Errorf("Failed to start VM: %v", err)
 	}
 

@@ -450,7 +450,17 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 		return "", false
 	}
 
-	if !strings.HasPrefix(name, user.GetName()+"-") {
+	owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+	if err != nil {
+		log.Printf("verify ownership for user %q %s vm %q failed: %v", user.GetName(), verb, name, err)
+		writeJSON(w, http.StatusInternalServerError, dashboardActionResponse{
+			OK:    false,
+			Error: "Unable to verify VM ownership.",
+		})
+		return "", false
+	}
+
+	if !owned {
 		log.Printf("user %q attempted to %s vm %q not owned by them", user.GetName(), verb, name)
 		writeJSON(w, http.StatusForbidden, dashboardActionResponse{
 			OK:    false,

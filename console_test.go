@@ -37,6 +37,7 @@ func TestDashboardConsoleRouteRejectsNonOwnerVM(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	originalDial := dialDashboardSerialSocket
 	dialDashboardSerialSocket = func(name string, timeout time.Duration) (net.Conn, error) {
@@ -66,6 +67,7 @@ func TestDashboardConsoleRoutePropagatesSerialAvailabilityErrors(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	tests := []struct {
 		name     string
@@ -130,6 +132,7 @@ func TestDashboardVNCRejectsNonOwnerVM(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	originalDial := dialDashboardVNCSocket
 	dialDashboardVNCSocket = func(name string, timeout time.Duration) (net.Conn, error) {
@@ -159,6 +162,7 @@ func TestDashboardVNCPropagatesAvailabilityErrors(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	tests := []struct {
 		name     string
@@ -215,5 +219,77 @@ func TestDashboardVNCPropagatesAvailabilityErrors(t *testing.T) {
 				t.Fatalf("expected body to contain %q, got %q", tc.wantBody, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestDashboardConsoleRejectsPrefixCollidingVM(t *testing.T) {
+	sessionManager := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sessionManager, settings)
+	cookie := issueSessionCookie(t, sessionManager, "alice")
+
+	stubDashboardVMOwnershipCheck(t, func(name, username string) (bool, error) {
+		if name != "alice-bob-devbox" || username != "alice" {
+			t.Fatalf("unexpected ownership check for %q / %q", name, username)
+		}
+		return false, nil
+	})
+
+	originalDial := dialDashboardSerialSocket
+	dialDashboardSerialSocket = func(name string, timeout time.Duration) (net.Conn, error) {
+		t.Fatalf("dialDashboardSerialSocket should not be called for rejected VM %q", name)
+		return nil, nil
+	}
+	defer func() {
+		dialDashboardSerialSocket = originalDial
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/alice-bob-devbox/ws", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d with body %s", http.StatusForbidden, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "You do not have permission to access this VM terminal.") {
+		t.Fatalf("unexpected body: %q", rec.Body.String())
+	}
+}
+
+func TestDashboardVNCRejectsPrefixCollidingVM(t *testing.T) {
+	sessionManager := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sessionManager, settings)
+	cookie := issueSessionCookie(t, sessionManager, "alice")
+
+	stubDashboardVMOwnershipCheck(t, func(name, username string) (bool, error) {
+		if name != "alice-bob-devbox" || username != "alice" {
+			t.Fatalf("unexpected ownership check for %q / %q", name, username)
+		}
+		return false, nil
+	})
+
+	originalDial := dialDashboardVNCSocket
+	dialDashboardVNCSocket = func(name string, timeout time.Duration) (net.Conn, error) {
+		t.Fatalf("dialDashboardVNCSocket should not be called for rejected VM %q", name)
+		return nil, nil
+	}
+	defer func() {
+		dialDashboardVNCSocket = originalDial
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/vnc/alice-bob-devbox/ws", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d with body %s", http.StatusForbidden, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "You do not have permission to access this VM VNC session.") {
+		t.Fatalf("unexpected body: %q", rec.Body.String())
 	}
 }

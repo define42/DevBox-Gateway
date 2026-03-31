@@ -172,6 +172,13 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	}
 
 	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
+	owned, err := UserOwnsVM(vmName, "bootuser")
+	if err != nil {
+		t.Fatalf("UserOwnsVM legacy owner: %v", err)
+	}
+	if !owned {
+		t.Fatalf("expected legacy VM %q to resolve owner from seed ISO", vmName)
+	}
 	if info, err := os.Lstat(serialPath); err == nil && info.Mode().IsRegular() {
 		t.Fatal("expected stale serial placeholder file to be replaced or removed before VM start")
 	}
@@ -265,6 +272,70 @@ func TestBootNewVMRecreatesExistingVM(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected recreated VM %q in VM list", vmName)
+	}
+}
+
+func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	settings := newBootTestSettings(t)
+	configureIsolatedBootStorage(t, settings)
+
+	user, err := types.NewUser("meta-"+time.Now().Format("150405"), "dogood")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	vmName, err := BootNewVM("metadata-vm", user, settings, 2, 4096)
+	if err != nil {
+		t.Fatalf("BootNewVM: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = RemoveVM(vmName, settings)
+	})
+
+	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
+
+	owned, err := UserOwnsVM(vmName, user.GetName())
+	if err != nil {
+		t.Fatalf("UserOwnsVM(owner): %v", err)
+	}
+	if !owned {
+		t.Fatalf("expected %q to own %q", user.GetName(), vmName)
+	}
+
+	owned, err = UserOwnsVM(vmName, "meta")
+	if err != nil {
+		t.Fatalf("UserOwnsVM(prefix): %v", err)
+	}
+	if owned {
+		t.Fatalf("did not expect prefix user %q to own %q", "meta", vmName)
+	}
+
+	metaVMs, err := ListVMs(user.GetName(), conn)
+	if err != nil {
+		t.Fatalf("ListVMs(owner): %v", err)
+	}
+	found := false
+	for _, vm := range metaVMs {
+		if vm.Name == vmName {
+			found = true
+			if vm.Owner != user.GetName() {
+				t.Fatalf("expected owner %q, got %q", user.GetName(), vm.Owner)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected VM %q in owner-scoped list", vmName)
+	}
+
+	prefixVMs, err := ListVMs("meta", conn)
+	if err != nil {
+		t.Fatalf("ListVMs(prefix): %v", err)
+	}
+	for _, vm := range prefixVMs {
+		if vm.Name == vmName {
+			t.Fatalf("did not expect prefix user list to include %q", vmName)
+		}
 	}
 }
 

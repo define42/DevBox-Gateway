@@ -49,6 +49,7 @@ func TestDashboardMutationEndpointsRejectNonOwnerVM(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	tests := []struct {
 		name    string
@@ -125,5 +126,43 @@ func TestDashboardMutationEndpointsRejectNonOwnerVM(t *testing.T) {
 				t.Fatalf("expected error %q, got %q", tc.wantErr, resp.Error)
 			}
 		})
+	}
+}
+
+func TestDashboardMutationEndpointsRejectPrefixCollidingVM(t *testing.T) {
+	sessionManager := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sessionManager, settings)
+	cookie := issueSessionCookie(t, sessionManager, "alice")
+
+	stubDashboardVMOwnershipCheck(t, func(name, username string) (bool, error) {
+		if name != "alice-bob-desktop" || username != "alice" {
+			t.Fatalf("unexpected ownership check for %q / %q", name, username)
+		}
+		return false, nil
+	})
+
+	form := url.Values{
+		"vm_name":       {"alice-bob-desktop"},
+		"vm_vcpu":       {"2"},
+		"vm_memory_mib": {"4096"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/dashboard/resources", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected %d, got %d with body %s", http.StatusForbidden, rec.Code, rec.Body.String())
+	}
+
+	var resp dashboardActionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "You do not have permission to update this VM." {
+		t.Fatalf("expected ownership denial, got %q", resp.Error)
 	}
 }

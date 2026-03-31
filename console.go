@@ -40,7 +40,13 @@ func handleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 			return
 		}
 
-		if !strings.HasPrefix(name, user.GetName()+"-") {
+		owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+		if err != nil {
+			log.Printf("verify terminal access for user %q vm %q failed: %v", user.GetName(), name, err)
+			http.Error(w, "Unable to verify VM ownership.", http.StatusInternalServerError)
+			return
+		}
+		if !owned {
 			log.Printf("user %q attempted to access terminal for vm %q not owned by them", user.GetName(), name)
 			http.Error(w, "You do not have permission to access this VM terminal.", http.StatusForbidden)
 			return
@@ -87,7 +93,13 @@ func handleDashboardVNCWS(sessionManager *session.Manager, settings *config.Sett
 			return
 		}
 
-		if !strings.HasPrefix(name, user.GetName()+"-") {
+		owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+		if err != nil {
+			log.Printf("verify VNC access for user %q vm %q failed: %v", user.GetName(), name, err)
+			http.Error(w, "Unable to verify VM ownership.", http.StatusInternalServerError)
+			return
+		}
+		if !owned {
 			log.Printf("user %q attempted to access VNC for vm %q not owned by them", user.GetName(), name)
 			http.Error(w, "You do not have permission to access this VM VNC session.", http.StatusForbidden)
 			return

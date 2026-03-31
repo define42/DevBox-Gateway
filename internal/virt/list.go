@@ -13,6 +13,7 @@ import (
 
 type vmInfo struct {
 	Name      string
+	Owner     string
 	State     string
 	MemoryMiB int
 	VCPU      int
@@ -23,7 +24,7 @@ type vmInfo struct {
 	VNCReady  bool
 }
 
-func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
+func ListVMs(user string, conn *libvirt.Connect) ([]vmInfo, error) {
 
 	doms, err := conn.ListAllDomains(0)
 	if err != nil {
@@ -43,7 +44,14 @@ func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
 			log.Printf("domain name: %v", err)
 			continue
 		}
-		if prefix != "" && !strings.HasPrefix(name, prefix) {
+
+		owner := ""
+		if metadataOwner, hasOwner, err := domainOwner(&d); err != nil {
+			log.Printf("domain owner %s: %v", name, err)
+		} else if hasOwner {
+			owner = metadataOwner
+		}
+		if user != "" && owner != user {
 			continue
 		}
 
@@ -67,6 +75,7 @@ func ListVMs(prefix string, conn *libvirt.Connect) ([]vmInfo, error) {
 		}
 		result = append(result, vmInfo{
 			Name:      name,
+			Owner:     owner,
 			State:     formatState(state),
 			MemoryMiB: mem,
 			VCPU:      vcpu,
@@ -196,7 +205,7 @@ func (s *SingletonWorker) GetVMs(user string) []vmInfo {
 
 	var filteredVMs []vmInfo
 	for _, vm := range snapshot {
-		if user == "" || strings.HasPrefix(vm.Name, user+"-") {
+		if user == "" || vm.Owner == user {
 			filteredVMs = append(filteredVMs, vm)
 		}
 	}

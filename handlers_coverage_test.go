@@ -578,6 +578,7 @@ func TestDashboardResourcesInvalidVCPU(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	form := url.Values{
 		"vm_name":       {"alice-desktop"},
@@ -600,6 +601,7 @@ func TestDashboardResourcesInvalidMemory(t *testing.T) {
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
+	stubDashboardVMOwnershipByPrefix(t)
 
 	form := url.Values{
 		"vm_name":       {"alice-desktop"},
