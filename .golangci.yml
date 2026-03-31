@@ -3,7 +3,14 @@ version: "2"
 linters:
   enable:
     - staticcheck
-      #    - gochecknoinits
+    - gochecknoinits
+    - gochecknoglobals
+    - govet
+    - errcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - nolintlint
 
   settings:
     staticcheck:

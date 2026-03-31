@@ -10,8 +10,6 @@ import (
 	"syscall"
 )
 
-var socketDirChown = os.Chown
-
 func ensureSocketDir(dir, socketLabel string) (string, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || dir == "." {
@@ -33,15 +31,22 @@ func ensureSocketDir(dir, socketLabel string) (string, error) {
 		return dir, nil
 	}
 
-	if err := socketDirChown(dir, owner, group); err != nil {
-		if canIgnoreSocketDirChownError(err) {
-			log.Printf("Skipping chown for %s socket directory %s: %v", socketLabel, dir, err)
-			return dir, nil
-		}
-		return "", fmt.Errorf("chown %s socket directory %s: %w", socketLabel, dir, err)
+	if err := chownSocketDir(dir, socketLabel, owner, group); err != nil {
+		return "", err
 	}
 
 	return dir, nil
+}
+
+func chownSocketDir(dir, socketLabel string, owner, group int) error {
+	if err := os.Chown(dir, owner, group); err != nil {
+		if canIgnoreSocketDirChownError(err) {
+			log.Printf("Skipping chown for %s socket directory %s: %v", socketLabel, dir, err)
+			return nil
+		}
+		return fmt.Errorf("chown %s socket directory %s: %w", socketLabel, dir, err)
+	}
+	return nil
 }
 
 func canIgnoreSocketDirChownError(err error) bool {

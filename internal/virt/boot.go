@@ -311,7 +311,7 @@ func ensureStoragePool(conn *libvirt.Connect, storagePoolName, storagePoolPath s
 func InitVirt(settings *config.SettingsType) error {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
-		return fmt.Errorf("failed to connect to libvirt: %v", err)
+		return fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
 		_, _ = conn.Close()
@@ -320,14 +320,14 @@ func InitVirt(settings *config.SettingsType) error {
 	poolName, poolPath := storagePoolConfig(settings)
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
 	if err != nil {
-		return fmt.Errorf("failed to ensure storage pool %s: %v", poolName, err)
+		return fmt.Errorf("failed to ensure storage pool %s: %w", poolName, err)
 	}
 	defer func() {
 		_ = pool.Free()
 	}()
 
 	if _, err := ensureBaseImage(settings); err != nil {
-		return fmt.Errorf("failed to ensure base image: %v", err)
+		return fmt.Errorf("failed to ensure base image: %w", err)
 	}
 
 	return nil
@@ -343,17 +343,17 @@ func BootNewVM(name string, user *types.User, settings *config.SettingsType, vcp
 	seedIso := vmName + "_seed.iso"
 	poolName, poolPath := storagePoolConfig(settings)
 	if _, err := ensureSerialSocketDir(settings); err != nil {
-		return vmName, fmt.Errorf("failed to ensure serial socket directory: %v", err)
+		return vmName, fmt.Errorf("failed to ensure serial socket directory: %w", err)
 	}
 	if _, err := ensureVNCSocketDir(settings); err != nil {
-		return vmName, fmt.Errorf("failed to ensure VNC socket directory: %v", err)
+		return vmName, fmt.Errorf("failed to ensure VNC socket directory: %w", err)
 	}
 	vmSerialSocketPath := serialSocketPath(settings, vmName)
 	vmVNCSocketPath := vncSocketPath(settings, vmName)
 
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
-		return vmName, fmt.Errorf("failed to connect to libvirt: %v", err)
+		return vmName, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
 		_, _ = conn.Close()
@@ -361,38 +361,38 @@ func BootNewVM(name string, user *types.User, settings *config.SettingsType, vcp
 
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
 	if err != nil {
-		return vmName, fmt.Errorf("failed to ensure storage pool %s: %v", poolName, err)
+		return vmName, fmt.Errorf("failed to ensure storage pool %s: %w", poolName, err)
 	}
 	_ = pool.Free()
 
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
-		return vmName, fmt.Errorf("failed to destroy existing domain: %v", err)
+		return vmName, fmt.Errorf("failed to destroy existing domain: %w", err)
 	}
 	if err := RemoveVolumes(conn, poolName, vmName, seedIso); err != nil {
-		return vmName, fmt.Errorf("failed to remove existing volumes: %v", err)
+		return vmName, fmt.Errorf("failed to remove existing volumes: %w", err)
 	}
 	if err := removeSerialSocket(settings, vmName); err != nil {
-		return vmName, fmt.Errorf("failed to remove existing serial socket: %v", err)
+		return vmName, fmt.Errorf("failed to remove existing serial socket: %w", err)
 	}
 	if err := removeVNCSocket(settings, vmName); err != nil {
-		return vmName, fmt.Errorf("failed to remove existing VNC socket: %v", err)
+		return vmName, fmt.Errorf("failed to remove existing VNC socket: %w", err)
 	}
 
 	baseImage, err := ensureBaseImage(settings)
 	if err != nil {
-		return vmName, fmt.Errorf("failed to ensure base image: %v", err)
+		return vmName, fmt.Errorf("failed to ensure base image: %w", err)
 	}
 
 	if err := CopyAndResizeVolume(conn, poolName, vmName, baseImage, 40*1024*1024*1024); err != nil {
-		return vmName, fmt.Errorf("failed to copy and resize base image: %v", err)
+		return vmName, fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
 
 	if err := CreateUbuntuSeedISOToPool(conn, poolName, seedIso, user.GetName(), user.GetCloudInitPasswordHash(), vmName); err != nil {
-		return vmName, fmt.Errorf("failed to create seed ISO: %v", err)
+		return vmName, fmt.Errorf("failed to create seed ISO: %w", err)
 	}
 
 	if err := StartVMWithOwner(vmName, seedIso, poolName, vmSerialSocketPath, vmVNCSocketPath, user.GetName(), vcpu, memoryMiB); err != nil {
-		return vmName, fmt.Errorf("failed to start VM: %v", err)
+		return vmName, fmt.Errorf("failed to start VM: %w", err)
 	}
 
 	return vmName, nil

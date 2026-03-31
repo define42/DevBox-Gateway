@@ -29,6 +29,7 @@ func InitLogging() {
 	glog.SetLevel(glog.ERROR)
 }
 
+//nolint:gochecknoglobals // package-level singleton needed for one-time registration
 var vmIPAddressLookup = func(hostname string) (string, error) {
 	return virt.GetInstance().GetIPOfVM(hostname)
 }

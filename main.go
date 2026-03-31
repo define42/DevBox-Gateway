@@ -57,14 +57,14 @@ func bootGateway() error {
 	settings := config.NewSettingType(true)
 
 	if err := virt.InitVirt(settings); err != nil {
-		return fmt.Errorf("failed to initialize virtualization: %v", err)
+		return fmt.Errorf("failed to initialize virtualization: %w", err)
 	}
 
 	mux := getRemoteGatewayRotuer(sessionManager, settings)
 
 	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
-		return fmt.Errorf("tls setup: %v", err)
+		return fmt.Errorf("tls setup: %w", err)
 	}
 
 	listen := settings.Get(config.LISTEN_ADDR)

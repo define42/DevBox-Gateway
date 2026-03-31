@@ -513,7 +513,7 @@ func validateVMName(name string) (string, error) {
 
 func parseDashboardVMName(req *http.Request) (string, error) {
 	if err := req.ParseForm(); err != nil {
-		return "", fmt.Errorf("%w: %v", errInvalidDashboardForm, err)
+		return "", fmt.Errorf("%w: %w", errInvalidDashboardForm, err)
 	}
 	name := strings.TrimSpace(req.FormValue("vm_name"))
 	if name == "" {

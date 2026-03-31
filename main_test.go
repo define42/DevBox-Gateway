@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -158,8 +159,11 @@ func TestHandleHTTPS_ACMETLSALPNClosesConn(t *testing.T) {
 	buf := make([]byte, 1)
 	if _, err := tlsClient.Read(buf); err == nil {
 		t.Fatal("expected connection close after ACME TLS-ALPN handshake")
-	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		t.Fatalf("expected connection close, got timeout: %v", err)
+	} else {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			t.Fatalf("expected connection close, got timeout: %v", err)
+		}
 	}
 
 	select {

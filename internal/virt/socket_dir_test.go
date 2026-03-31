@@ -4,34 +4,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 )
 
-func TestEnsureSocketDirIgnoresPermissionDeniedChown(t *testing.T) {
-	t.Setenv(volumeOwnerEnv, "123")
-	t.Setenv(volumeGroupEnv, "456")
-
+func TestEnsureSocketDirCreatesDirectoryWithPermissions(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "serial")
-
-	originalChown := socketDirChown
-	t.Cleanup(func() {
-		socketDirChown = originalChown
-	})
-
-	socketDirChown = func(path string, uid, gid int) error {
-		if path != dir {
-			t.Fatalf("expected chown path %q, got %q", dir, path)
-		}
-		if uid != 123 || gid != 456 {
-			t.Fatalf("expected chown ownership 123:456, got %d:%d", uid, gid)
-		}
-		return &os.PathError{Op: "chown", Path: path, Err: syscall.EPERM}
-	}
 
 	got, err := ensureSocketDir(dir, "serial")
 	if err != nil {
-		t.Fatalf("expected permission-denied chown to be ignored, got %v", err)
+		t.Fatalf("ensure socket directory: %v", err)
 	}
 	if got != dir {
 		t.Fatalf("expected ensured directory %q, got %q", dir, got)
@@ -46,26 +27,40 @@ func TestEnsureSocketDirIgnoresPermissionDeniedChown(t *testing.T) {
 	}
 }
 
-func TestEnsureSocketDirReturnsUnexpectedChownError(t *testing.T) {
-	t.Setenv(volumeOwnerEnv, "123")
-
+func TestEnsureSocketDirIgnoresPermissionDeniedChown(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "serial")
-	expectedErr := errors.New("boom")
 
-	originalChown := socketDirChown
-	t.Cleanup(func() {
-		socketDirChown = originalChown
-	})
+	const owner = 0
+	const group = 0
 
-	socketDirChown = func(string, int, int) error {
-		return expectedErr
+	probeErr := os.Chown(dir, owner, group)
+	if probeErr == nil {
+		t.Skip("environment allows chown; cannot reproduce permission-denied path")
+	}
+	if !canIgnoreSocketDirChownError(probeErr) {
+		t.Skipf("environment returned non-ignorable chown error: %v", probeErr)
 	}
 
-	_, err := ensureSocketDir(dir, "serial")
+	t.Setenv(volumeOwnerEnv, "0")
+	t.Setenv(volumeGroupEnv, "0")
+
+	got, err := ensureSocketDir(dir, "serial")
+	if err != nil {
+		t.Fatalf("expected permission-denied chown to be ignored, got %v", err)
+	}
+	if got != dir {
+		t.Fatalf("expected ensured directory %q, got %q", dir, got)
+	}
+}
+
+func TestChownSocketDirReturnsUnexpectedChownError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+
+	err := chownSocketDir(dir, "serial", 0, 0)
 	if err == nil {
 		t.Fatal("expected chown error")
 	}
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected error to wrap %v, got %v", expectedErr, err)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected error to wrap %v, got %v", os.ErrNotExist, err)
 	}
 }

@@ -258,8 +258,8 @@ func (s *SingletonWorker) setVMs(vms []vmInfo) {
 }
 
 var (
-	instance *SingletonWorker
-	once     sync.Once
+	instance *SingletonWorker //nolint:gochecknoglobals // package-level singleton needed for one-time registration
+	once     sync.Once        //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 )
 
 func GetInstance() *SingletonWorker {

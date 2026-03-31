@@ -28,7 +28,7 @@ const sessionKey = "session"
 
 const sessionTTL = 30 * time.Minute
 
-var registerSessionTypesOnce sync.Once
+var registerSessionTypesOnce sync.Once //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 
 type Manager struct {
 	*scs.SessionManager
