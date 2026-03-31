@@ -41,6 +41,7 @@ type dashboardActionResponse struct {
 }
 
 func renderDashboardPage(w http.ResponseWriter) {
+	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	dashboardHTML, err := fs.ReadFile(staticFiles, dashboardHTMLPath)
 	if err != nil {
@@ -94,6 +95,7 @@ func listDashboardVMs(settings *config.SettingsType, user string) ([]dashboardVM
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
+	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)

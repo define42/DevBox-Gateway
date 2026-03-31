@@ -37,6 +37,15 @@ func TestRenderDashboardPage(t *testing.T) {
 	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("expected text/html content type, got %q", ct)
 	}
+	if got := res.Header.Get("Cache-Control"); got != cacheControlValue {
+		t.Fatalf("expected Cache-Control %q, got %q", cacheControlValue, got)
+	}
+	if got := res.Header.Get("Pragma"); got != pragmaValue {
+		t.Fatalf("expected Pragma %q, got %q", pragmaValue, got)
+	}
+	if got := res.Header.Get("Expires"); got != expiresValue {
+		t.Fatalf("expected Expires %q, got %q", expiresValue, got)
+	}
 	if body := rec.Body.String(); body != string(expected) {
 		t.Fatalf("rendered dashboard page did not match embedded asset")
 	}

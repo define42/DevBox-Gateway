@@ -339,6 +339,15 @@ func TestWriteJSON(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json; charset=utf-8" {
 		t.Fatalf("expected JSON content type, got %q", ct)
 	}
+	if got := rec.Header().Get("Cache-Control"); got != cacheControlValue {
+		t.Fatalf("expected Cache-Control %q, got %q", cacheControlValue, got)
+	}
+	if got := rec.Header().Get("Pragma"); got != pragmaValue {
+		t.Fatalf("expected Pragma %q, got %q", pragmaValue, got)
+	}
+	if got := rec.Header().Get("Expires"); got != expiresValue {
+		t.Fatalf("expected Expires %q, got %q", expiresValue, got)
+	}
 
 	var resp dashboardActionResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {

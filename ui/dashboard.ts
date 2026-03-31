@@ -1,9 +1,11 @@
 // Source for the dashboard UI. Run "tsc -p tsconfig.json" to update static/dashboard.js.
 
 const DEFAULT_VM_ERROR = "Unable to load virtual machines right now.";
+const SESSION_CHECK_ERROR = "Unable to verify your session. Reload and sign in again.";
 const AUTO_REFRESH_INTERVAL_MS = 10000;
 const DEFAULT_VCPU = "4";
 const DEFAULT_MEMORY_MIB = "4096";
+const LOGIN_PATH = "/login";
 const VCPU_OPTIONS = ["1", "2", "4", "8"];
 const MEMORY_OPTIONS = ["4096", "8192", "16384", "32768"];
 
@@ -967,20 +969,47 @@ function bootstrap(): void {
         }
     }
 
+    function redirectToLogin(): null {
+        state.vms = [];
+        state.vmError = "";
+        state.loading = true;
+        clearAction();
+        closeTerminal();
+        closeVNC();
+        renderVMList();
+        window.location.replace(LOGIN_PATH);
+        return null;
+    }
+
+    function responseRequiresLogin(response: Response): boolean {
+        if (response.status === 401) {
+            return true;
+        }
+
+        try {
+            const finalUrl = new URL(response.url, window.location.origin);
+            return finalUrl.pathname === LOGIN_PATH;
+        } catch {
+            return false;
+        }
+    }
+
     async function requestJSON<T>(url: string, init: RequestInit = {}): Promise<RequestResult<T> | null> {
         const headers = new Headers(init.headers);
         headers.set("Accept", "application/json");
-        const response = await fetch(url, {
-            ...init,
-            headers,
-            credentials: "same-origin",
-        });
-        if (response.redirected) {
-            const redirectedUrl = new URL(response.url);
-            if (redirectedUrl.pathname === "/login") {
-                window.location.assign("/login");
-                return null;
-            }
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                ...init,
+                cache: "no-store",
+                headers,
+                credentials: "same-origin",
+            });
+        } catch {
+            return { ok: false, error: SESSION_CHECK_ERROR };
+        }
+        if (responseRequiresLogin(response)) {
+            return redirectToLogin();
         }
         let payload: any = null;
         try {
@@ -1014,6 +1043,7 @@ function bootstrap(): void {
                 return;
             }
             if (!result.ok || !result.data) {
+                state.vms = [];
                 state.vmError = result.error || DEFAULT_VM_ERROR;
                 return;
             }
@@ -1229,6 +1259,16 @@ function bootstrap(): void {
         if (!document.hidden) {
             void loadVMs({ showLoading: false });
         }
+    });
+
+    window.addEventListener("focus", () => {
+        if (!state.busy) {
+            void loadVMs({ showLoading: false });
+        }
+    });
+
+    window.addEventListener("pageshow", () => {
+        void loadVMs({ showLoading: false });
     });
 
     window.addEventListener("beforeunload", () => {
