@@ -1,7 +1,9 @@
 package main
 
 import (
+	"embed"
 	"encoding/base64"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +39,53 @@ func TestRenderDashboardPage(t *testing.T) {
 	}
 	if body := rec.Body.String(); body != string(expected) {
 		t.Fatalf("rendered dashboard page did not match embedded asset")
+	}
+}
+
+type errResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *errResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *errResponseWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *errResponseWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func TestRenderDashboardPageWriteError(t *testing.T) {
+	writer := &errResponseWriter{}
+	renderDashboardPage(writer)
+
+	if ct := writer.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("expected text/html content type, got %q", ct)
+	}
+}
+
+func TestRenderDashboardPageMissingTemplate(t *testing.T) {
+	originalStaticFiles := staticFiles
+	staticFiles = embed.FS{}
+	t.Cleanup(func() {
+		staticFiles = originalStaticFiles
+	})
+
+	rec := httptest.NewRecorder()
+	renderDashboardPage(rec)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Dashboard template unavailable.") {
+		t.Fatalf("unexpected body: %q", rec.Body.String())
 	}
 }
 

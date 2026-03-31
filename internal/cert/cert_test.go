@@ -1,7 +1,12 @@
 package cert
 
 import (
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
+	"os"
+	"path/filepath"
 	"rdptlsgateway/internal/config"
 	"testing"
 
@@ -144,5 +149,95 @@ func TestLoadOrGenerateCertOnlyOnePath(t *testing.T) {
 	_, err := LoadOrGenerateCert(settings)
 	if err == nil {
 		t.Fatal("expected error when only cert is provided")
+	}
+}
+
+func TestLoadOrGenerateCertFromFiles(t *testing.T) {
+	t.Setenv(config.CERT_FILE, "")
+	t.Setenv(config.KEY_FILE, "")
+	t.Setenv(config.ACME_ENABLE, "false")
+
+	settings := config.NewSettingType(false)
+	generated, err := LoadOrGenerateCert(settings)
+	if err != nil {
+		t.Fatalf("generate cert pair: %v", err)
+	}
+
+	certPath := filepath.Join(t.TempDir(), "cert.pem")
+	keyPath := filepath.Join(t.TempDir(), "key.pem")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: generated.Certificate[0]}), 0o644); err != nil {
+		t.Fatalf("write cert file: %v", err)
+	}
+
+	keyDER, ok := generated.PrivateKey.(*rsa.PrivateKey)
+	if !ok {
+		t.Fatalf("expected RSA private key, got %T", generated.PrivateKey)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(keyDER)})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+
+	t.Setenv(config.CERT_FILE, certPath)
+	t.Setenv(config.KEY_FILE, keyPath)
+	settings = config.NewSettingType(false)
+
+	loaded, err := LoadOrGenerateCert(settings)
+	if err != nil {
+		t.Fatalf("load cert pair: %v", err)
+	}
+	if len(loaded.Certificate) == 0 {
+		t.Fatal("expected loaded certificate chain")
+	}
+}
+
+func TestACMEGetCertificateFallback(t *testing.T) {
+	fallback, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generate fallback cert: %v", err)
+	}
+
+	getCertificate := acmeGetCertificate(nil, fallback)
+	cert, err := getCertificate(nil)
+	if err != nil {
+		t.Fatalf("fallback for nil hello: %v", err)
+	}
+	if cert == nil || len(cert.Certificate) == 0 || len(cert.Certificate[0]) == 0 {
+		t.Fatal("expected non-empty fallback certificate for nil hello")
+	}
+
+	cert, err = getCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatalf("fallback for empty hello: %v", err)
+	}
+	if cert == nil || len(cert.Certificate) == 0 || len(cert.Certificate[0]) == 0 {
+		t.Fatal("expected non-empty fallback certificate for empty server name")
+	}
+}
+
+func TestNewTLSManagerACMERequiresFrontDomain(t *testing.T) {
+	t.Setenv(config.ACME_ENABLE, "true")
+	t.Setenv(config.FRONT_DOMAIN, "")
+	t.Setenv(config.CERT_FILE, "")
+	t.Setenv(config.KEY_FILE, "")
+
+	settings := config.NewSettingType(false)
+	if _, err := NewTLSManager(settings); err == nil {
+		t.Fatal("expected ACME-enabled TLS manager without front domain to fail")
+	}
+}
+
+func TestUpdateDomainsNoChange(t *testing.T) {
+	t.Setenv(config.FRONT_DOMAIN, "example.test")
+	settings := config.NewSettingType(false)
+
+	manager := &TLSManager{
+		settings: settings,
+		domains:  []string{"example.test"},
+	}
+	manager.updateDomains()
+
+	if len(manager.domains) != 1 || manager.domains[0] != "example.test" {
+		t.Fatalf("expected domains to remain unchanged, got %v", manager.domains)
 	}
 }

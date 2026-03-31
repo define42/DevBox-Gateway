@@ -170,3 +170,21 @@ func TestHandleHTTPS_ACMETLSALPNClosesConn(t *testing.T) {
 
 	waitHandleHTTPSDone(t, done)
 }
+
+func TestHandleHTTPSHandshakeFailure(t *testing.T) {
+	frontTLS, settings := newTestTLSManager(t)
+
+	client, server := net.Pipe()
+	defer server.Close()
+
+	done := make(chan struct{})
+	go func() {
+		handleHTTPS(server, frontTLS, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Error("handler should not be called when TLS handshake fails")
+		}), settings)
+		close(done)
+	}()
+
+	_ = client.Close()
+	waitHandleHTTPSDone(t, done)
+}

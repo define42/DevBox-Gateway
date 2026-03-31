@@ -6,7 +6,7 @@ lint:
 gosec:
 	go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
 test:
-	 go test ./...  -coverpkg=./...
+	 go test ./...  -coverpkg=./... -cover
 
 run: 
 	docker compose stop

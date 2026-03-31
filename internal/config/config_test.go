@@ -284,3 +284,73 @@ func TestIsTrue(t *testing.T) {
 		t.Fatal("expected IsTrue to return false")
 	}
 }
+
+func TestOverwriteForTestHelpers(t *testing.T) {
+	s := NewSettingType(false)
+
+	if err := s.OverwriteForTestInt(TIMEOUT, 1); err == nil {
+		t.Fatal("expected type mismatch when overwriting duration with int")
+	}
+	if err := s.OverwriteForTestBool(LDAP_URL, true); err == nil {
+		t.Fatal("expected type mismatch when overwriting string with bool")
+	}
+	if err := s.OverwriteForTestDuration(LDAP_URL, time.Second); err == nil {
+		t.Fatal("expected type mismatch when overwriting string with duration")
+	}
+
+	if err := s.OverwriteForTestInt("MISSING", 1); err == nil {
+		t.Fatal("expected missing setting error for int overwrite")
+	}
+	if err := s.OverwriteForTestBool("MISSING", true); err == nil {
+		t.Fatal("expected missing setting error for bool overwrite")
+	}
+	if err := s.OverwriteForTestDuration("MISSING", time.Second); err == nil {
+		t.Fatal("expected missing setting error for duration overwrite")
+	}
+
+	if err := s.OverwriteForTestInt(VIRT_STORAGE_POOL_NAME, 1); err == nil {
+		t.Fatal("expected type mismatch when overwriting string with int")
+	}
+
+	if err := s.OverwriteForTestInt(TIMEOUT, 1); err == nil {
+		t.Fatal("expected type mismatch when overwriting duration with int")
+	}
+}
+
+func TestOverwriteForTestSettersAndErrors(t *testing.T) {
+	s := NewSettingType(false)
+	s.SetInt("TEST_INT", "int", 1)
+	s.SetBool("TEST_BOOL", "bool", false)
+	s.SetDuration("TEST_DURATION", "duration", time.Second)
+
+	if err := s.OverwriteForTestInt("TEST_INT", 42); err != nil {
+		t.Fatalf("overwrite int: %v", err)
+	}
+	if got := s.GetInt("TEST_INT"); got != 42 {
+		t.Fatalf("expected overwritten int 42, got %d", got)
+	}
+
+	if err := s.OverwriteForTestBool("TEST_BOOL", true); err != nil {
+		t.Fatalf("overwrite bool: %v", err)
+	}
+	if got := s.GetBool("TEST_BOOL"); !got {
+		t.Fatal("expected overwritten bool true")
+	}
+
+	if err := s.OverwriteForTestDuration("TEST_DURATION", 45*time.Second); err != nil {
+		t.Fatalf("overwrite duration: %v", err)
+	}
+	if got := s.GetDuration("TEST_DURATION"); got != 45*time.Second {
+		t.Fatalf("expected overwritten duration 45s, got %v", got)
+	}
+
+	if got := (&SettingTypeMismatchError{ID: "X", Expected: KindString, Actual: KindInt}).Error(); got == "" {
+		t.Fatal("expected non-empty mismatch error message")
+	}
+	if got := (&SettingNotFoundError{ID: "Y"}).Error(); got == "" {
+		t.Fatal("expected non-empty not found error message")
+	}
+	if got := kindToString(KindDuration); got != "duration" {
+		t.Fatalf("expected duration kind string, got %q", got)
+	}
+}
