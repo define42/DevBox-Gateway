@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"rdptlsgateway/internal/types"
 	"testing"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 )
 
 const testSessionRemoteAddr = "192.0.2.10:12345"
@@ -257,5 +260,120 @@ func TestCreateSessionNormalizesIPv4MappedIPv6(t *testing.T) {
 	}
 	if !m.UserHasActiveSessionFromIP("frank", "192.0.2.50") {
 		t.Fatal("expected IPv4-mapped IPv6 login to authorize plain IPv4 lookups")
+	}
+}
+
+func TestCanonicalClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		wantIP     string
+		wantOK     bool
+	}{
+		{name: "ipv4 with port", remoteAddr: "192.0.2.70:443", wantIP: "192.0.2.70", wantOK: true},
+		{name: "plain ipv4", remoteAddr: "192.0.2.71", wantIP: "192.0.2.71", wantOK: true},
+		{name: "ipv4 mapped ipv6", remoteAddr: "[::ffff:192.0.2.72]:443", wantIP: "192.0.2.72", wantOK: true},
+		{name: "empty", remoteAddr: "", wantIP: "", wantOK: false},
+		{name: "unparseable", remoteAddr: "not-an-ip:443", wantIP: "", wantOK: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotIP, gotOK := CanonicalClientIP(tc.remoteAddr)
+			if gotOK != tc.wantOK {
+				t.Fatalf("expected ok=%v, got %v", tc.wantOK, gotOK)
+			}
+			if gotIP != tc.wantIP {
+				t.Fatalf("expected ip %q, got %q", tc.wantIP, gotIP)
+			}
+		})
+	}
+}
+
+func TestGetSessionFromUserNameEmpty(t *testing.T) {
+	m := NewManager()
+
+	if _, ok := m.GetSessionFromUserName("   "); ok {
+		t.Fatal("expected blank username lookup to fail")
+	}
+}
+
+func TestUserHasActiveSessionFromIPRejectsInvalidInput(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("grace", "pass")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	issueSession(t, m, user, "192.0.2.80:5000")
+
+	if m.UserHasActiveSessionFromIP("", "192.0.2.80") {
+		t.Fatal("expected blank username to fail authorization")
+	}
+	if m.UserHasActiveSessionFromIP("grace", "not-an-ip") {
+		t.Fatal("expected invalid client IP to fail authorization")
+	}
+}
+
+func TestSessionMiddlewareRedirectsWithoutSession(t *testing.T) {
+	m := NewManager()
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+
+	handler := m.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := humachi.NewContext(nil, r, w)
+		m.SessionMiddleware()(ctx, func(huma.Context) {
+			t.Fatal("next should not be called without a session")
+		})
+	}))
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected %d, got %d", http.StatusSeeOther, rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/login" {
+		t.Fatalf("expected redirect to /login, got %q", loc)
+	}
+}
+
+func TestSessionMiddlewareCallsNextWithSession(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("heidi", "pass")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	sessionCookie := issueSession(t, m, user, "192.0.2.90:5000")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.AddCookie(sessionCookie)
+
+	called := false
+	handler := m.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := humachi.NewContext(nil, r, w)
+		m.SessionMiddleware()(ctx, func(nextCtx huma.Context) {
+			called = true
+
+			sess, ok := nextCtx.Context().Value(sessionContextKey{}).(sessionData)
+			if !ok {
+				t.Fatal("expected session data in huma context")
+			}
+			if sess.User == nil || sess.User.GetName() != "heidi" {
+				t.Fatalf("expected session user %q, got %#v", "heidi", sess.User)
+			}
+
+			w.WriteHeader(http.StatusNoContent)
+		})
+	}))
+	handler.ServeHTTP(rec, req)
+
+	if !called {
+		t.Fatal("expected middleware to call next handler")
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected %d, got %d", http.StatusNoContent, rec.Code)
 	}
 }
