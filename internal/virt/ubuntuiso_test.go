@@ -1,7 +1,6 @@
 package virt
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,38 +14,41 @@ const powerTestTimeout = 30 * time.Second
 
 func TestSeedISOCreate(t *testing.T) {
 	t.Run("requires user-data", func(t *testing.T) {
-		iso := &SeedISO{MetaData: []byte("instance-id: vm\n")}
-		err := iso.Create(filepath.Join(t.TempDir(), "seed.iso"))
+
+		_, err := CreateSeedISO(nil, &SeedMetaData{InstanceID: "vm"}, nil)
 		if err == nil || !strings.Contains(err.Error(), "user-data is required") {
 			t.Fatalf("expected missing user-data error, got %v", err)
 		}
 	})
 
 	t.Run("requires meta-data", func(t *testing.T) {
-		iso := &SeedISO{UserData: []byte("#cloud-config\n")}
-		err := iso.Create(filepath.Join(t.TempDir(), "seed.iso"))
+
+		_, err := CreateSeedISO(&SeedUserData{Users: []SeedUser{}}, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "meta-data is required") {
 			t.Fatalf("expected missing meta-data error, got %v", err)
 		}
 	})
 
-	t.Run("creates iso", func(t *testing.T) {
-		outputPath := filepath.Join(t.TempDir(), "seed.iso")
-		iso := &SeedISO{
-			UserData:      []byte("#cloud-config\nusers: []\n"),
-			MetaData:      []byte("instance-id: vm\nlocal-hostname: vm\n"),
-			NetworkConfig: []byte("version: 2\n"),
-		}
+	t.Run("creates iso from yaml documents", func(t *testing.T) {
 
-		if err := iso.Create(outputPath); err != nil {
-			t.Fatalf("SeedISO.Create: %v", err)
-		}
-
-		info, err := os.Stat(outputPath)
+		data, err := CreateSeedISO(
+			&SeedUserData{
+				Users: []SeedUser{},
+			},
+			&SeedMetaData{
+				InstanceID:    "vm",
+				LocalHostname: "vm",
+			},
+			&SeedNetworkConfig{
+				Network: SeedNetwork{
+					Version: 2,
+				},
+			},
+		)
 		if err != nil {
-			t.Fatalf("stat created iso: %v", err)
+			t.Fatalf("SeedISO.CreateSeedISO: %v", err)
 		}
-		if info.Size() == 0 {
+		if len(data) == 0 {
 			t.Fatal("expected created iso to be non-empty")
 		}
 	})

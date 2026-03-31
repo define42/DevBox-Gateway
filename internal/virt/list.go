@@ -67,7 +67,7 @@ func ListVMs(user string, conn *libvirt.Connect) ([]vmInfo, error) {
 		ip := ""
 		primaryIP := ""
 		if state == libvirt.DOMAIN_RUNNING || state == libvirt.DOMAIN_PAUSED || state == libvirt.DOMAIN_PMSUSPENDED {
-			ips := domainIPs(d, name)
+			ips := domainIPs(d)
 			if len(ips) > 0 {
 				primaryIP = ips[0]
 				ip = strings.Join(ips, ", ")
@@ -136,7 +136,7 @@ func domainDiskGB(d libvirt.Domain) int {
 	return int((size + (1 << 30) - 1) >> 30)
 }
 
-func domainIPs(d libvirt.Domain, name string) []string {
+func domainIPs(d libvirt.Domain) []string {
 	sources := []libvirt.DomainInterfaceAddressesSource{
 		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT,
 		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE,

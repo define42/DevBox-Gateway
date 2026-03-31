@@ -1,9 +1,9 @@
 package virt
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/google/uuid"
 	"libvirt.org/go/libvirt"
@@ -19,60 +19,53 @@ func CreateUbuntuSeedISOToPool(
 ) error {
 
 	// 2. Build cloud-init data
-	userData := []byte(`#cloud-config
-output:
-  all: '| tee -a /var/log/cloud-init-output.log'
-keyboard:
-  layout: dk
-  variant: ''
-users:
-  - name: ` + username + `
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    lock_passwd: false
-    passwd: ` + cloudInitPasswordHash + `
-ssh_pwauth: true
-runcmd:
-  - systemctl enable --now serial-getty@ttyS0.service
-`)
-
-	fmt.Println("userData:", string(userData))
+	userData := &SeedUserData{
+		Output: &SeedOutput{
+			All: "| tee -a /var/log/cloud-init-output.log",
+		},
+		Keyboard: &SeedKeyboard{
+			Layout:  "dk",
+			Variant: "",
+		},
+		Users: []SeedUser{
+			{
+				Name:       username,
+				Sudo:       "ALL=(ALL) NOPASSWD:ALL",
+				Shell:      "/bin/bash",
+				LockPasswd: false,
+				Passwd:     cloudInitPasswordHash,
+			},
+		},
+		SSHPwAuth: true,
+		RunCmd: []string{
+			"systemctl enable --now serial-getty@ttyS0.service",
+		},
+	}
 
 	id := uuid.New()
-	metaData := []byte(`instance-id: ` + id.String() + `
-local-hostname: ` + hostname + `
-`)
-
-	networkConfig := []byte(`#cloud-config
-network:
-  version: 2
-  ethernets:
-    all:
-      match:
-        name: "en*"
-      dhcp4: true
-	  dhcp6: false
-	  accept-ra: false
-`)
-
-	// 3. Create temporary ISO
-	tmpFile, err := os.CreateTemp("", "seed-*.iso")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmpFile.Name())
-
-	iso := SeedISO{
-		UserData:      userData,
-		MetaData:      metaData,
-		NetworkConfig: networkConfig,
+	metaData := &SeedMetaData{
+		InstanceID:    id.String(),
+		LocalHostname: hostname,
 	}
 
-	if err := iso.Create(tmpFile.Name()); err != nil {
-		return err
+	networkConfig := &SeedNetworkConfig{
+		Network: SeedNetwork{
+			Version: 2,
+			Ethernets: SeedEthernets{
+				All: SeedEthernet{
+					Match: &SeedInterfaceMatch{
+						Name: "en*",
+					},
+					DHCP4:    true,
+					DHCP6:    false,
+					AcceptRA: false,
+				},
+			},
+		},
 	}
 
-	info, err := os.Stat(tmpFile.Name())
+	// 3. Build the seed ISO in memory.
+	seedISOData, err := CreateSeedISO(userData, metaData, networkConfig)
 	if err != nil {
 		return err
 	}
@@ -89,25 +82,10 @@ network:
 	}()
 
 	// 5. Create volume for ISO
-	permXML, err := storageVolPermissionsXML()
+	volXML, err := storageVolCreateXML(pool, volumeName, uint64(len(seedISOData)), "raw")
 	if err != nil {
 		return err
 	}
-	pathXML := ""
-	if permXML != "" {
-		pathXML, err = storageVolPathXML(pool, volumeName)
-		if err != nil {
-			return err
-		}
-	}
-	volXML := fmt.Sprintf(`
-<volume>
-  <name>%s</name>
-  <capacity unit="bytes">%d</capacity>
-  <target>
-    <format type="raw"/>%s%s
-  </target>
-</volume>`, volumeName, info.Size(), pathXML, permXML)
 
 	vol, err := pool.StorageVolCreateXML(volXML, 0)
 	if err != nil {
@@ -118,11 +96,7 @@ network:
 	}()
 
 	// 6. Upload ISO into the volume
-	src, err := os.Open(tmpFile.Name())
-	if err != nil {
-		return err
-	}
-	defer src.Close()
+	src := bytes.NewReader(seedISOData)
 
 	stream, err := conn.NewStream(0)
 	if err != nil {
@@ -132,7 +106,7 @@ network:
 		_ = stream.Free()
 	}()
 
-	if err := vol.Upload(stream, 0, uint64(info.Size()), 0); err != nil {
+	if err := vol.Upload(stream, 0, uint64(len(seedISOData)), 0); err != nil {
 		return err
 	}
 

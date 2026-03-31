@@ -2,6 +2,7 @@ package virt
 
 import (
 	"context"
+	"encoding/xml"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -100,6 +101,61 @@ func TestEnsureStoragePoolAndPathXML(t *testing.T) {
 	}
 	if !strings.Contains(pathXML, filepath.Join(filepath.Clean(poolPath), "disk.qcow2")) {
 		t.Fatalf("expected path xml to contain volume path, got %q", pathXML)
+	}
+}
+
+func TestStorageVolCreateXML(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	poolPath := t.TempDir()
+	poolName := uniquePoolName("volume-xml-pool")
+	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+
+	pool, err := ensureStoragePool(conn, poolName, poolPath)
+	if err != nil {
+		t.Fatalf("ensureStoragePool: %v", err)
+	}
+	defer func() {
+		_ = pool.Free()
+	}()
+
+	t.Setenv(volumeOwnerEnv, "1000")
+	t.Setenv(volumeGroupEnv, "1001")
+	t.Setenv(volumeModeEnv, "0660")
+
+	volXML, err := storageVolCreateXML(pool, "disk.qcow2", 12345, "qcow2")
+	if err != nil {
+		t.Fatalf("storageVolCreateXML: %v", err)
+	}
+
+	var parsed storageVolumeXML
+	if err := xml.Unmarshal([]byte(volXML), &parsed); err != nil {
+		t.Fatalf("unmarshal generated xml: %v", err)
+	}
+
+	if parsed.Name != "disk.qcow2" {
+		t.Fatalf("expected volume name %q, got %q", "disk.qcow2", parsed.Name)
+	}
+	if parsed.Capacity.Unit != "bytes" || parsed.Capacity.Value != 12345 {
+		t.Fatalf("unexpected capacity %+v", parsed.Capacity)
+	}
+	if parsed.Target.Format.Type != "qcow2" {
+		t.Fatalf("expected format %q, got %q", "qcow2", parsed.Target.Format.Type)
+	}
+	wantPath := filepath.Join(filepath.Clean(poolPath), "disk.qcow2")
+	if filepath.Clean(parsed.Target.Path) != wantPath {
+		t.Fatalf("expected path %q, got %q", wantPath, parsed.Target.Path)
+	}
+	if parsed.Target.Permissions == nil {
+		t.Fatal("expected permissions to be present")
+	}
+	if parsed.Target.Permissions.Owner == nil || *parsed.Target.Permissions.Owner != 1000 {
+		t.Fatalf("expected owner %d, got %+v", 1000, parsed.Target.Permissions.Owner)
+	}
+	if parsed.Target.Permissions.Group == nil || *parsed.Target.Permissions.Group != 1001 {
+		t.Fatalf("expected group %d, got %+v", 1001, parsed.Target.Permissions.Group)
+	}
+	if parsed.Target.Permissions.Mode == nil || *parsed.Target.Permissions.Mode != "0660" {
+		t.Fatalf("expected mode %q, got %+v", "0660", parsed.Target.Permissions.Mode)
 	}
 }
 
