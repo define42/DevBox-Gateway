@@ -59,11 +59,11 @@ func TestStartVM(t *testing.T) {
 	//tmpDir := t.TempDir()
 
 	settings := config.NewSettingType(false)
-	settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir())
-	settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, t.TempDir())
-
-	if err := virt.InitVirt(settings); err != nil {
-		log.Fatalf("Failed to initialize virtualization: %v", err)
+	if settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir()) != nil {
+		t.Fatalf("Failed to overwrite VIRT_SERIAL_SOCKET_DIR for test")
+	}
+	if settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, t.TempDir()) != nil {
+		t.Fatalf("Failed to overwrite VIRT_VNC_SOCKET_DIR for test")
 	}
 
 	user, err := typesUser.NewUser(testUsername, testPassword)
