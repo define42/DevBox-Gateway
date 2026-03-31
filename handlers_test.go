@@ -5,24 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strings"
 	"testing"
 
-	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/types"
 )
-
-func stubLoginAuthenticate(t *testing.T, fn func(username, password string, settings *config.SettingsType) (*types.User, error)) {
-	t.Helper()
-
-	originalAuthenticate := loginAuthenticate
-	loginAuthenticate = fn
-	t.Cleanup(func() {
-		loginAuthenticate = originalAuthenticate
-	})
-}
 
 func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username string) *http.Cookie {
 	t.Helper()
@@ -56,27 +43,20 @@ func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username 
 	return nil
 }
 
-func TestHandleLoginPostRecordsLoginIP(t *testing.T) {
+func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	sessionManager := session.NewManager()
-	settings := config.NewSettingType(false)
-
-	stubLoginAuthenticate(t, func(username, password string, _ *config.SettingsType) (*types.User, error) {
-		if username != "alice" || password != "dogood" {
-			t.Fatalf("unexpected credentials %q / %q", username, password)
-		}
-		return types.NewUser(username, password)
-	})
-
-	form := url.Values{
-		"username": {"alice"},
-		"password": {"dogood"},
+	user, err := types.NewUser("alice", "dogood")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.RemoteAddr = "[::ffff:192.0.2.60]:4321"
 	rec := httptest.NewRecorder()
 
-	handler := sessionManager.LoadAndSave(handleLoginPost(sessionManager, settings))
+	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		completeLogin(sessionManager, w, r, user)
+	}))
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusSeeOther {

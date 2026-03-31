@@ -10,6 +10,7 @@ import (
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/ldap"
 	"rdptlsgateway/internal/session"
+	"rdptlsgateway/internal/types"
 	"rdptlsgateway/internal/virt"
 	"strconv"
 	"strings"
@@ -25,8 +26,6 @@ const (
 	expiresValue      = "0"
 	rdpFilename       = "rdpgw.rdp"
 )
-
-var loginAuthenticate = ldap.LdapAuthenticateAccess
 
 func extractCredentials(r *http.Request) (string, string, bool, error) {
 	username, password, ok := r.BasicAuth()
@@ -56,20 +55,24 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 			return
 		}
 
-		user, err := loginAuthenticate(username, password, settings)
+		user, err := ldap.LdapAuthenticateAccess(username, password, settings)
 		if err != nil {
 			log.Printf("ldap auth failed for %s: %v", username, err)
 			serveLogin(w, "Invalid credentials.")
 			return
 		}
 
-		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
-			log.Printf("session create failed for %s: %v", username, err)
-			serveLogin(w, "Login failed.")
-			return
-		}
-		http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
+		completeLogin(sessionManager, w, r, user)
 	}
+}
+
+func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User) {
+	if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
+		log.Printf("session create failed for %s: %v", user.GetName(), err)
+		serveLogin(w, "Login failed.")
+		return
+	}
+	http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
 }
 
 func serveLogin(w http.ResponseWriter, message string) {
@@ -529,6 +532,13 @@ func parseDashboardVCPU(raw string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("cpu selection is invalid")
 	}
+	var allowedDashboardVCPU = map[int]struct{}{
+		1: {},
+		2: {},
+		4: {},
+		8: {},
+	}
+
 	if _, ok := allowedDashboardVCPU[value]; !ok {
 		return 0, fmt.Errorf("cpu selection is not supported")
 	}
@@ -544,6 +554,14 @@ func parseDashboardMemoryMiB(raw string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("memory selection is invalid")
 	}
+
+	var allowedDashboardMemoryMiB = map[int]struct{}{
+		4096:  {},
+		8192:  {},
+		16384: {},
+		32768: {},
+	}
+
 	if _, ok := allowedDashboardMemoryMiB[value]; !ok {
 		return 0, fmt.Errorf("memory selection is not supported")
 	}
@@ -570,17 +588,3 @@ func handleDashboardFormError(w http.ResponseWriter, action string, err error) b
 }
 
 var errInvalidDashboardForm = errors.New("invalid form submission")
-
-var allowedDashboardVCPU = map[int]struct{}{
-	1: {},
-	2: {},
-	4: {},
-	8: {},
-}
-
-var allowedDashboardMemoryMiB = map[int]struct{}{
-	4096:  {},
-	8192:  {},
-	16384: {},
-	32768: {},
-}
