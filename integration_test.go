@@ -44,7 +44,6 @@ func TestIntegrationLogin(t *testing.T) {
 	assertLoginFailure(ctx, t, baseURL, loginClient, "serviceuser", "mysecret2", "Invalid credentials.")
 	assertLoginFailure(ctx, t, baseURL, loginClient, "hackers", "wrongpass2", "Invalid credentials.")
 	assertLoginFailure(ctx, t, baseURL, loginClient, "hackers", "", "Missing credentials.")
-
 }
 
 func assertLoginSuccess(ctx context.Context, t *testing.T, baseURL string, client *http.Client, username, password string) {

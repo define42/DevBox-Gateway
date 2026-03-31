@@ -7,13 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestDashboardConsoleRouteRejectsUnauthorizedRequests(t *testing.T) {

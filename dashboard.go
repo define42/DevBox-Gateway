@@ -7,10 +7,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"strings"
-
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/virt"
+	"strings"
 )
 
 const dashboardHTMLPath = "static/dashboard.html"

@@ -3,11 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"testing"
-
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
+	"strings"
+	"testing"
 )
 
 func TestStaticFilesDisableCaching(t *testing.T) {

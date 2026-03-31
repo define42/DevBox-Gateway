@@ -6,11 +6,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"rdptlsgateway/internal/virt"
 	"strings"
 	"testing"
 	"time"
-
-	"rdptlsgateway/internal/virt"
 
 	"github.com/gorilla/websocket"
 )

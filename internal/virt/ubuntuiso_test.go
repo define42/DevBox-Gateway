@@ -2,19 +2,17 @@ package virt
 
 import (
 	"path/filepath"
+	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/types"
 	"strings"
 	"testing"
 	"time"
-
-	"rdptlsgateway/internal/config"
-	"rdptlsgateway/internal/types"
 )
 
 const powerTestTimeout = 30 * time.Second
 
 func TestSeedISOCreate(t *testing.T) {
 	t.Run("requires user-data", func(t *testing.T) {
-
 		_, err := CreateSeedISO(nil, &SeedMetaData{InstanceID: "vm"}, nil)
 		if err == nil || !strings.Contains(err.Error(), "user-data is required") {
 			t.Fatalf("expected missing user-data error, got %v", err)
@@ -22,7 +20,6 @@ func TestSeedISOCreate(t *testing.T) {
 	})
 
 	t.Run("requires meta-data", func(t *testing.T) {
-
 		_, err := CreateSeedISO(&SeedUserData{Users: []SeedUser{}}, nil, nil)
 		if err == nil || !strings.Contains(err.Error(), "meta-data is required") {
 			t.Fatalf("expected missing meta-data error, got %v", err)
@@ -30,7 +27,6 @@ func TestSeedISOCreate(t *testing.T) {
 	})
 
 	t.Run("creates iso from yaml documents", func(t *testing.T) {
-
 		data, err := CreateSeedISO(
 			&SeedUserData{
 				Users: []SeedUser{},

@@ -5,11 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
-	"testing"
-
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
+	"strings"
+	"testing"
 )
 
 func TestExtractCredentialsFromForm(t *testing.T) {

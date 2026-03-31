@@ -7,14 +7,13 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/types"
+	"rdptlsgateway/internal/virt"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"rdptlsgateway/internal/config"
-	"rdptlsgateway/internal/types"
-	"rdptlsgateway/internal/virt"
 )
 
 const dashboardVMTestTimeout = 30 * time.Second

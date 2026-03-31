@@ -4,11 +4,10 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
-	"testing"
-	"time"
-
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
+	"testing"
+	"time"
 
 	"github.com/tomatome/grdp/protocol/x224"
 )

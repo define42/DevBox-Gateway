@@ -3,12 +3,11 @@ package virt
 import (
 	"os"
 	"path/filepath"
+	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/types"
 	"strings"
 	"testing"
 	"time"
-
-	"rdptlsgateway/internal/config"
-	"rdptlsgateway/internal/types"
 
 	"libvirt.org/go/libvirt"
 )

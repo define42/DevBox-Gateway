@@ -5,10 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"testing"
-
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/types"
+	"testing"
 )
 
 func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username string) *http.Cookie {

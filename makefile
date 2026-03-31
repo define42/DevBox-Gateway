@@ -2,7 +2,7 @@ all: ui
 	docker compose build
 
 lint:
-	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run 
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run 
 lint2:
 	go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --enable=stylecheck --enable=gochecknoinits
 gosec:
@@ -17,4 +17,3 @@ run:
 
 ui:
 	tsc -p tsconfig.json
-

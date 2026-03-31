@@ -29,15 +29,14 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
-	"time"
-
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/rdp"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
+	"strings"
+	"sync"
+	"time"
 )
 
 func main() {

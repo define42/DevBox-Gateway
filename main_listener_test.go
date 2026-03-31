@@ -7,12 +7,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"testing"
-	"time"
-
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
+	"testing"
+	"time"
 )
 
 func TestSameOriginWebsocketRequest(t *testing.T) {

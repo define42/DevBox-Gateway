@@ -36,7 +36,6 @@ func (tm *TLSManager) GetTLSConfig() *tls.Config {
 }
 
 func (tm *TLSManager) worker() {
-
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 

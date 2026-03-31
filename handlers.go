@@ -107,7 +107,6 @@ func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
 }
 
 func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
-
 	router := chi.NewRouter()
 	router.Use(sessionManager.LoadAndSave)
 
@@ -418,7 +417,7 @@ func parseDashboardVCPU(raw string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("cpu selection is invalid")
 	}
-	var allowedDashboardVCPU = map[int]struct{}{
+	allowedDashboardVCPU := map[int]struct{}{
 		1: {},
 		2: {},
 		4: {},
@@ -441,7 +440,7 @@ func parseDashboardMemoryMiB(raw string) (int, error) {
 		return 0, fmt.Errorf("memory selection is invalid")
 	}
 
-	var allowedDashboardMemoryMiB = map[int]struct{}{
+	allowedDashboardMemoryMiB := map[int]struct{}{
 		4096:  {},
 		8192:  {},
 		16384: {},

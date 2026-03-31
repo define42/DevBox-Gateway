@@ -7,11 +7,10 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"testing"
-	"time"
-
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
+	"testing"
+	"time"
 
 	"github.com/mholt/acmez"
 )

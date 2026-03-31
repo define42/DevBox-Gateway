@@ -9,14 +9,13 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"strings"
-	"testing"
-	"time"
-
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
+	"strings"
+	"testing"
+	"time"
 )
 
 const gatewayTestTimeout = 60 * time.Second

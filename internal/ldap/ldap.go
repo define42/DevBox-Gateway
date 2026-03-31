@@ -73,7 +73,6 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 }
 
 func dialLDAP(settings *config.SettingsType) (*ldap.Conn, error) {
-
 	// #nosec G402 -- skip TLS verification if configured
 	ldapURL := settings.Get(config.LDAP_URL)
 	insecureSkipVerify := settings.IsTrue(config.LDAP_SKIP_TLS_VERIFY)

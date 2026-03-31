@@ -1,6 +1,7 @@
 version: "2"
 
 linters:
+  default: none
   enable:
     - unused
     - revive
@@ -19,10 +20,6 @@ linters:
     - recvcheck
     - interfacebloat
     - cyclop
-    - gofmt
-    - gofumpt
-    - goimports
-
   settings:
     gocognit:
       min-complexity: 15
@@ -31,10 +28,15 @@ linters:
     cyclop:
       max-complexity: 15
       package-average: 10.0
-
   exclusions:
     rules:
       - path: (^|.*/)config\.go$
         linters:
           - revive
         text: "don't use ALL_CAPS in Go names; use CamelCase"
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
