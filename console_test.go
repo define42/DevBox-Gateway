@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,15 +41,6 @@ func TestDashboardConsoleRouteRejectsNonOwnerVM(t *testing.T) {
 	cookie := issueSessionCookie(t, sessionManager, "alice")
 	stubDashboardVMOwnershipByPrefix(t)
 
-	originalDial := dialDashboardSerialSocket
-	dialDashboardSerialSocket = func(name string, timeout time.Duration) (net.Conn, error) {
-		t.Fatalf("dialDashboardSerialSocket should not be called for non-owner VM %q", name)
-		return nil, nil
-	}
-	defer func() {
-		dialDashboardSerialSocket = originalDial
-	}()
-
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/bob-devbox/ws", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -62,13 +55,73 @@ func TestDashboardConsoleRouteRejectsNonOwnerVM(t *testing.T) {
 	}
 }
 
-func TestDashboardConsoleRoutePropagatesSerialAvailabilityErrors(t *testing.T) {
-	sessionManager := session.NewManager()
-	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sessionManager, settings)
-	cookie := issueSessionCookie(t, sessionManager, "alice")
-	stubDashboardVMOwnershipByPrefix(t)
+func TestDialDashboardSerialSocket(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "dashboard.serial.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen on unix socket: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
 
+	acceptedCh := make(chan net.Conn, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			errCh <- acceptErr
+			return
+		}
+		acceptedCh <- conn
+	}()
+
+	clientConn, err := dialDashboardSerialSocket(socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("dialDashboardSerialSocket(%q): %v", socketPath, err)
+	}
+	defer clientConn.Close()
+
+	var serverConn net.Conn
+	select {
+	case serverConn = <-acceptedCh:
+	case err := <-errCh:
+		t.Fatalf("accept dashboard serial socket: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for accepted dashboard serial socket")
+	}
+	defer serverConn.Close()
+
+	want := []byte("hello from terminal")
+	if _, err := clientConn.Write(want); err != nil {
+		t.Fatalf("write to dashboard serial socket: %v", err)
+	}
+
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(serverConn, got); err != nil {
+		t.Fatalf("read from accepted dashboard serial socket: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("expected payload %q, got %q", string(want), string(got))
+	}
+}
+
+func TestDialDashboardSerialSocketReturnsNotReadyForMissingSocket(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "missing.serial.sock")
+
+	conn, err := dialDashboardSerialSocket(socketPath, time.Second)
+	if err == nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		t.Fatal("expected missing socket dial to fail")
+	}
+	if !errors.Is(err, virt.ErrSerialConsoleNotReady) {
+		t.Fatalf("expected ErrSerialConsoleNotReady, got %v", err)
+	}
+}
+
+func TestWriteDashboardSerialSocketError(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
@@ -103,19 +156,9 @@ func TestDashboardConsoleRoutePropagatesSerialAvailabilityErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			originalDial := dialDashboardSerialSocket
-			dialDashboardSerialSocket = func(name string, timeout time.Duration) (net.Conn, error) {
-				return nil, tc.err
-			}
-			defer func() {
-				dialDashboardSerialSocket = originalDial
-			}()
-
-			req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/alice-devbox/ws", nil)
-			req.AddCookie(cookie)
 			rec := httptest.NewRecorder()
 
-			router.ServeHTTP(rec, req)
+			writeDashboardSerialSocketError(rec, "alice-devbox", tc.err)
 
 			if rec.Code != tc.wantCode {
 				t.Fatalf("expected %d, got %d with body %s", tc.wantCode, rec.Code, rec.Body.String())
@@ -234,15 +277,6 @@ func TestDashboardConsoleRejectsPrefixCollidingVM(t *testing.T) {
 		}
 		return false, nil
 	})
-
-	originalDial := dialDashboardSerialSocket
-	dialDashboardSerialSocket = func(name string, timeout time.Duration) (net.Conn, error) {
-		t.Fatalf("dialDashboardSerialSocket should not be called for rejected VM %q", name)
-		return nil, nil
-	}
-	defer func() {
-		dialDashboardSerialSocket = originalDial
-	}()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/alice-bob-devbox/ws", nil)
 	req.AddCookie(cookie)

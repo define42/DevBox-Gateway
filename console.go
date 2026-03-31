@@ -8,20 +8,21 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
 var (
-	dialDashboardSerialSocket = virt.DialSerialSocket
-	dialDashboardVNCSocket    = virt.DialVNCSocket
-	dashboardSocketUpgrader   = websocket.Upgrader{
+	dialDashboardVNCSocket  = virt.DialVNCSocket
+	dashboardSocketUpgrader = websocket.Upgrader{
 		CheckOrigin: sameOriginWebsocketRequest,
 	}
 )
@@ -52,19 +53,9 @@ func handleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 			return
 		}
 
-		serialConn, err := dialDashboardSerialSocket(name, settings.GetDuration(config.TIMEOUT))
+		serialConn, err := openDashboardSerialSocket(name, settings.GetDuration(config.TIMEOUT))
 		if err != nil {
-			switch {
-			case errors.Is(err, virt.ErrSerialConsoleNotRunning):
-				http.Error(w, "VM must be running for terminal access.", http.StatusConflict)
-			case errors.Is(err, virt.ErrSerialConsoleNotConfigured):
-				http.Error(w, "Serial terminal is not available for this VM.", http.StatusConflict)
-			case errors.Is(err, virt.ErrSerialConsoleNotReady):
-				http.Error(w, "Serial terminal is not ready yet.", http.StatusConflict)
-			default:
-				log.Printf("open serial console for vm %q failed: %v", name, err)
-				http.Error(w, "Failed to open serial terminal.", http.StatusInternalServerError)
-			}
+			writeDashboardSerialSocketError(w, name, err)
 			return
 		}
 
@@ -76,6 +67,39 @@ func handleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 		}
 
 		bridgeDashboardSocket("terminal", name, ws, serialConn)
+	}
+}
+
+func openDashboardSerialSocket(name string, timeout time.Duration) (net.Conn, error) {
+	socketPath, err := virt.SerialSocketPathForDomain(name)
+	if err != nil {
+		return nil, err
+	}
+	return dialDashboardSerialSocket(socketPath, timeout)
+}
+
+func dialDashboardSerialSocket(socketPath string, timeout time.Duration) (net.Conn, error) {
+	serialConn, err := net.DialTimeout("unix", socketPath, timeout)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, virt.ErrSerialConsoleNotReady
+		}
+		return nil, fmt.Errorf("dial serial socket %s: %w", socketPath, err)
+	}
+	return serialConn, nil
+}
+
+func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err error) {
+	switch {
+	case errors.Is(err, virt.ErrSerialConsoleNotRunning):
+		http.Error(w, "VM must be running for terminal access.", http.StatusConflict)
+	case errors.Is(err, virt.ErrSerialConsoleNotConfigured):
+		http.Error(w, "Serial terminal is not available for this VM.", http.StatusConflict)
+	case errors.Is(err, virt.ErrSerialConsoleNotReady):
+		http.Error(w, "Serial terminal is not ready yet.", http.StatusConflict)
+	default:
+		log.Printf("open serial console for vm %q failed: %v", name, err)
+		http.Error(w, "Failed to open serial terminal.", http.StatusInternalServerError)
 	}
 }
 
