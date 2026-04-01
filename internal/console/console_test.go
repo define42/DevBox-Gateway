@@ -1,4 +1,4 @@
-package main
+package console
 
 import (
 	"errors"
@@ -13,12 +13,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestDashboardConsoleRouteRejectsUnauthorizedRequests(t *testing.T) {
 	sessionManager := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+
+	router := chi.NewRouter()
+	router.Use(sessionManager.LoadAndSave)
+	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(sessionManager, settings))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/alice-devbox/ws", nil)
 	rec := httptest.NewRecorder()

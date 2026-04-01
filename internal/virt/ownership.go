@@ -74,20 +74,12 @@ func domainOwner(dom *libvirt.Domain) (string, bool, error) {
 
 // UserOwnsVM reports whether the named VM is owned by the given user.
 func UserOwnsVM(name, username string) (bool, error) {
-	username = strings.TrimSpace(username)
-	if username == "" {
-		return false, nil
-	}
-
 	owner, hasOwner, err := VMOwner(name)
 	if err != nil {
 		return false, err
 	}
-	if !hasOwner {
-		return false, nil
-	}
 
-	return owner == username, nil
+	return ownedByUser(owner, hasOwner, username), nil
 }
 
 // VMOwner returns the owner metadata for the named VM when present.
@@ -125,4 +117,13 @@ func VMOwner(name string) (string, bool, error) {
 	}
 
 	return owner, true, nil
+}
+
+func ownedByUser(owner string, hasOwner bool, username string) bool {
+	username = strings.TrimSpace(username)
+	if username == "" || !hasOwner {
+		return false
+	}
+
+	return strings.TrimSpace(owner) == username
 }

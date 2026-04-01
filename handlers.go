@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"rdptlsgateway/internal/config"
+	consolepkg "rdptlsgateway/internal/console"
 	"rdptlsgateway/internal/ldap"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/types"
@@ -128,8 +129,8 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	apiCfg.SchemasPath = ""
 	api := humachi.New(router, apiCfg)
 	registerAPI(api, sessionManager, settings)
-	router.Get("/api/dashboard/console/{name}/ws", handleDashboardConsoleWS(sessionManager, settings))
-	router.Get("/api/dashboard/vnc/{name}/ws", handleDashboardVNCWS(sessionManager, settings))
+	router.Get("/api/dashboard/console/{name}/ws", consolepkg.HandleDashboardConsoleWS(sessionManager, settings))
+	router.Get("/api/dashboard/vnc/{name}/ws", consolepkg.HandleDashboardVNCWS(sessionManager, settings))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -340,7 +341,7 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 		return "", false
 	}
 
-	owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+	owned, err := virt.UserOwnsVM(name, user.GetName())
 	if err != nil {
 		writeDashboardVMActionOwnershipError(w, name, user.GetName(), verb, err)
 		return "", false

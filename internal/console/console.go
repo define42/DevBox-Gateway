@@ -1,4 +1,5 @@
-package main
+// Package console handles dashboard terminal and VNC websocket endpoints.
+package console
 
 import (
 	"errors"
@@ -20,7 +21,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func handleDashboardConsoleWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
+// HandleDashboardConsoleWS serves the serial console websocket endpoint.
+func HandleDashboardConsoleWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
@@ -34,7 +36,7 @@ func handleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 			return
 		}
 
-		owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+		owned, err := virt.UserOwnsVM(name, user.GetName())
 		if err != nil {
 			writeDashboardConsoleOwnershipError(w, name, user.GetName(), err)
 			return
@@ -98,7 +100,8 @@ func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err err
 	}
 }
 
-func handleDashboardVNCWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
+// HandleDashboardVNCWS serves the VNC websocket endpoint.
+func HandleDashboardVNCWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
@@ -112,7 +115,7 @@ func handleDashboardVNCWS(sessionManager *session.Manager, settings *config.Sett
 			return
 		}
 
-		owned, err := dashboardVMOwnershipCheck(name, user.GetName())
+		owned, err := virt.UserOwnsVM(name, user.GetName())
 		if err != nil {
 			writeDashboardVNCOwnershipError(w, name, user.GetName(), err)
 			return
@@ -268,10 +271,12 @@ func sameOriginWebsocketRequest(r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
+
 	originURL, err := url.Parse(origin)
 	if err != nil {
 		return false
 	}
+
 	return strings.EqualFold(originURL.Host, r.Host)
 }
 

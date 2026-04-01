@@ -1,8 +1,8 @@
-package main
+package virt
 
 import "testing"
 
-func TestDashboardVMOwnedByUser(t *testing.T) {
+func TestOwnedByUser(t *testing.T) {
 	tests := []struct {
 		name     string
 		owner    string
@@ -49,9 +49,9 @@ func TestDashboardVMOwnedByUser(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := dashboardVMOwnedByUser(tc.owner, tc.hasOwner, tc.username)
+			got := ownedByUser(tc.owner, tc.hasOwner, tc.username)
 			if got != tc.want {
-				t.Fatalf("dashboardVMOwnedByUser(%q, %v, %q) = %v, want %v", tc.owner, tc.hasOwner, tc.username, got, tc.want)
+				t.Fatalf("ownedByUser(%q, %v, %q) = %v, want %v", tc.owner, tc.hasOwner, tc.username, got, tc.want)
 			}
 		})
 	}
