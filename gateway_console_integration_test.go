@@ -31,7 +31,7 @@ func loginGatewayUser(t *testing.T, server gatewayTestServer, username, password
 
 func newInsecureHTTPClient() *http.Client {
 	return &http.Client{
-		Timeout: 15 * time.Second,
+		Timeout: gatewayRequestTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},

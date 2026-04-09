@@ -19,7 +19,10 @@ import (
 	"time"
 )
 
-const gatewayTestTimeout = 60 * time.Second
+const (
+	gatewayRequestTimeout = 30 * time.Second
+	gatewayTestTimeout    = 60 * time.Second
+)
 
 type gatewayTestServer struct {
 	baseURL string
@@ -57,7 +60,7 @@ func startGatewayTestServer(t *testing.T, settings *config.SettingsType) gateway
 
 	client := &http.Client{
 		Jar:     jar,
-		Timeout: 15 * time.Second,
+		Timeout: gatewayRequestTimeout,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},

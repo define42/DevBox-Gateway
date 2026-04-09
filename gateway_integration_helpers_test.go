@@ -19,8 +19,8 @@ func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Setting
 	t.Setenv(config.LDAP_STARTTLS, "false")
 	t.Setenv(config.LDAP_USER_DOMAIN, "@example.com")
 	t.Setenv(config.FRONT_DOMAIN, "gateway.test")
-	t.Setenv(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir())
-	t.Setenv(config.VIRT_VNC_SOCKET_DIR, t.TempDir())
+	t.Setenv(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-"))
+	t.Setenv(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-"))
 
 	return config.NewSettingType(false)
 }

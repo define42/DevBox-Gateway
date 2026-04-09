@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"rdptlsgateway/internal/config"
 	"testing"
 	"time"
@@ -52,6 +53,27 @@ func cleanupStoragePool(t *testing.T, name string) {
 
 func uniquePoolName(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		t.Fatalf("mkdir temp dir %q: %v", prefix, err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("chmod temp dir %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return dir
+}
+
+func usePermissiveLibvirtVolumeMode(t *testing.T) {
+	t.Helper()
+	t.Setenv(volumeModeEnv, "0666")
 }
 
 func newInitVirtSettings(t *testing.T, poolPath string) *config.SettingsType {

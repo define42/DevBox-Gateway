@@ -22,6 +22,22 @@ const (
 	testTimeout  = 30 * time.Second
 )
 
+func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory for libvirt: %v", err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("Failed to chmod temporary directory %s: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return dir
+}
+
 func checkCPUAndMemory(testUsername, vmName string, vcpu, memory int, conn *libvirt.Connect) error {
 	vms, err := virt.ListVMs(testUsername, conn)
 	if err != nil {
@@ -128,11 +144,13 @@ func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
 func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
+	tmpDir := newLibvirtAccessibleTempDir(t, "rdptlsgateway-console-")
+
 	settings := config.NewSettingType(false)
-	if settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir()) != nil {
+	if settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, tmpDir) != nil {
 		t.Fatalf("Failed to overwrite VIRT_SERIAL_SOCKET_DIR for test")
 	}
-	if settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, t.TempDir()) != nil {
+	if settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, tmpDir) != nil {
 		t.Fatalf("Failed to overwrite VIRT_VNC_SOCKET_DIR for test")
 	}
 	return settings

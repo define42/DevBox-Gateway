@@ -18,10 +18,10 @@ func newBootTestSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir()); err != nil {
+	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-")); err != nil {
 		t.Fatalf("overwrite VIRT_SERIAL_SOCKET_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, t.TempDir()); err != nil {
+	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-")); err != nil {
 		t.Fatalf("overwrite VIRT_VNC_SOCKET_DIR: %v", err)
 	}
 	return settings
@@ -30,7 +30,7 @@ func newBootTestSettings(t *testing.T) *config.SettingsType {
 func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 	t.Helper()
 
-	poolPath := t.TempDir()
+	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
 	poolName := uniquePoolName("boot-lifecycle-pool")
 	baseSettings := config.NewSettingType(false)
 	baseImageURL, baseImagePath, err := baseImageURLAndPath(baseSettings)
@@ -41,6 +41,7 @@ func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 		t.Skipf("skipping boot lifecycle coverage test; base image unavailable at %s: %v", baseImagePath, err)
 	}
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+	usePermissiveLibvirtVolumeMode(t)
 
 	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, filepath.Dir(baseImagePath)); err != nil {
 		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
@@ -217,9 +218,10 @@ func writeStaleSocketPlaceholders(t *testing.T, serialPath, vncPath string) {
 func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
-	poolPath := t.TempDir()
+	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
 	poolName := uniquePoolName("start-remove-pool")
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+	usePermissiveLibvirtVolumeMode(t)
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, poolPath); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
 	}
@@ -380,7 +382,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	settings := newBootTestSettings(t)
 	user := newBootTestUser(t, "missingbase")
-	poolPath := t.TempDir()
+	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
 	poolName := uniquePoolName("missing-base-pool")
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 

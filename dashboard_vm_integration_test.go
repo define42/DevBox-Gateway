@@ -39,10 +39,10 @@ func newDashboardVMSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, t.TempDir()); err != nil {
+	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-")); err != nil {
 		t.Fatalf("overwrite VIRT_SERIAL_SOCKET_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, t.TempDir()); err != nil {
+	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-")); err != nil {
 		t.Fatalf("overwrite VIRT_VNC_SOCKET_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.FRONT_DOMAIN, "dashboard.test"); err != nil {
