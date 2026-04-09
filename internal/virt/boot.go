@@ -177,7 +177,7 @@ func DestroyExistingDomain(conn *libvirt.Connect, vmName string) error {
 
 func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
 	poolName = config.DefaultVirtStoragePoolName
-	poolPath = config.DefaultVirtStoragePoolPath
+	poolPath = config.VirtStoragePoolPath(nil)
 	if settings == nil {
 		return poolName, filepath.Clean(poolPath)
 	}
@@ -186,11 +186,7 @@ func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath
 		poolName = configuredPoolName
 	}
 
-	if configuredPoolPath := strings.TrimSpace(settings.Get(config.VIRT_STORAGE_POOL_PATH)); configuredPoolPath != "" {
-		poolPath = configuredPoolPath
-	} else if imageDir := strings.TrimSpace(settings.Get(config.VDI_IMAGE_DIR)); imageDir != "" {
-		poolPath = imageDir
-	}
+	poolPath = config.VirtStoragePoolPath(settings)
 
 	return poolName, filepath.Clean(poolPath)
 }

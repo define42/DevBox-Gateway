@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
@@ -18,11 +19,11 @@ func newBootTestSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-")); err != nil {
-		t.Fatalf("overwrite VIRT_SERIAL_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-")); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-")); err != nil {
-		t.Fatalf("overwrite VIRT_VNC_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("boot-test-pool")); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
 	return settings
 }
@@ -30,7 +31,7 @@ func newBootTestSettings(t *testing.T) *config.SettingsType {
 func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 	t.Helper()
 
-	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
+	rootDir := newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-")
 	poolName := uniquePoolName("boot-lifecycle-pool")
 	baseSettings := config.NewSettingType(false)
 	baseImageURL, baseImagePath, err := baseImageURLAndPath(baseSettings)
@@ -43,11 +44,8 @@ func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 	usePermissiveLibvirtVolumeMode(t)
 
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, filepath.Dir(baseImagePath)); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, poolPath); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
@@ -55,6 +53,8 @@ func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, baseImageURL); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
 	}
+
+	stageBootBaseImage(t, baseImagePath, filepath.Join(config.ImageDir(settings), filepath.Base(baseImagePath)))
 }
 
 func existingBootBaseImagePath(t *testing.T) string {
@@ -69,6 +69,36 @@ func existingBootBaseImagePath(t *testing.T) string {
 		t.Skipf("skipping boot lifecycle coverage test; base image unavailable at %s: %v", baseImagePath, err)
 	}
 	return baseImagePath
+}
+
+func stageBootBaseImage(t *testing.T, sourcePath, targetPath string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("create staged base image dir: %v", err)
+	}
+	if _, err := os.Stat(targetPath); err == nil {
+		return
+	}
+	if err := os.Link(sourcePath, targetPath); err == nil {
+		return
+	}
+
+	sourceFile, err := os.Open(sourcePath)
+	if err != nil {
+		t.Fatalf("open source base image %s: %v", sourcePath, err)
+	}
+	defer func() { _ = sourceFile.Close() }()
+
+	targetFile, err := os.Create(targetPath)
+	if err != nil {
+		t.Fatalf("create staged base image %s: %v", targetPath, err)
+	}
+	defer func() { _ = targetFile.Close() }()
+
+	if _, err := io.Copy(targetFile, sourceFile); err != nil {
+		t.Fatalf("copy base image into test root: %v", err)
+	}
 }
 
 func newBootTestUser(t *testing.T, prefix string) *types.User {
@@ -207,6 +237,18 @@ func assertListExcludesVM(t *testing.T, vms []VMInfo, vmName string) {
 func writeStaleSocketPlaceholders(t *testing.T, serialPath, vncPath string) {
 	t.Helper()
 
+	if err := os.MkdirAll(filepath.Dir(serialPath), 0o755); err != nil {
+		t.Fatalf("create stale serial socket dir: %v", err)
+	}
+	if err := os.Chmod(filepath.Dir(serialPath), 0o777); err != nil {
+		t.Fatalf("chmod stale serial socket dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(vncPath), 0o755); err != nil {
+		t.Fatalf("create stale vnc socket dir: %v", err)
+	}
+	if err := os.Chmod(filepath.Dir(vncPath), 0o777); err != nil {
+		t.Fatalf("chmod stale vnc socket dir: %v", err)
+	}
 	if err := os.WriteFile(serialPath, []byte("stale"), 0o644); err != nil {
 		t.Fatalf("write stale serial socket placeholder: %v", err)
 	}
@@ -218,16 +260,13 @@ func writeStaleSocketPlaceholders(t *testing.T, serialPath, vncPath string) {
 func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
-	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
 	poolName := uniquePoolName("start-remove-pool")
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 	usePermissiveLibvirtVolumeMode(t)
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, poolPath); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
-	}
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
+	poolPath := config.VirtStoragePoolPath(settings)
 
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
 	if err != nil {
@@ -382,16 +421,9 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	settings := newBootTestSettings(t)
 	user := newBootTestUser(t, "missingbase")
-	poolPath := newLibvirtAccessibleTempDir(t, "rdptlsgateway-pool-")
 	poolName := uniquePoolName("missing-base-pool")
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, poolPath); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, poolPath); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
-	}
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}

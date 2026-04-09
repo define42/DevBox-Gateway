@@ -19,8 +19,8 @@ func TestEnsureBaseImageDownloadsAndReusesExistingFile(t *testing.T) {
 	defer server.Close()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, t.TempDir()); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, server.URL+"/resolute.qcow2"); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
@@ -65,8 +65,8 @@ func TestBaseImageURLAndPathValidationInvalidURL(t *testing.T) {
 
 func TestBaseImageURLAndPathValidationMissingImageName(t *testing.T) {
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, t.TempDir()); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/"); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
@@ -76,24 +76,28 @@ func TestBaseImageURLAndPathValidationMissingImageName(t *testing.T) {
 	}
 }
 
-func TestBaseImageURLAndPathValidationInvalidImageDir(t *testing.T) {
+func TestBaseImageURLAndPathUsesDerivedImageDir(t *testing.T) {
 	settings := config.NewSettingType(false)
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/base.qcow2"); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, "."); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, "/srv/vm-root"); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if _, _, err := baseImageURLAndPath(settings); err == nil {
-		t.Fatal("expected invalid image dir error")
+	_, imagePath, err := baseImageURLAndPath(settings)
+	if err != nil {
+		t.Fatalf("baseImageURLAndPath: %v", err)
+	}
+	if want := filepath.Join("/srv/vm-root", "image", "base.qcow2"); imagePath != want {
+		t.Fatalf("expected image path %q, got %q", want, imagePath)
 	}
 }
 
 func TestBaseImageURLAndPathValidationValidPath(t *testing.T) {
 	settings := config.NewSettingType(false)
-	imageDir := filepath.Join(t.TempDir(), "images")
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, imageDir); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
+	rootDir := filepath.Join(t.TempDir(), "gateway-root")
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/base.qcow2"); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
@@ -102,7 +106,7 @@ func TestBaseImageURLAndPathValidationValidPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("baseImageURLAndPath: %v", err)
 	}
-	if want := filepath.Join(imageDir, "base.qcow2"); imagePath != want {
+	if want := filepath.Join(rootDir, "image", "base.qcow2"); imagePath != want {
 		t.Fatalf("expected image path %q, got %q", want, imagePath)
 	}
 }

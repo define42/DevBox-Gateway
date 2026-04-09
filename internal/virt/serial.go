@@ -43,14 +43,7 @@ type domainSerialDeviceXML struct {
 }
 
 func serialSocketDir(settings *config.SettingsType) string {
-	if settings != nil {
-		if configured := filepath.Clean(strings.TrimSpace(settings.Get(config.VIRT_SERIAL_SOCKET_DIR))); configured != "" && configured != "." {
-			return configured
-		}
-	}
-
-	_, poolPath := storagePoolConfig(settings)
-	return filepath.Join(poolPath, serialSocketSubdir)
+	return config.SerialSocketDir(settings)
 }
 
 func serialSocketPath(settings *config.SettingsType, name string) string {

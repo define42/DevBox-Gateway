@@ -24,9 +24,9 @@ func baseImageURLAndPath(settings *config.SettingsType) (string, string, error) 
 		return "", "", fmt.Errorf("invalid base image URL %q", baseImageURL)
 	}
 
-	imageDir := filepath.Clean(settings.Get(config.VDI_IMAGE_DIR))
+	imageDir := config.ImageDir(settings)
 	if imageDir == "." {
-		return "", "", fmt.Errorf("invalid VDI image directory %q", settings.Get(config.VDI_IMAGE_DIR))
+		return "", "", fmt.Errorf("invalid image directory derived from %q", settings.Get(config.DATA_ROOT_DIR))
 	}
 
 	return baseImageURL, filepath.Join(imageDir, imageName), nil

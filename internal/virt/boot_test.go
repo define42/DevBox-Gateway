@@ -3,8 +3,12 @@ package virt_test
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"rdptlsgateway/internal/config"
 	typesUser "rdptlsgateway/internal/types"
 	"rdptlsgateway/internal/virt"
@@ -16,10 +20,11 @@ import (
 )
 
 const (
-	testVMName   = "test-vm"
-	testUsername = "testuser"
-	testPassword = "dogood"
-	testTimeout  = 30 * time.Second
+	testVMName            = "test-vm"
+	testUsername          = "testuser"
+	testPassword          = "dogood"
+	testTimeout           = 30 * time.Second
+	legacyDefaultImageDir = "/data/desktop"
 )
 
 func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
@@ -144,16 +149,77 @@ func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
 func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
-	tmpDir := newLibvirtAccessibleTempDir(t, "rdptlsgateway-console-")
+	rootDir := newLibvirtAccessibleTempDir(t, "rdptlsgateway-console-root-")
 
 	settings := config.NewSettingType(false)
-	if settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, tmpDir) != nil {
-		t.Fatalf("Failed to overwrite VIRT_SERIAL_SOCKET_DIR for test")
+	if settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir) != nil {
+		t.Fatalf("Failed to overwrite DATA_ROOT_DIR for test")
 	}
-	if settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, tmpDir) != nil {
-		t.Fatalf("Failed to overwrite VIRT_VNC_SOCKET_DIR for test")
+	if settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, "virt-console-test-"+fmt.Sprint(time.Now().UnixNano())) != nil {
+		t.Fatalf("Failed to overwrite VIRT_STORAGE_POOL_NAME for test")
 	}
+	stageExistingBaseImageFromDefaultRoot(t, settings)
 	return settings
+}
+
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) {
+	t.Helper()
+
+	if settings == nil {
+		return
+	}
+	parsedURL, err := url.Parse(settings.Get(config.BASE_IMAGE_URL))
+	if err != nil {
+		return
+	}
+	imageName := path.Base(parsedURL.Path)
+	if imageName == "." || imageName == "/" || imageName == "" {
+		return
+	}
+
+	sourcePath, ok := findExistingBaseImageSourcePath(imageName)
+	if !ok {
+		return
+	}
+	targetPath := filepath.Join(config.ImageDir(settings), imageName)
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("Failed to create image directory %s: %v", filepath.Dir(targetPath), err)
+	}
+	if _, err := os.Stat(targetPath); err == nil {
+		return
+	}
+	if err := os.Link(sourcePath, targetPath); err == nil {
+		return
+	}
+
+	sourceFile, err := os.Open(sourcePath)
+	if err != nil {
+		t.Fatalf("Failed to open source base image %s: %v", sourcePath, err)
+	}
+	defer func() { _ = sourceFile.Close() }()
+
+	targetFile, err := os.Create(targetPath)
+	if err != nil {
+		t.Fatalf("Failed to create staged base image %s: %v", targetPath, err)
+	}
+	defer func() { _ = targetFile.Close() }()
+
+	if _, err := io.Copy(targetFile, sourceFile); err != nil {
+		t.Fatalf("Failed to copy base image into test root: %v", err)
+	}
+}
+
+func findExistingBaseImageSourcePath(imageName string) (string, bool) {
+	candidates := []string{
+		filepath.Join(config.ImageDir(nil), imageName),
+		filepath.Join(legacyDefaultImageDir, imageName),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func waitForRunningVM(t *testing.T, username, vmName string, conn *libvirt.Connect, timeout time.Duration) {

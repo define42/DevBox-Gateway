@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,25 +46,25 @@ type SettingsType struct {
 }
 
 const (
-	// DefaultVDIImageDir is the default directory for VM disk images.
-	DefaultVDIImageDir = "/data/desktop/"
+	// DefaultDataRootDir is the default root directory for gateway-managed data.
+	DefaultDataRootDir = "/data"
 	// DefaultVirtStoragePoolName is the default libvirt storage pool name.
 	DefaultVirtStoragePoolName = "desktop"
-	// DefaultVirtStoragePoolPath is the default libvirt storage pool path.
-	DefaultVirtStoragePoolPath = DefaultVDIImageDir
+)
+
+const (
+	acmeDataSubdir   = "acme"
+	imageDataSubdir  = "image"
+	serialDataSubdir = "serial"
+	vncDataSubdir    = "vnc"
 )
 
 // NewSettingType builds the gateway settings from defaults and environment overrides.
 func NewSettingType(printSettings bool) *SettingsType {
 	s := &SettingsType{m: make(map[string]*Setting)}
 
-	s.SetString(ACME_DATA_DIR, "ACME data directory", "/data/acme/")
-
-	s.SetString(VDI_IMAGE_DIR, "Directory for VDI images", DefaultVDIImageDir)
+	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
-	s.SetString(VIRT_STORAGE_POOL_PATH, "Filesystem path for the libvirt storage pool", DefaultVirtStoragePoolPath)
-	s.SetString(VIRT_SERIAL_SOCKET_DIR, "Filesystem path for VM serial UNIX sockets (defaults to <storage pool path>/serial when empty)", "")
-	s.SetString(VIRT_VNC_SOCKET_DIR, "Filesystem path for VM VNC UNIX sockets (defaults to <storage pool path>/vnc when empty)", "")
 	s.SetString(LDAP_URL, "LDAP server url", "ldaps://ldap:389")
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
@@ -104,6 +105,42 @@ func NewSettingType(printSettings bool) *SettingsType {
 	}
 
 	return s
+}
+
+// DataRootDir resolves the root directory for gateway-managed data.
+func DataRootDir(settings *SettingsType) string {
+	rootDir := DefaultDataRootDir
+	if settings != nil {
+		if configuredRoot := strings.TrimSpace(settings.Get(DATA_ROOT_DIR)); configuredRoot != "" {
+			rootDir = configuredRoot
+		}
+	}
+	return filepath.Clean(rootDir)
+}
+
+// ACMEStorageDir resolves the ACME storage directory below the data root.
+func ACMEStorageDir(settings *SettingsType) string {
+	return filepath.Join(DataRootDir(settings), acmeDataSubdir)
+}
+
+// ImageDir resolves the VM image directory below the data root.
+func ImageDir(settings *SettingsType) string {
+	return filepath.Join(DataRootDir(settings), imageDataSubdir)
+}
+
+// SerialSocketDir resolves the VM serial socket directory below the data root.
+func SerialSocketDir(settings *SettingsType) string {
+	return filepath.Join(DataRootDir(settings), serialDataSubdir)
+}
+
+// VNCSocketDir resolves the VM VNC socket directory below the data root.
+func VNCSocketDir(settings *SettingsType) string {
+	return filepath.Join(DataRootDir(settings), vncDataSubdir)
+}
+
+// VirtStoragePoolPath resolves the libvirt storage pool path below the data root.
+func VirtStoragePoolPath(settings *SettingsType) string {
+	return ImageDir(settings)
 }
 
 // ---- Setters ----
@@ -290,11 +327,11 @@ func (s *SettingsType) GetDuration(id string) time.Duration {
 
 // Environment-backed configuration keys.
 const (
-	ACME_DATA_DIR          = "ACME_DATA_DIR"
 	ACME_EMAIL             = "ACME_EMAIL"
 	ACME_CA                = "ACME_CA"
 	ACME_ENABLE            = "ACME_ENABLE"
 	CERT_FILE              = "CERT_FILE"
+	DATA_ROOT_DIR          = "DATA_ROOT_DIR"
 	FRONT_DOMAIN           = "FRONT_DOMAIN"
 	KEY_FILE               = "KEY_FILE"
 	LDAP_URL               = "LDAP_URL"
@@ -304,11 +341,7 @@ const (
 	LDAP_STARTTLS          = "LDAP_STARTTLS"
 	LDAP_SKIP_TLS_VERIFY   = "LDAP_SKIP_TLS_VERIFY"
 	LISTEN_ADDR            = "LISTEN_ADDR"
-	VDI_IMAGE_DIR          = "VDI_IMAGE_DIR"
 	VIRT_STORAGE_POOL_NAME = "VIRT_STORAGE_POOL_NAME"
-	VIRT_STORAGE_POOL_PATH = "VIRT_STORAGE_POOL_PATH"
-	VIRT_SERIAL_SOCKET_DIR = "VIRT_SERIAL_SOCKET_DIR"
-	VIRT_VNC_SOCKET_DIR    = "VIRT_VNC_SOCKET_DIR"
 	BASE_IMAGE_URL         = "BASE_IMAGE_URL"
 	TIMEOUT                = "TIMEOUT"
 )

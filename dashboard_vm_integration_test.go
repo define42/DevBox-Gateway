@@ -39,15 +39,16 @@ func newDashboardVMSettings(t *testing.T) *config.SettingsType {
 	t.Helper()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-")); err != nil {
-		t.Fatalf("overwrite VIRT_SERIAL_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-")); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-")); err != nil {
-		t.Fatalf("overwrite VIRT_VNC_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, "dashboard-test-"+strconv.FormatInt(time.Now().UnixNano(), 10)); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.FRONT_DOMAIN, "dashboard.test"); err != nil {
 		t.Fatalf("overwrite FRONT_DOMAIN: %v", err)
 	}
+	stageExistingBaseImageFromDefaultRoot(t, settings)
 	return settings
 }
 

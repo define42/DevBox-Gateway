@@ -49,27 +49,24 @@ func TestStoragePoolConfigAndPathHelpers(t *testing.T) {
 	if poolName != config.DefaultVirtStoragePoolName {
 		t.Fatalf("expected default pool name %q, got %q", config.DefaultVirtStoragePoolName, poolName)
 	}
-	if poolPath != filepath.Clean(config.DefaultVirtStoragePoolPath) {
-		t.Fatalf("expected default pool path %q, got %q", filepath.Clean(config.DefaultVirtStoragePoolPath), poolPath)
+	if poolPath != filepath.Clean(config.VirtStoragePoolPath(nil)) {
+		t.Fatalf("expected default pool path %q, got %q", filepath.Clean(config.VirtStoragePoolPath(nil)), poolPath)
 	}
 
 	settings := config.NewSettingType(false)
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, "custom"); err != nil {
 		t.Fatalf("overwrite pool name: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, ""); err != nil {
-		t.Fatalf("overwrite pool path: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, "/tmp/image-dir"); err != nil {
-		t.Fatalf("overwrite image dir: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, "/tmp/gateway-root"); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 
 	poolName, poolPath = storagePoolConfig(settings)
 	if poolName != "custom" {
 		t.Fatalf("expected custom pool name, got %q", poolName)
 	}
-	if poolPath != filepath.Clean("/tmp/image-dir") {
-		t.Fatalf("expected VDI image dir fallback, got %q", poolPath)
+	if poolPath != filepath.Clean("/tmp/gateway-root/image") {
+		t.Fatalf("expected derived image dir path, got %q", poolPath)
 	}
 }
 
@@ -174,14 +171,17 @@ func assertStorageVolXMLPermissions(t *testing.T, permissions *storageVolumePerm
 
 func TestInitVirtWithExistingAndDownloadedBaseImage(t *testing.T) {
 	t.Run("existing image", func(t *testing.T) {
-		poolPath := t.TempDir()
-		settings := newInitVirtSettings(t, poolPath)
+		rootDir := t.TempDir()
+		settings := newInitVirtSettings(t, rootDir)
 		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
 		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
-		existingPath := filepath.Join(poolPath, "existing.img")
+		existingPath := filepath.Join(config.ImageDir(settings), "existing.img")
 		if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/existing.img"); err != nil {
 			t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(existingPath), 0o755); err != nil {
+			t.Fatalf("create image dir: %v", err)
 		}
 		if err := os.WriteFile(existingPath, []byte("present"), 0o644); err != nil {
 			t.Fatalf("write existing base image: %v", err)
@@ -193,8 +193,8 @@ func TestInitVirtWithExistingAndDownloadedBaseImage(t *testing.T) {
 	})
 
 	t.Run("download image", func(t *testing.T) {
-		poolPath := t.TempDir()
-		settings := newInitVirtSettings(t, poolPath)
+		rootDir := t.TempDir()
+		settings := newInitVirtSettings(t, rootDir)
 		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
 		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
@@ -207,7 +207,7 @@ func TestInitVirtWithExistingAndDownloadedBaseImage(t *testing.T) {
 		if err := InitVirt(settings); err != nil {
 			t.Fatalf("InitVirt with download: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(poolPath, "download.img")); err != nil {
+		if _, err := os.Stat(filepath.Join(config.ImageDir(settings), "download.img")); err != nil {
 			t.Fatalf("expected downloaded base image to exist: %v", err)
 		}
 	})

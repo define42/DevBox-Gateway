@@ -159,7 +159,7 @@ func configureACMEDefaults(settings *config.SettingsType) {
 	if ca := settings.Get(config.ACME_CA); ca != "" {
 		certmagic.DefaultACME.CA = resolveACMECA(ca)
 	}
-	if storage := settings.Get(config.ACME_DATA_DIR); storage != "" {
+	if storage := config.ACMEStorageDir(settings); storage != "" {
 		certmagic.Default.Storage = &certmagic.FileStorage{Path: storage}
 	}
 }

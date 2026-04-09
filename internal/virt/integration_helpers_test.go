@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"rdptlsgateway/internal/config"
 	"testing"
 	"time"
 
 	"libvirt.org/go/libvirt"
 )
+
+const legacyDefaultImageDir = "/data/desktop"
 
 func newTestLibvirtConn(t *testing.T) *libvirt.Connect {
 	t.Helper()
@@ -76,20 +81,53 @@ func usePermissiveLibvirtVolumeMode(t *testing.T) {
 	t.Setenv(volumeModeEnv, "0666")
 }
 
-func newInitVirtSettings(t *testing.T, poolPath string) *config.SettingsType {
+func newInitVirtSettings(t *testing.T, rootDir string) *config.SettingsType {
 	t.Helper()
 
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, poolPath); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, poolPath); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("virt-test-pool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
+	stageExistingBaseImageFromDefaultRoot(t, settings)
 	return settings
+}
+
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) {
+	t.Helper()
+
+	if settings == nil {
+		return
+	}
+	parsedURL, err := url.Parse(settings.Get(config.BASE_IMAGE_URL))
+	if err != nil {
+		return
+	}
+	imageName := path.Base(parsedURL.Path)
+	if imageName == "." || imageName == "/" || imageName == "" {
+		return
+	}
+
+	sourcePath, ok := findExistingBaseImageSourcePath(imageName)
+	if !ok {
+		return
+	}
+	stageBootBaseImage(t, sourcePath, filepath.Join(config.ImageDir(settings), imageName))
+}
+
+func findExistingBaseImageSourcePath(imageName string) (string, bool) {
+	candidates := []string{
+		filepath.Join(config.ImageDir(nil), imageName),
+		filepath.Join(legacyDefaultImageDir, imageName),
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func newImageServer(t *testing.T, payload []byte, status int) *httptest.Server {

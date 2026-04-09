@@ -44,14 +44,7 @@ type domainGraphicsDeviceXML struct {
 }
 
 func vncSocketDir(settings *config.SettingsType) string {
-	if settings != nil {
-		if configured := filepath.Clean(strings.TrimSpace(settings.Get(config.VIRT_VNC_SOCKET_DIR))); configured != "" && configured != "." {
-			return configured
-		}
-	}
-
-	_, poolPath := storagePoolConfig(settings)
-	return filepath.Join(poolPath, vncSocketSubdir)
+	return config.VNCSocketDir(settings)
 }
 
 func vncSocketPath(settings *config.SettingsType, name string) string {

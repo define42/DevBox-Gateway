@@ -52,9 +52,9 @@ func TestSeedISOCreate(t *testing.T) {
 
 func TestCreateUbuntuSeedISOToPool(t *testing.T) {
 	conn := newTestLibvirtConn(t)
-	poolPath := t.TempDir()
-	settings := newInitVirtSettings(t, poolPath)
-	poolName, _ := storagePoolConfig(settings)
+	rootDir := t.TempDir()
+	settings := newInitVirtSettings(t, rootDir)
+	poolName, poolPath := storagePoolConfig(settings)
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
@@ -113,12 +113,13 @@ func waitForDomainActiveState(t *testing.T, name string, want bool, timeout time
 
 func TestPowerLifecycleAndResourceGuards(t *testing.T) {
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-")); err != nil {
-		t.Fatalf("overwrite VIRT_SERIAL_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-")); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-")); err != nil {
-		t.Fatalf("overwrite VIRT_VNC_SOCKET_DIR: %v", err)
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("power-test-pool")); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
+	stageExistingBaseImageFromDefaultRoot(t, settings)
 
 	user, err := types.NewUser("poweruser"+time.Now().Format("150405"), "dogood")
 	if err != nil {
@@ -185,18 +186,15 @@ func TestEnsureStoragePoolRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
-func TestStoragePoolConfigUsesImageDirFallback(t *testing.T) {
+func TestStoragePoolConfigUsesDerivedImageDir(t *testing.T) {
 	settings := config.NewSettingType(false)
-	imageDir := filepath.Join(t.TempDir(), "images")
-	if err := settings.OverwriteForTestString(config.VDI_IMAGE_DIR, imageDir); err != nil {
-		t.Fatalf("overwrite VDI_IMAGE_DIR: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_PATH, ""); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_PATH: %v", err)
+	rootDir := filepath.Join(t.TempDir(), "gateway-root")
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
+		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
 
 	_, gotPath := storagePoolConfig(settings)
-	if gotPath != filepath.Clean(imageDir) {
-		t.Fatalf("expected image dir fallback %q, got %q", filepath.Clean(imageDir), gotPath)
+	if gotPath != filepath.Clean(filepath.Join(rootDir, "image")) {
+		t.Fatalf("expected derived image dir %q, got %q", filepath.Clean(filepath.Join(rootDir, "image")), gotPath)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -8,6 +9,9 @@ import (
 func TestNewSettingTypeDefaults(t *testing.T) {
 	s := NewSettingType(false)
 
+	if got := s.GetString(DATA_ROOT_DIR); got != DefaultDataRootDir {
+		t.Fatalf("expected default DATA_ROOT_DIR %q, got %q", DefaultDataRootDir, got)
+	}
 	if got := s.GetString(LDAP_URL); got != "ldaps://ldap:389" {
 		t.Fatalf("expected default LDAP_URL, got %q", got)
 	}
@@ -19,6 +23,78 @@ func TestNewSettingTypeDefaults(t *testing.T) {
 	}
 	if got := s.GetDuration(TIMEOUT); got != 10*time.Second {
 		t.Fatalf("expected default TIMEOUT=10s, got %v", got)
+	}
+}
+
+func TestDerivedDataPathsDefault(t *testing.T) {
+	s := NewSettingType(false)
+
+	if got := DataRootDir(s); got != filepath.Clean(DefaultDataRootDir) {
+		t.Fatalf("expected data root %q, got %q", filepath.Clean(DefaultDataRootDir), got)
+	}
+	if got := ACMEStorageDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "acme") {
+		t.Fatalf("expected ACME storage dir under default root, got %q", got)
+	}
+	if got := ImageDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "image") {
+		t.Fatalf("expected image dir under default root, got %q", got)
+	}
+	if got := SerialSocketDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "serial") {
+		t.Fatalf("expected serial dir under default root, got %q", got)
+	}
+	if got := VNCSocketDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "vnc") {
+		t.Fatalf("expected VNC dir under default root, got %q", got)
+	}
+	if got := VirtStoragePoolPath(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "image") {
+		t.Fatalf("expected storage pool path under default root, got %q", got)
+	}
+}
+
+func TestDerivedDataPathsCustomRoot(t *testing.T) {
+	t.Setenv(DATA_ROOT_DIR, " /srv/gateway/../gateway-data/ ")
+
+	s := NewSettingType(false)
+	root := filepath.Clean("/srv/gateway-data")
+
+	if got := DataRootDir(s); got != root {
+		t.Fatalf("expected cleaned data root %q, got %q", root, got)
+	}
+	if got := ACMEStorageDir(s); got != filepath.Join(root, "acme") {
+		t.Fatalf("expected ACME storage dir %q, got %q", filepath.Join(root, "acme"), got)
+	}
+	if got := ImageDir(s); got != filepath.Join(root, "image") {
+		t.Fatalf("expected image dir %q, got %q", filepath.Join(root, "image"), got)
+	}
+	if got := SerialSocketDir(s); got != filepath.Join(root, "serial") {
+		t.Fatalf("expected serial dir %q, got %q", filepath.Join(root, "serial"), got)
+	}
+	if got := VNCSocketDir(s); got != filepath.Join(root, "vnc") {
+		t.Fatalf("expected VNC dir %q, got %q", filepath.Join(root, "vnc"), got)
+	}
+	if got := VirtStoragePoolPath(s); got != filepath.Join(root, "image") {
+		t.Fatalf("expected storage pool path %q, got %q", filepath.Join(root, "image"), got)
+	}
+}
+
+func TestDerivedDataPathsNilSettings(t *testing.T) {
+	root := filepath.Clean(DefaultDataRootDir)
+
+	if got := DataRootDir(nil); got != root {
+		t.Fatalf("expected nil-settings root %q, got %q", root, got)
+	}
+	if got := ACMEStorageDir(nil); got != filepath.Join(root, "acme") {
+		t.Fatalf("expected nil-settings ACME dir %q, got %q", filepath.Join(root, "acme"), got)
+	}
+	if got := ImageDir(nil); got != filepath.Join(root, "image") {
+		t.Fatalf("expected nil-settings image dir %q, got %q", filepath.Join(root, "image"), got)
+	}
+	if got := SerialSocketDir(nil); got != filepath.Join(root, "serial") {
+		t.Fatalf("expected nil-settings serial dir %q, got %q", filepath.Join(root, "serial"), got)
+	}
+	if got := VNCSocketDir(nil); got != filepath.Join(root, "vnc") {
+		t.Fatalf("expected nil-settings VNC dir %q, got %q", filepath.Join(root, "vnc"), got)
+	}
+	if got := VirtStoragePoolPath(nil); got != filepath.Join(root, "image") {
+		t.Fatalf("expected nil-settings storage pool path %q, got %q", filepath.Join(root, "image"), got)
 	}
 }
 

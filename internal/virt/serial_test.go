@@ -21,25 +21,12 @@ func TestUbuntuDomainWithSerialSocketIncludesUnixSerial(t *testing.T) {
 	}
 }
 
-func TestSerialSocketDirDefaultsToStoragePoolPath(t *testing.T) {
-	t.Setenv(config.VIRT_STORAGE_POOL_PATH, "/srv/libvirt/devboxes")
-	t.Setenv(config.VIRT_SERIAL_SOCKET_DIR, "")
+func TestSerialSocketDirUsesDerivedDataRoot(t *testing.T) {
+	t.Setenv(config.DATA_ROOT_DIR, "/srv/libvirt/devboxes")
 
 	settings := config.NewSettingType(false)
 	got := serialSocketDir(settings)
 	want := filepath.Join("/srv/libvirt/devboxes", serialSocketSubdir)
-	if got != want {
-		t.Fatalf("expected serial socket dir %q, got %q", want, got)
-	}
-}
-
-func TestSerialSocketDirUsesExplicitOverride(t *testing.T) {
-	t.Setenv(config.VIRT_STORAGE_POOL_PATH, "/srv/libvirt/devboxes")
-	t.Setenv(config.VIRT_SERIAL_SOCKET_DIR, "/run/devbox-serial")
-
-	settings := config.NewSettingType(false)
-	got := serialSocketDir(settings)
-	want := filepath.Clean("/run/devbox-serial")
 	if got != want {
 		t.Fatalf("expected serial socket dir %q, got %q", want, got)
 	}

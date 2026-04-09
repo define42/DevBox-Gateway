@@ -18,25 +18,12 @@ func TestUbuntuDomainIncludesVNCSocket(t *testing.T) {
 	}
 }
 
-func TestVNCSocketDirDefaultsToStoragePoolPath(t *testing.T) {
-	t.Setenv(config.VIRT_STORAGE_POOL_PATH, "/srv/libvirt/devboxes")
-	t.Setenv(config.VIRT_VNC_SOCKET_DIR, "")
+func TestVNCSocketDirUsesDerivedDataRoot(t *testing.T) {
+	t.Setenv(config.DATA_ROOT_DIR, "/srv/libvirt/devboxes")
 
 	settings := config.NewSettingType(false)
 	got := vncSocketDir(settings)
 	want := filepath.Join("/srv/libvirt/devboxes", vncSocketSubdir)
-	if got != want {
-		t.Fatalf("expected VNC socket dir %q, got %q", want, got)
-	}
-}
-
-func TestVNCSocketDirUsesExplicitOverride(t *testing.T) {
-	t.Setenv(config.VIRT_STORAGE_POOL_PATH, "/srv/libvirt/devboxes")
-	t.Setenv(config.VIRT_VNC_SOCKET_DIR, "/run/devbox-vnc")
-
-	settings := config.NewSettingType(false)
-	got := vncSocketDir(settings)
-	want := filepath.Clean("/run/devbox-vnc")
 	if got != want {
 		t.Fatalf("expected VNC socket dir %q, got %q", want, got)
 	}

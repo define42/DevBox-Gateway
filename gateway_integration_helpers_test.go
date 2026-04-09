@@ -19,10 +19,12 @@ func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Setting
 	t.Setenv(config.LDAP_STARTTLS, "false")
 	t.Setenv(config.LDAP_USER_DOMAIN, "@example.com")
 	t.Setenv(config.FRONT_DOMAIN, "gateway.test")
-	t.Setenv(config.VIRT_SERIAL_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-serial-"))
-	t.Setenv(config.VIRT_VNC_SOCKET_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-vnc-"))
+	t.Setenv(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-"))
+	t.Setenv(config.VIRT_STORAGE_POOL_NAME, "gateway-test-"+uniqueGatewayVMShortName("pool"))
 
-	return config.NewSettingType(false)
+	settings := config.NewSettingType(false)
+	stageExistingBaseImageFromDefaultRoot(t, settings)
+	return settings
 }
 
 func assertGatewayStatus(t *testing.T, client *http.Client, method, rawURL string, form url.Values, wantStatus int) string {
