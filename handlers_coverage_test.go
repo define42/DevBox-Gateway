@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,8 +17,9 @@ func TestExtractCredentialsFromForm(t *testing.T) {
 	form := url.Values{"username": {"alice"}, "password": {"secret"}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
 
-	u, p, ok, err := extractCredentials(req)
+	u, p, ok, err := extractCredentials(rec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,8 +34,9 @@ func TestExtractCredentialsFromForm(t *testing.T) {
 func TestExtractCredentialsFromBasicAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.SetBasicAuth("bob", "pass123")
+	rec := httptest.NewRecorder()
 
-	u, p, ok, err := extractCredentials(req)
+	u, p, ok, err := extractCredentials(rec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,8 +52,9 @@ func TestExtractCredentialsMissing(t *testing.T) {
 	form := url.Values{"username": {""}, "password": {""}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
 
-	_, _, ok, err := extractCredentials(req)
+	_, _, ok, err := extractCredentials(rec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,13 +67,29 @@ func TestExtractCredentialsPartialMissing(t *testing.T) {
 	form := url.Values{"username": {"alice"}, "password": {""}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
 
-	_, _, ok, err := extractCredentials(req)
+	_, _, ok, err := extractCredentials(rec, req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if ok {
 		t.Fatal("expected ok=false when password is empty")
+	}
+}
+
+func TestExtractCredentialsRejectsOversizedForm(t *testing.T) {
+	body := "username=" + strings.Repeat("a", maxFormBodyBytes) + "&password=secret"
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	_, _, ok, err := extractCredentials(rec, req)
+	if err == nil {
+		t.Fatal("expected parse error for oversized form body")
+	}
+	if ok {
+		t.Fatal("expected ok=false for oversized form body")
 	}
 }
 
@@ -278,8 +298,9 @@ func TestParseDashboardVMName(t *testing.T) {
 			form := url.Values{"vm_name": {tc.vmName}}
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
 
-			_, err := parseDashboardVMName(req)
+			_, err := parseDashboardVMName(rec, req)
 			if tc.wantErr && err == nil {
 				t.Fatal("expected error")
 			}
@@ -287,6 +308,18 @@ func TestParseDashboardVMName(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestParseDashboardVMNameRejectsOversizedForm(t *testing.T) {
+	body := "vm_name=" + strings.Repeat("a", maxFormBodyBytes)
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+
+	_, err := parseDashboardVMName(rec, req)
+	if !errors.Is(err, errInvalidDashboardForm) {
+		t.Fatalf("expected invalid dashboard form error, got %v", err)
 	}
 }
 
@@ -550,6 +583,32 @@ func TestDashboardPostInvalidMemory(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardPostRejectsOversizedForm(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	body := "vm_name=" + strings.Repeat("a", maxFormBodyBytes) + "&vm_vcpu=2&vm_memory_mib=4096"
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp dashboard.ActionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "Invalid form submission." {
+		t.Fatalf("expected invalid form submission error, got %q", resp.Error)
 	}
 }
 

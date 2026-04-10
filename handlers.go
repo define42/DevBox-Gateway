@@ -27,14 +27,23 @@ const (
 	pragmaValue       = "no-cache"
 	expiresValue      = "0"
 	rdpFilename       = "rdpgw.rdp"
+	maxFormBodyBytes  = 1 << 20
 )
 
-func extractCredentials(r *http.Request) (string, string, bool, error) {
+func parseFormWithBodyLimit(w http.ResponseWriter, req *http.Request) error {
+	if req.Form != nil {
+		return nil
+	}
+	req.Body = http.MaxBytesReader(w, req.Body, maxFormBodyBytes)
+	return req.ParseForm()
+}
+
+func extractCredentials(w http.ResponseWriter, r *http.Request) (string, string, bool, error) {
 	username, password, ok := r.BasicAuth()
 	if ok && username != "" && password != "" {
 		return username, password, true, nil
 	}
-	if err := r.ParseForm(); err != nil {
+	if err := parseFormWithBodyLimit(w, r); err != nil {
 		return "", "", false, err
 	}
 	username = strings.TrimSpace(r.FormValue("username"))
@@ -47,7 +56,7 @@ func extractCredentials(r *http.Request) (string, string, bool, error) {
 
 func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		username, password, ok, err := extractCredentials(r)
+		username, password, ok, err := extractCredentials(w, r)
 		if err != nil {
 			serveLogin(w, "Invalid form submission.")
 			return
@@ -217,7 +226,7 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
 	registerHiddenPost(group, "/dashboard", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		if err := req.ParseForm(); err != nil {
+		if err := parseFormWithBodyLimit(w, req); err != nil {
 			log.Printf("dashboard form parse failed: %v", err)
 			dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
 				OK:    false,
@@ -337,7 +346,7 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 		return "", false
 	}
 
-	name, err := parseDashboardVMName(req)
+	name, err := parseDashboardVMName(w, req)
 	if handleDashboardFormError(w, dashboardAction, err) {
 		return "", false
 	}
@@ -396,8 +405,8 @@ func validateVMName(name string) (string, error) {
 	return name, nil
 }
 
-func parseDashboardVMName(req *http.Request) (string, error) {
-	if err := req.ParseForm(); err != nil {
+func parseDashboardVMName(w http.ResponseWriter, req *http.Request) (string, error) {
+	if err := parseFormWithBodyLimit(w, req); err != nil {
 		return "", fmt.Errorf("%w: %w", errInvalidDashboardForm, err)
 	}
 	name := strings.TrimSpace(req.FormValue("vm_name"))
