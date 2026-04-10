@@ -15,7 +15,9 @@ import (
 	"net"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/virt"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caddyserver/certmagic"
@@ -27,6 +29,7 @@ type TLSManager struct {
 	magic     *certmagic.Config
 	settings  *config.SettingsType
 	tlsConfig *tls.Config
+	domainsMu sync.RWMutex
 	domains   []string
 }
 
@@ -57,15 +60,27 @@ func (tm *TLSManager) updateDomains() {
 		domains = append(domains, name+"."+frontPageDomain)
 	}
 
-	if sameElements(tm.domains, domains) {
+	if sameElements(tm.managedDomains(), domains) {
 		return
 	}
 	if err := tm.magic.ManageSync(context.Background(), domains); err != nil {
 		log.Printf("acme: error updating managed domains: %v", err)
 		return
 	}
-	tm.domains = domains
-	log.Printf("acme: updated managed domains: %s", strings.Join(tm.domains, ", "))
+	tm.setManagedDomains(domains)
+	log.Printf("acme: updated managed domains: %s", strings.Join(domains, ", "))
+}
+
+func (tm *TLSManager) managedDomains() []string {
+	tm.domainsMu.RLock()
+	defer tm.domainsMu.RUnlock()
+	return slices.Clone(tm.domains)
+}
+
+func (tm *TLSManager) setManagedDomains(domains []string) {
+	tm.domainsMu.Lock()
+	defer tm.domainsMu.Unlock()
+	tm.domains = slices.Clone(domains)
 }
 
 // NewTLSManager builds the frontend TLS manager from the active settings.
@@ -140,6 +155,7 @@ func newACMETLSManager(settings *config.SettingsType, fallback tls.Certificate) 
 		tlsConfig: newManagedTLSConfig(magic, fallback),
 		settings:  settings,
 	}
+	tm.setManagedDomains(domains)
 	go tm.worker()
 
 	return tm, nil

@@ -239,7 +239,21 @@ func TestUpdateDomainsNoChange(t *testing.T) {
 	}
 	manager.updateDomains()
 
-	if len(manager.domains) != 1 || manager.domains[0] != "example.test" {
-		t.Fatalf("expected domains to remain unchanged, got %v", manager.domains)
+	got := manager.managedDomains()
+	if len(got) != 1 || got[0] != "example.test" {
+		t.Fatalf("expected domains to remain unchanged, got %v", got)
+	}
+}
+
+func TestManagedDomainsReturnsClone(t *testing.T) {
+	manager := &TLSManager{}
+	manager.setManagedDomains([]string{"example.test"})
+
+	got := manager.managedDomains()
+	got[0] = "mutated.test"
+
+	stored := manager.managedDomains()
+	if len(stored) != 1 || stored[0] != "example.test" {
+		t.Fatalf("expected managed domains to be isolated from caller mutation, got %v", stored)
 	}
 }
