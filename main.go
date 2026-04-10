@@ -43,12 +43,18 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	gateway, err := bootGateway()
 	if err != nil {
-		log.Fatalf("Failed to boot gateway: %v", err)
+		// If booting the gateway fails, we can't do much about it, so log and exit.
+		log.Printf("Failed to boot gateway: %v", err)
+		return 1
 	}
 	defer func() {
 		if err := gateway.Close(); err != nil {
@@ -57,6 +63,8 @@ func main() {
 	}()
 
 	<-ctx.Done()
+
+	return 0
 }
 
 type gatewayRuntime struct {
