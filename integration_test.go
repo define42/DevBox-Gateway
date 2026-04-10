@@ -24,9 +24,15 @@ func TestIntegrationLogin(t *testing.T) {
 	t.Setenv("LDAP_USER_DOMAIN", "@example.com")
 	t.Setenv("LISTEN_ADDR", ":8443")
 
-	if err := bootGateway(); err != nil {
+	gateway, err := bootGateway()
+	if err != nil {
 		t.Fatalf("Failed to boot gateway: %v", err)
 	}
+	defer func() {
+		if err := gateway.Close(); err != nil {
+			t.Fatalf("close gateway: %v", err)
+		}
+	}()
 
 	baseURL := "https://127.0.0.1:8443"
 

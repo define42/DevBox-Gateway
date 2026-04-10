@@ -107,6 +107,11 @@ func TestServeListenerReturnsWhenClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -137,6 +142,11 @@ func TestServeListenerRetriesTimeoutAccept(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -176,6 +186,11 @@ func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -207,6 +222,11 @@ func TestHandleSharedConnPeekFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 
 	client, server := net.Pipe()
 
@@ -233,7 +253,7 @@ func TestBootGatewayErrors(t *testing.T) {
 		t.Setenv(config.LISTEN_ADDR, "bad::addr")
 		t.Setenv(config.CERT_FILE, "")
 		t.Setenv(config.KEY_FILE, "")
-		if err := bootGateway(); err == nil {
+		if _, err := bootGateway(); err == nil {
 			t.Fatal("expected bootGateway to fail for invalid listen address")
 		}
 	})
@@ -243,7 +263,7 @@ func TestBootGatewayErrors(t *testing.T) {
 		t.Setenv(config.CERT_FILE, "")
 		t.Setenv(config.KEY_FILE, "")
 		t.Setenv(config.BASE_IMAGE_URL, "://bad-url")
-		if err := bootGateway(); err == nil {
+		if _, err := bootGateway(); err == nil {
 			t.Fatal("expected bootGateway to fail for invalid base image url")
 		}
 	})

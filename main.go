@@ -22,6 +22,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/rdp"
@@ -36,19 +38,60 @@ import (
 	"rdptlsgateway/internal/virt"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 func main() {
-	if err := bootGateway(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	gateway, err := bootGateway()
+	if err != nil {
 		log.Fatalf("Failed to boot gateway: %v", err)
 	}
+	defer func() {
+		if err := gateway.Close(); err != nil {
+			log.Printf("gateway shutdown: %v", err)
+		}
+	}()
 
-	// run forever
-	select {}
+	<-ctx.Done()
 }
 
-func bootGateway() error {
+type gatewayRuntime struct {
+	listener net.Listener
+	frontTLS *cert.TLSManager
+	done     <-chan struct{}
+}
+
+func (g *gatewayRuntime) Close() error {
+	var errs []error
+
+	if g.listener != nil {
+		if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, err)
+		}
+	}
+
+	if g.done != nil {
+		select {
+		case <-g.done:
+		case <-time.After(5 * time.Second):
+			errs = append(errs, fmt.Errorf("gateway listener did not stop in time"))
+		}
+	}
+
+	if g.frontTLS != nil {
+		if err := g.frontTLS.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+func bootGateway() (*gatewayRuntime, error) {
 	virt.GetInstance()
 
 	rdp.InitLogging()
@@ -56,25 +99,34 @@ func bootGateway() error {
 	settings := config.NewSettingType(true)
 
 	if err := virt.InitVirt(settings); err != nil {
-		return fmt.Errorf("failed to initialize virtualization: %w", err)
+		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
 	}
 
 	mux := getRemoteGatewayRotuer(sessionManager, settings)
 
 	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
-		return fmt.Errorf("tls setup: %w", err)
+		return nil, fmt.Errorf("tls setup: %w", err)
 	}
 
 	listen := settings.Get(config.LISTEN_ADDR)
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
-		return fmt.Errorf("listen on %s: %w", listen, err)
+		_ = frontTLS.Close()
+		return nil, fmt.Errorf("listen on %s: %w", listen, err)
 	}
 	log.Printf("listening on %s", listen)
 
-	go serveListener(ln, mux, frontTLS, sessionManager, settings)
-	return nil
+	done := make(chan struct{})
+	go func() {
+		serveListener(ln, mux, frontTLS, sessionManager, settings)
+		close(done)
+	}()
+	return &gatewayRuntime{
+		listener: ln,
+		frontTLS: frontTLS,
+		done:     done,
+	}, nil
 }
 
 func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {

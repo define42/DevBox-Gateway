@@ -1,6 +1,7 @@
 package cert
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"rdptlsgateway/internal/config"
 	"testing"
+	"time"
 
 	"github.com/mholt/acmez"
 )
@@ -255,5 +257,22 @@ func TestManagedDomainsReturnsClone(t *testing.T) {
 	stored := manager.managedDomains()
 	if len(stored) != 1 || stored[0] != "example.test" {
 		t.Fatalf("expected managed domains to be isolated from caller mutation, got %v", stored)
+	}
+}
+
+func TestTLSManagerCloseStopsWorker(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	manager := &TLSManager{
+		cancel:     cancel,
+		workerDone: make(chan struct{}),
+	}
+
+	go manager.worker(ctx, time.NewTicker(time.Hour))
+
+	if err := manager.Close(); err != nil {
+		t.Fatalf("close worker: %v", err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatalf("close worker a second time: %v", err)
 	}
 }

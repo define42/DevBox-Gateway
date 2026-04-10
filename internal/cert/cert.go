@@ -26,11 +26,15 @@ import (
 
 // TLSManager owns the frontend TLS configuration and ACME domain updates.
 type TLSManager struct {
-	magic     *certmagic.Config
-	settings  *config.SettingsType
-	tlsConfig *tls.Config
-	domainsMu sync.RWMutex
-	domains   []string
+	magic      *certmagic.Config
+	settings   *config.SettingsType
+	tlsConfig  *tls.Config
+	domainsMu  sync.RWMutex
+	domains    []string
+	workerMu   sync.Mutex
+	cancel     context.CancelFunc
+	workerDone chan struct{}
+	stopOnce   sync.Once
 }
 
 // GetTLSConfig returns the tls.Config used for incoming frontend connections.
@@ -38,15 +42,36 @@ func (tm *TLSManager) GetTLSConfig() *tls.Config {
 	return tm.tlsConfig
 }
 
-func (tm *TLSManager) worker() {
-	ticker := time.NewTicker(5 * time.Second)
+func (tm *TLSManager) worker(ctx context.Context, ticker *time.Ticker) {
 	defer ticker.Stop()
+	defer close(tm.workerDone)
 
 	for {
-		for range ticker.C {
+		select {
+		case <-ticker.C:
 			tm.updateDomains()
+		case <-ctx.Done():
+			return
 		}
 	}
+}
+
+// Close stops the background ACME domain worker, if one is running.
+func (tm *TLSManager) Close() error {
+	tm.workerMu.Lock()
+	cancel := tm.cancel
+	done := tm.workerDone
+	tm.workerMu.Unlock()
+
+	if cancel == nil {
+		return nil
+	}
+
+	tm.stopOnce.Do(func() {
+		cancel()
+		<-done
+	})
+	return nil
 }
 
 func (tm *TLSManager) updateDomains() {
@@ -156,7 +181,10 @@ func newACMETLSManager(settings *config.SettingsType, fallback tls.Certificate) 
 		settings:  settings,
 	}
 	tm.setManagedDomains(domains)
-	go tm.worker()
+	ctx, cancel := context.WithCancel(context.Background())
+	tm.cancel = cancel
+	tm.workerDone = make(chan struct{})
+	go tm.worker(ctx, time.NewTicker(5*time.Second))
 
 	return tm, nil
 }

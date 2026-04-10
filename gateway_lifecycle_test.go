@@ -76,6 +76,9 @@ func startGatewayTestServer(t *testing.T, settings *config.SettingsType) gateway
 		case <-time.After(5 * time.Second):
 			t.Fatalf("gateway test server did not stop in time")
 		}
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
 	}
 	t.Cleanup(cleanup)
 

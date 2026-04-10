@@ -64,6 +64,11 @@ func TestHandleRDPRejectsSNIMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 
 	client, server := net.Pipe()
 	defer func() {

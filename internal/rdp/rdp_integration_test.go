@@ -290,6 +290,11 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := frontTLS.Close(); err != nil {
+			t.Fatalf("close TLS manager: %v", err)
+		}
+	})
 	return frontTLS, settings
 }
 
