@@ -136,10 +136,22 @@ func TestFindServerSelectedProtocol(t *testing.T) {
 	}
 }
 
-func TestFindX224NegotiationTooShort(t *testing.T) {
-	_, ok := findX224Negotiation([]byte{1, 2, 3}, x224.TYPE_RDP_NEG_REQ)
-	if ok {
-		t.Fatal("expected ok=false for too-short payload")
+func TestFindX224NegotiationShortPayload(t *testing.T) {
+	// Less than TPKT(4) + X.224 header(7) bytes total
+	if _, ok := findX224Negotiation(make([]byte, 5), x224.TYPE_RDP_NEG_REQ); ok {
+		t.Fatal("expected ok=false for short payload")
+	}
+}
+
+func TestFindX224NegotiationWrongLength(t *testing.T) {
+	// Construct a TPKT+X.224 payload where the negotiation block has the wrong length.
+	payload := make([]byte, 4+7+8) // TPKT + X.224 + neg
+	payload[4+7] = byte(x224.TYPE_RDP_NEG_REQ)
+	// Set wrong length (must be 8 to be accepted).
+	payload[4+7+2] = 0x10
+	payload[4+7+3] = 0x00
+	if _, ok := findX224Negotiation(payload, x224.TYPE_RDP_NEG_REQ); ok {
+		t.Fatal("expected ok=false when negotiation length is not 8")
 	}
 }
 
