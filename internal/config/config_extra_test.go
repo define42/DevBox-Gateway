@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -58,12 +59,5 @@ func TestKindToStringUnknown(t *testing.T) {
 
 // asTypeMismatch is a small helper to avoid importing errors here just for one call.
 func asTypeMismatch(err error, target **SettingTypeMismatchError) bool {
-	if err == nil {
-		return false
-	}
-	if e, ok := err.(*SettingTypeMismatchError); ok {
-		*target = e
-		return true
-	}
-	return false
+	return errors.As(err, target)
 }

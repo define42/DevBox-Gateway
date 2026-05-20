@@ -41,7 +41,7 @@ func TestAppendDomainInterfaceIPsFlattensAddresses(t *testing.T) {
 		Addrs: []libvirt.DomainIPAddress{
 			{Addr: "10.0.0.1"},
 			{Addr: "10.0.0.2"},
-			{Addr: ""}, // skipped
+			{Addr: ""},         // skipped
 			{Addr: "10.0.0.1"}, // duplicate, skipped
 		},
 	}
