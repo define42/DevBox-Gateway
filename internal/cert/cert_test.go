@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"
 )
 
@@ -257,6 +258,56 @@ func TestManagedDomainsReturnsClone(t *testing.T) {
 	stored := manager.managedDomains()
 	if len(stored) != 1 || stored[0] != "example.test" {
 		t.Fatalf("expected managed domains to be isolated from caller mutation, got %v", stored)
+	}
+}
+
+func TestNewManagedTLSConfigWraps(t *testing.T) {
+	fallback, err := generateSelfSignedCert()
+	if err != nil {
+		t.Fatalf("generate fallback cert: %v", err)
+	}
+	magic := certmagic.NewDefault()
+	cfg := newManagedTLSConfig(magic, fallback)
+	if cfg == nil {
+		t.Fatal("expected non-nil tls config")
+	}
+	if cfg.MinVersion != tls.VersionTLS10 {
+		t.Fatalf("expected MinVersion TLS1.0, got 0x%04x", cfg.MinVersion)
+	}
+	if cfg.GetCertificate == nil {
+		t.Fatal("expected GetCertificate to be set")
+	}
+	// HTTP/1.1 should be advertised first so non-ACME clients can negotiate the gateway.
+	if len(cfg.NextProtos) == 0 || cfg.NextProtos[0] != "http/1.1" {
+		t.Fatalf("expected http/1.1 as first NextProto, got %v", cfg.NextProtos)
+	}
+	if len(cfg.CipherSuites) == 0 {
+		t.Fatal("expected cipher suites to be populated")
+	}
+
+	// GetCertificate should return the fallback cert for nil/empty hello.
+	cert, err := cfg.GetCertificate(nil)
+	if err != nil {
+		t.Fatalf("get certificate: %v", err)
+	}
+	if cert == nil || len(cert.Certificate) == 0 {
+		t.Fatal("expected fallback certificate for nil hello")
+	}
+}
+
+func TestInitialManagedDomainsEmpty(t *testing.T) {
+	if _, err := initialManagedDomains(""); err == nil {
+		t.Fatal("expected error when no front-page domain is provided")
+	}
+}
+
+func TestInitialManagedDomainsWithDomain(t *testing.T) {
+	got, err := initialManagedDomains("example.test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "example.test" {
+		t.Fatalf("expected [\"example.test\"], got %v", got)
 	}
 }
 
