@@ -84,8 +84,51 @@ func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.
 
 	_ = clientConn.tlsConn.SetDeadline(time.Time{})
 	_ = backendTLS.SetDeadline(time.Time{})
+
+	if filter := newChannelFilter(settings); filter.enabled() {
+		if !forwardClientMCSConnectInitial(clientConn.tlsConn, backendTLS, filter, settings) {
+			_ = clientConn.tlsConn.Close()
+			_ = backendTLS.Close()
+			return
+		}
+	}
+
 	log.Printf("rdp debug: starting bidirectional proxy")
 	proxyBidirectional(clientConn.tlsConn, backendTLS)
+}
+
+// forwardClientMCSConnectInitial reads exactly one TPKT PDU from the client
+// (expected to be the MCS Connect Initial that follows the front-side TLS
+// handshake), applies the channel filter to its CS_NET block in place, and
+// forwards it to the backend. It returns false on a transport error so the
+// caller can tear the connection down.
+func forwardClientMCSConnectInitial(client, backend net.Conn, filter channelFilter, settings *config.SettingsType) bool {
+	timeout := settings.GetDuration(config.TIMEOUT)
+	if timeout > 0 {
+		_ = client.SetReadDeadline(time.Now().Add(timeout))
+		_ = backend.SetWriteDeadline(time.Now().Add(timeout))
+	}
+
+	buf, err := readTPKT(client)
+	if err != nil {
+		log.Printf("rdp channel filter: read MCS Connect Initial: %v", err)
+		return false
+	}
+
+	if rewritten := filter.rewriteMCSConnectInitial(buf); len(rewritten) > 0 {
+		log.Printf("rdp channel filter: stripped channels %v", rewritten)
+	} else {
+		log.Printf("rdp channel filter: no CS_NET block found, forwarding unchanged")
+	}
+
+	if _, err := backend.Write(buf); err != nil {
+		log.Printf("rdp channel filter: forward MCS Connect Initial: %v", err)
+		return false
+	}
+
+	_ = client.SetReadDeadline(time.Time{})
+	_ = backend.SetWriteDeadline(time.Time{})
+	return true
 }
 
 func proxyBidirectional(a, b net.Conn) {

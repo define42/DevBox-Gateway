@@ -87,6 +87,9 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetString(ACME_CA, "ACME CA directory URL or 'staging'", "")
 	s.SetString(FRONT_DOMAIN, "Front domain to serve front page on HTTPS requests and also the prefix for vm names", "desktop.local.gd")
 
+	s.SetBool(RDP_DISABLE_CLIPBOARD, "Strip clipboard (cliprdr) channel from RDP sessions so the gateway prevents clipboard redirection regardless of client/VM policy", false)
+	s.SetBool(RDP_DISABLE_DRIVES, "Strip drive redirection (rdpdr) channel from RDP sessions so the gateway prevents local drive mapping regardless of client/VM policy", false)
+
 	if printSettings {
 		table := tablewriter.NewWriter(os.Stdout)
 		table.Header("KEY", "Description", "Value")
@@ -341,6 +344,8 @@ const (
 	LDAP_STARTTLS          = "LDAP_STARTTLS"
 	LDAP_SKIP_TLS_VERIFY   = "LDAP_SKIP_TLS_VERIFY"
 	LISTEN_ADDR            = "LISTEN_ADDR"
+	RDP_DISABLE_CLIPBOARD  = "RDP_DISABLE_CLIPBOARD"
+	RDP_DISABLE_DRIVES     = "RDP_DISABLE_DRIVES"
 	VIRT_STORAGE_POOL_NAME = "VIRT_STORAGE_POOL_NAME"
 	BASE_IMAGE_URL         = "BASE_IMAGE_URL"
 	TIMEOUT                = "TIMEOUT"
