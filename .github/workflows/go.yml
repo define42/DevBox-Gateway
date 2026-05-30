@@ -21,7 +21,7 @@ jobs:
       # Checkout
       # -------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0   # REQUIRED for tag calculation
 
@@ -52,7 +52,7 @@ jobs:
       # Go setup
       # -------------------------------
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache-dependency-path: go.sum
@@ -82,7 +82,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
@@ -113,7 +113,7 @@ jobs:
       # -------------------------------
       - name: Set up Docker Buildx
         if: github.event_name == 'push'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GHCR
         if: github.event_name == 'push'
@@ -125,7 +125,7 @@ jobs:
 
       - name: Build and push container
         if: github.event_name == 'push'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
