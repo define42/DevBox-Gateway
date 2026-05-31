@@ -131,7 +131,7 @@ func TestListDashboardVMs(t *testing.T) {
 	settings := newDashboardVMSettings(t)
 	username, vmName := createDashboardVM(t, settings)
 	row := waitForDashboardVM(t, settings, username, vmName, dashboardVMTestTimeout)
-	wantDisplayName := vmName + ".dashboard.test"
+	wantDisplayName := strings.TrimPrefix(vmName, username+"-")
 	wantConnectHost := hash.RoutingLabel([]byte(settings.Get(config.SNI_HASH_SECRET)), vmName) + ".dashboard.test"
 
 	assertDashboardVMRow(t, row, wantDisplayName)

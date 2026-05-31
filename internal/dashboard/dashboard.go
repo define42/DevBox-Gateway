@@ -28,6 +28,7 @@ const (
 type VM struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
+	User        string `json:"user"`
 	RDPConnect  string `json:"rdpConnect"`
 	RDPFilename string `json:"rdpFilename"`
 	IP          string `json:"ip"`
@@ -67,6 +68,18 @@ func RenderDashboardPage(w http.ResponseWriter, staticFiles fs.FS) {
 	if _, err := w.Write(dashboardHTML); err != nil {
 		log.Printf("render dashboard page: %v", err)
 	}
+}
+
+// vmBareName returns the name the user typed at creation time, i.e. the VM
+// name with the leading "<owner>-" prefix removed. VMs without owner metadata
+// (older ones) fall back to the full name.
+func vmBareName(vm virt.VMInfo) string {
+	if owner := strings.TrimSpace(vm.Owner); owner != "" {
+		if bare := strings.TrimPrefix(vm.Name, owner+"-"); bare != "" {
+			return bare
+		}
+	}
+	return vm.Name
 }
 
 // rdpDownloadFilename derives a friendly per-VM download filename (e.g.
@@ -118,13 +131,13 @@ func buildDashboardRows(vmList []virt.VMInfo, settings *config.SettingsType, use
 	rows := make([]VM, 0, len(vmList))
 	secret := []byte(settings.Get(config.SNI_HASH_SECRET))
 	for _, vm := range vmList {
-		// displayName stays friendly for the (authenticated, encrypted) UI;
+		// The UI shows the bare VM name (the part the user typed at creation,
+		// without the owner prefix) — the old FQDN was never the on-wire SNI.
 		// connectHost uses the opaque HMAC routing label so the cleartext TLS
-		// SNI on the wire never reveals the username-hostname.
-		displayName := vm.Name
+		// SNI never reveals the username-hostname.
+		displayName := vmBareName(vm)
 		connectHost := vm.Name
 		if domain := strings.TrimSpace(settings.GetString(config.FRONT_DOMAIN)); domain != "" {
-			displayName = vm.Name + "." + domain
 			connectHost = hash.RoutingLabel(secret, vm.Name) + "." + domain
 		}
 		// Prefer the guest account stored on the VM; older VMs without that
@@ -136,6 +149,7 @@ func buildDashboardRows(vmList []virt.VMInfo, settings *config.SettingsType, use
 		rows = append(rows, VM{
 			Name:        vm.Name,
 			DisplayName: displayName,
+			User:        rdpUser,
 			RDPConnect:  GenerateRDP(connectHost, rdpUser),
 			RDPFilename: rdpDownloadFilename(vm.Name),
 			IP:          vm.IP,

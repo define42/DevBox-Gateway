@@ -128,6 +128,8 @@ func TestBuildDashboardRows(t *testing.T) {
 	rows := buildDashboardRows([]virt.VMInfo{
 		{
 			Name:      "alice-vm",
+			Owner:     "alice",
+			GuestUser: "guest",
 			IP:        "192.0.2.10",
 			State:     "running",
 			MemoryMiB: 4096,
@@ -142,8 +144,11 @@ func TestBuildDashboardRows(t *testing.T) {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
 	row := rows[0]
-	if row.DisplayName != "alice-vm.example.test" {
-		t.Fatalf("expected display name with front domain, got %q", row.DisplayName)
+	if row.DisplayName != "vm" {
+		t.Fatalf("expected display name to strip the owner prefix, got %q", row.DisplayName)
+	}
+	if row.User != "guest" {
+		t.Fatalf("expected user %q, got %q", "guest", row.User)
 	}
 	if row.Name != "alice-vm" || row.IP != "192.0.2.10" || row.State != "running" {
 		t.Fatalf("unexpected row data: %+v", row)

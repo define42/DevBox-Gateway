@@ -205,8 +205,8 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 
 	fullName = createGatewayVM(t, server, shortName)
 	row := waitForGatewayVMState(t, server, fullName, "running")
-	if row.DisplayName != fullName+".gateway.test" {
-		t.Fatalf("expected display name %q, got %q", fullName+".gateway.test", row.DisplayName)
+	if row.DisplayName != shortName {
+		t.Fatalf("expected display name %q, got %q", shortName, row.DisplayName)
 	}
 
 	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/shutdown", url.Values{

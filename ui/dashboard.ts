@@ -46,6 +46,7 @@ declare const FitAddon: {
 type DashboardVM = {
     name: string;
     displayName: string;
+    user?: string;
     rdpConnect: string;
     rdpFilename?: string;
     ip: string;
@@ -703,6 +704,13 @@ function bootstrap(): void {
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
             nameCell.textContent = displayName || "n/a";
+            const userValue = (vm.user || "").trim();
+            if (userValue !== "") {
+                const userLine = document.createElement("div");
+                userLine.className = "small text-secondary fw-normal";
+                userLine.textContent = `user=${userValue}`;
+                nameCell.appendChild(userLine);
+            }
             row.appendChild(nameCell);
 
             const connectCell = document.createElement("td");
