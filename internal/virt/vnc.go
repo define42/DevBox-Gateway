@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"libvirt.org/go/libvirt"
 )
@@ -71,11 +69,19 @@ func domainVNCSocketPath(dom *libvirt.Domain) (string, bool, error) {
 	return vncSocketPathFromDomainXML(xmlDesc)
 }
 
-// VNCSocketPathForDomain returns the VNC socket path for a running domain.
-func VNCSocketPathForDomain(name string) (string, error) {
+// OpenVNCConn returns a connection to a running domain's VNC server.
+//
+// It uses libvirt's OpenGraphicsFD: libvirt opens the (libvirt-managed) VNC unix
+// socket itself — as root, unconfined by svirt — and passes back a connected
+// file descriptor. The gateway therefore never touches the socket path, which
+// lives in libvirt's per-domain runtime directory
+// (/var/lib/libvirt/qemu/domain-*/) that is otherwise unreachable for a non-root
+// or SELinux-confined gateway. This mirrors how libvirt fd-passes the serial
+// console socket.
+func OpenVNCConn(name string) (net.Conn, error) {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
-		return "", fmt.Errorf("connect libvirt: %w", err)
+		return nil, fmt.Errorf("connect libvirt: %w", err)
 	}
 	defer func() {
 		_, _ = conn.Close()
@@ -83,7 +89,7 @@ func VNCSocketPathForDomain(name string) (string, error) {
 
 	dom, err := conn.LookupDomainByName(name)
 	if err != nil {
-		return "", fmt.Errorf("lookup domain %s: %w", name, err)
+		return nil, fmt.Errorf("lookup domain %s: %w", name, err)
 	}
 	defer func() {
 		_ = dom.Free()
@@ -91,36 +97,24 @@ func VNCSocketPathForDomain(name string) (string, error) {
 
 	active, err := dom.IsActive()
 	if err != nil {
-		return "", fmt.Errorf("check domain active %s: %w", name, err)
+		return nil, fmt.Errorf("check domain active %s: %w", name, err)
 	}
 	if !active {
-		return "", ErrVNCNotRunning
+		return nil, ErrVNCNotRunning
 	}
 
-	socketPath, ok, err := domainVNCSocketPath(dom)
+	// idx 0 = the domain's first (only) graphics device; SKIPAUTH yields the raw
+	// RFB stream (the unix-socket VNC has no password), matching a direct dial.
+	file, err := dom.OpenGraphicsFD(0, libvirt.DOMAIN_OPEN_GRAPHICS_SKIPAUTH)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("open graphics fd for %s: %w", name, err)
 	}
-	if !ok {
-		return "", ErrVNCNotConfigured
-	}
+	// net.FileConn dups the fd, so the original file can be closed afterwards.
+	defer func() { _ = file.Close() }()
 
-	return socketPath, nil
-}
-
-// DialVNCSocket connects to the VNC socket for a running domain.
-func DialVNCSocket(name string, timeout time.Duration) (net.Conn, error) {
-	socketPath, err := VNCSocketPathForDomain(name)
+	vncConn, err := net.FileConn(file)
 	if err != nil {
-		return nil, err
-	}
-
-	vncConn, err := net.DialTimeout("unix", socketPath, timeout)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrVNCNotReady
-		}
-		return nil, fmt.Errorf("dial vnc socket %s: %w", socketPath, err)
+		return nil, fmt.Errorf("wrap graphics fd for %s: %w", name, err)
 	}
 	return vncConn, nil
 }

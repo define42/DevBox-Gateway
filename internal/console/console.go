@@ -101,7 +101,7 @@ func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err err
 }
 
 // HandleDashboardVNCWS serves the VNC websocket endpoint.
-func HandleDashboardVNCWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
+func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
@@ -125,7 +125,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager, settings *config.Sett
 			return
 		}
 
-		vncConn, err := openDashboardVNCSocket(name, settings.GetDuration(config.TIMEOUT))
+		vncConn, err := openDashboardVNCSocket(name)
 		if err != nil {
 			writeDashboardVNCSocketError(w, name, err)
 			return
@@ -146,23 +146,11 @@ func HandleDashboardVNCWS(sessionManager *session.Manager, settings *config.Sett
 	}
 }
 
-func openDashboardVNCSocket(name string, timeout time.Duration) (net.Conn, error) {
-	socketPath, err := virt.VNCSocketPathForDomain(name)
-	if err != nil {
-		return nil, err
-	}
-	return dialDashboardVNCSocket(socketPath, timeout)
-}
-
-func dialDashboardVNCSocket(socketPath string, timeout time.Duration) (net.Conn, error) {
-	vncConn, err := net.DialTimeout("unix", socketPath, timeout)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, virt.ErrVNCNotReady
-		}
-		return nil, fmt.Errorf("dial vnc socket %s: %w", socketPath, err)
-	}
-	return vncConn, nil
+func openDashboardVNCSocket(name string) (net.Conn, error) {
+	// The VNC socket is libvirt-managed (inside libvirt's per-domain runtime dir),
+	// so the gateway cannot dial its path directly. OpenVNCConn has libvirt open
+	// it and hand back a connected fd instead.
+	return virt.OpenVNCConn(name)
 }
 
 func writeDashboardVNCSocketError(w http.ResponseWriter, name string, err error) {

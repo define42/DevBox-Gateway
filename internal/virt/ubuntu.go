@@ -56,7 +56,7 @@ const ubuntuDomainXML = `<domain type='kvm'>
     <!-- Graphics: libvirt manages the VNC unix socket (it allocates the path
          under the per-domain runtime dir and applies the svirt SELinux label so
          the confined QEMU can bind it). The actual path is read back from the
-         running domain XML; see VNCSocketPathForDomain. -->
+         gateway connects to it via libvirt's OpenGraphicsFD; see OpenVNCConn. -->
     <graphics type='vnc' autoport='no'>
       <listen type='socket'/>
     </graphics>

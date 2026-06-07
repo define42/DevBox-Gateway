@@ -126,7 +126,7 @@ func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		conn, err := virt.DialVNCSocket(vmName, time.Second)
+		conn, err := virt.OpenVNCConn(vmName)
 		if err == nil {
 			_ = conn.Close()
 			return
@@ -139,10 +139,10 @@ func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		t.Fatalf("DialVNCSocket(%s) failed: %v", vmName, err)
+		t.Fatalf("OpenVNCConn(%s) failed: %v", vmName, err)
 	}
 
-	t.Fatalf("VNC socket for %s was not ready within %s: %v", vmName, timeout, lastErr)
+	t.Fatalf("VNC for %s was not ready within %s: %v", vmName, timeout, lastErr)
 }
 
 func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
