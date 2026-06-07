@@ -374,7 +374,12 @@ The dashboard manages VMs through libvirt. The gateway expects:
 - A libvirt socket bind-mounted at `/var/run/libvirt` (already wired up in
   `docker-compose.yml`).
 - A storage pool named by `VIRT_STORAGE_POOL_NAME` (default `desktop`) backed
-  by `$DATA_ROOT_DIR/image` on the host.
+  by `$DATA_ROOT_DIR/image` on the host. The gateway defines and starts this
+  pool automatically if it is missing.
+- The libvirt `default` NAT network (the `virbr0` bridge, `192.168.122.0/24`),
+  which every VDI attaches to. The gateway defines, starts, and sets it to
+  autostart automatically if it is missing — handy on a fresh modular-libvirt
+  host (e.g. Rocky/RHEL 9) that ships without it.
 - A base image library directory (`BASE_IMAGE_DIR`, default
   `$DATA_ROOT_DIR/baseimages`) containing at least one `.img`, `.qcow2`, or
   `.raw` disk image.
