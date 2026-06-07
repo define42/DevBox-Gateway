@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/hash"
+	"strings"
 	"testing"
 	"time"
 
@@ -245,6 +247,37 @@ func TestUpdateDomainsNoChange(t *testing.T) {
 	got := manager.managedDomains()
 	if len(got) != 1 || got[0] != "example.test" {
 		t.Fatalf("expected domains to remain unchanged, got %v", got)
+	}
+}
+
+func TestManagedDomainListUsesRoutingLabel(t *testing.T) {
+	const (
+		frontDomain = "vdi.example.test"
+		vmName      = "define42-skod"
+	)
+	secret := []byte("test-secret")
+
+	got := managedDomainList([]string{vmName}, frontDomain, secret)
+
+	want := []string{
+		frontDomain,
+		hash.RoutingLabel(secret, vmName) + "." + frontDomain,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("domain[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// The cleartext VM name must never appear — that is the whole point of the
+	// opaque routing label (no username-hostname leak to CT logs / the SNI).
+	for _, d := range got {
+		if strings.Contains(d, vmName) {
+			t.Fatalf("managed domain %q leaks the cleartext VM name %q", d, vmName)
+		}
 	}
 }
 

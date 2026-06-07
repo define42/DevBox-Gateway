@@ -47,7 +47,10 @@ type SettingsType struct {
 
 const (
 	// DefaultDataRootDir is the default root directory for gateway-managed data.
-	DefaultDataRootDir = "/data"
+	// It lives under /var/lib/libvirt so VM disk images and sockets sit in a tree
+	// libvirt/QEMU can use under SELinux (svirt) without relabeling a custom path
+	// such as /data. Override with DATA_ROOT_DIR.
+	DefaultDataRootDir = "/var/lib/libvirt/rdp-tls-gateway"
 	// DefaultVirtStoragePoolName is the default libvirt storage pool name.
 	DefaultVirtStoragePoolName = "desktop"
 )

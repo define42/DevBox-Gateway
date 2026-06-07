@@ -157,9 +157,11 @@ to provision VMs.
 
 2. **Satisfy the runtime prerequisites** — the same ones as the Docker quick
    start: a running libvirt daemon, a storage pool, write access to
-   `DATA_ROOT_DIR` (default `/data`), and at least one base image in
-   `<DATA_ROOT_DIR>/baseimages` (the gateway refuses to start with an empty
-   library). See [Libvirt and VM storage](#libvirt-and-vm-storage).
+   `DATA_ROOT_DIR` (native default `/var/lib/libvirt/rdp-tls-gateway`), and at
+   least one base image in `<DATA_ROOT_DIR>/baseimages` (the gateway refuses to
+   start with an empty library). The default lives under `/var/lib/libvirt` so
+   images and sockets sit in a tree QEMU can use under SELinux without
+   relabeling. See [Libvirt and VM storage](#libvirt-and-vm-storage).
 
    Make sure libvirt itself is enabled — the gateway's unit only *wants*
    `libvirtd.service`, it does not enable libvirt for you. On Fedora / RHEL 9+
@@ -276,7 +278,7 @@ file**, which keeps container and development overrides working.
 | `ACME_CA`                 | _(empty)_                                                                                                        | ACME directory URL, or `staging` for the Let's Encrypt staging endpoint.                          |
 | `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Domain served by the dashboard and used as the suffix for VM SNI routing labels.                  |
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
-| `DATA_ROOT_DIR`           | `/data`                                                                                                          | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets).        |
+| `DATA_ROOT_DIR`           | `/var/lib/libvirt/rdp-tls-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable base VDI images (`.img`, `.qcow2`, `.raw`). Users pick one per VM in the dashboard. The gateway refuses to start if it is empty. |
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | LDAP server URL.                                                                                  |
@@ -392,7 +394,8 @@ Base images are operator-supplied: place one or more disk images in
 to clone for a new VM. **If the directory contains no usable image at startup,
 the gateway fails to boot** with a clear error, so populate it first.
 
-Before the first run, populate the library, for example:
+Before the first run, populate the library, for example (Docker Compose, which
+uses `/data`):
 
 ```sh
 mkdir -p /data/baseimages
@@ -402,6 +405,11 @@ curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
 
 Because `docker-compose.yml` already bind-mounts `/data/`, files dropped in
 `/data/baseimages` on the host are visible to the gateway container.
+
+For a native (RPM) install the data root defaults to
+`/var/lib/libvirt/rdp-tls-gateway`, so populate
+`/var/lib/libvirt/rdp-tls-gateway/baseimages` instead (or set `DATA_ROOT_DIR` /
+`BASE_IMAGE_DIR` to wherever you keep images).
 
 ## Building from source
 

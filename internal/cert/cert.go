@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/hash"
 	"rdptlsgateway/internal/virt"
 	"slices"
 	"strings"
@@ -77,13 +78,9 @@ func (tm *TLSManager) Close() error {
 func (tm *TLSManager) updateDomains() {
 	vmNames := virt.GetInstance().GetVMnames()
 	frontPageDomain := tm.settings.Get(config.FRONT_DOMAIN)
+	secret := []byte(tm.settings.Get(config.SNI_HASH_SECRET))
 
-	var domains []string
-	domains = append(domains, frontPageDomain)
-
-	for _, name := range vmNames {
-		domains = append(domains, name+"."+frontPageDomain)
-	}
+	domains := managedDomainList(vmNames, frontPageDomain, secret)
 
 	if sameElements(tm.managedDomains(), domains) {
 		return
@@ -94,6 +91,19 @@ func (tm *TLSManager) updateDomains() {
 	}
 	tm.setManagedDomains(domains)
 	log.Printf("acme: updated managed domains: %s", strings.Join(domains, ", "))
+}
+
+// managedDomainList builds the set of domains ACME should manage: the front-page
+// domain plus, for every VM, its opaque HMAC routing label under that domain.
+// Using the routing label (rather than the cleartext VM name) keeps the
+// certificate from leaking the username-hostname and matches the SNI the RDP
+// client sends — see the dashboard .rdp connect host and the RDP front handler.
+func managedDomainList(vmNames []string, frontPageDomain string, secret []byte) []string {
+	domains := []string{frontPageDomain}
+	for _, name := range vmNames {
+		domains = append(domains, hash.RoutingLabel(secret, name)+"."+frontPageDomain)
+	}
+	return domains
 }
 
 func (tm *TLSManager) managedDomains() []string {
