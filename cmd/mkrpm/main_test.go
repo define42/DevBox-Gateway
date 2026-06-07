@@ -19,15 +19,12 @@ func TestRPMArch(t *testing.T) {
 }
 
 func TestPackageRelations(t *testing.T) {
-	requires, recommends, err := packageRelations()
+	requires, err := packageRelations()
 	if err != nil {
 		t.Fatalf("packageRelations: %v", err)
 	}
-	if len(requires) != 2 {
-		t.Fatalf("requires = %d, want 2 (libvirt-libs, ca-certificates)", len(requires))
-	}
-	if len(recommends) != 2 {
-		t.Fatalf("recommends = %d, want 2 (libvirt-daemon-kvm, qemu-kvm)", len(recommends))
+	if len(requires) != 4 {
+		t.Fatalf("requires = %d, want 4 (libvirt-libs, ca-certificates, libvirt-daemon-kvm, qemu-kvm)", len(requires))
 	}
 }
 

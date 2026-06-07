@@ -107,7 +107,7 @@ func rpmArch(goarch string) string {
 }
 
 func writeRPM(o options) error {
-	requires, recommends, err := packageRelations()
+	requires, err := packageRelations()
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,6 @@ func writeRPM(o options) error {
 		URL:         url,
 		Licence:     o.licence,
 		Requires:    requires,
-		Recommends:  recommends,
 	})
 	if err != nil {
 		return err
@@ -147,21 +146,18 @@ func writeRPM(o options) error {
 	return dst.Close()
 }
 
-// packageRelations builds the RPM's hard requires (the libvirt client library
-// the binary links against, plus ca-certificates for outbound TLS) and soft
-// recommends (a local KVM stack to actually host the virtual desktops).
-func packageRelations() (requires, recommends rpmpack.Relations, err error) {
-	for _, dep := range []string{"libvirt-libs", "ca-certificates"} {
+// packageRelations builds the RPM's hard requires: the libvirt client library
+// the binary links against, ca-certificates for outbound TLS, and the local KVM
+// stack that hosts the virtual desktops. libvirt-daemon-kvm pulls in the modular
+// libvirt daemons (virtqemud/virtnetworkd/virtstoraged) and qemu-kvm, so a fresh
+// install can provision VMs out of the box.
+func packageRelations() (requires rpmpack.Relations, err error) {
+	for _, dep := range []string{"libvirt-libs", "ca-certificates", "libvirt-daemon-kvm", "qemu-kvm"} {
 		if err := requires.Set(dep); err != nil {
-			return nil, nil, fmt.Errorf("add require %q: %w", dep, err)
+			return nil, fmt.Errorf("add require %q: %w", dep, err)
 		}
 	}
-	for _, dep := range []string{"libvirt-daemon-kvm", "qemu-kvm"} {
-		if err := recommends.Set(dep); err != nil {
-			return nil, nil, fmt.Errorf("add recommend %q: %w", dep, err)
-		}
-	}
-	return requires, recommends, nil
+	return requires, nil
 }
 
 // addPackageFiles adds the binary, systemd unit, sample environment file, and

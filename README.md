@@ -142,8 +142,11 @@ The package installs:
 | `/usr/lib/systemd/system/rdp-tls-gateway.service`| systemd unit (runs as root, binds `:443`).          |
 | `/etc/rdp-tls-gateway/rdp-tls-gateway.conf`      | Config file, marked `%config(noreplace)` so your edits survive upgrades. |
 
-It depends on `libvirt-libs` and `ca-certificates`, and recommends
-`libvirt-daemon-kvm` and `qemu-kvm` to host the virtual desktops locally.
+It requires `libvirt-libs` and `ca-certificates`, plus `libvirt-daemon-kvm` and
+`qemu-kvm` — the local libvirt/KVM stack that hosts the virtual desktops.
+`libvirt-daemon-kvm` pulls in the modular libvirt daemons
+(`virtqemud`/`virtnetworkd`/`virtstoraged`), so `dnf` installs everything needed
+to provision VMs.
 
 1. **Install** (let `dnf` pull in the dependencies):
 
@@ -156,6 +159,25 @@ It depends on `libvirt-libs` and `ca-certificates`, and recommends
    `DATA_ROOT_DIR` (default `/data`), and at least one base image in
    `<DATA_ROOT_DIR>/baseimages` (the gateway refuses to start with an empty
    library). See [Libvirt and VM storage](#libvirt-and-vm-storage).
+
+   Make sure libvirt itself is enabled — the gateway's unit only *wants*
+   `libvirtd.service`, it does not enable libvirt for you. On Fedora / RHEL 9+
+   (and recent Debian/Ubuntu) libvirt ships as modular, socket-activated daemons,
+   so enable the sockets the gateway uses:
+
+   ```sh
+   sudo systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
+   ```
+
+   On older distributions with the classic monolithic daemon, use instead:
+
+   ```sh
+   sudo systemctl enable --now libvirtd
+   ```
+
+   If you get `Unit file libvirtd.service does not exist`, your system uses the
+   modular daemons above. Verify libvirt is reachable with
+   `virsh -c qemu:///system version`.
 
 3. **Configure** the gateway by editing the config file (every setting is
    documented inline; see [Configuration](#configuration)):
