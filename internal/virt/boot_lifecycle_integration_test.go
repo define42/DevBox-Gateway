@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -309,7 +310,7 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	assertMissingVolumes(t, pool, vmName, seedISO)
 }
 
-func TestBootNewVMRecreatesExistingVM(t *testing.T) {
+func TestBootNewVMRejectsExistingName(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)
@@ -327,18 +328,16 @@ func TestBootNewVMRecreatesExistingVM(t *testing.T) {
 	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
 	firstUUID := lookupDomainUUID(t, conn, vmName)
 
-	recreatedName, err := BootNewVM(shortName, user, "", "", settings, 4, 8192)
-	if err != nil {
-		t.Fatalf("BootNewVM recreate: %v", err)
-	}
-	if recreatedName != vmName {
-		t.Fatalf("expected recreated VM name %q, got %q", vmName, recreatedName)
+	// Creating again with the same name must be refused (no silent recreate) so
+	// the existing VM is preserved; the user is expected to delete it first.
+	if _, err := BootNewVM(shortName, user, "", "", settings, 4, 8192); !errors.Is(err, ErrVMAlreadyExists) {
+		t.Fatalf("expected ErrVMAlreadyExists on duplicate create, got %v", err)
 	}
 
-	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
-	recreatedUUID := lookupDomainUUID(t, conn, vmName)
-	if recreatedUUID == firstUUID {
-		t.Fatal("expected recreated VM to have a new domain UUID")
+	// The original VM must be untouched: same domain (UUID), still running, with
+	// its original resources rather than the ones in the second request.
+	if got := lookupDomainUUID(t, conn, vmName); got != firstUUID {
+		t.Fatalf("existing VM domain UUID changed (was clobbered): was %q, now %q", firstUUID, got)
 	}
 
 	vms, err := ListVMs(user.GetName(), conn)
@@ -347,13 +346,10 @@ func TestBootNewVMRecreatesExistingVM(t *testing.T) {
 	}
 	vm := requireListedVM(t, vms, vmName)
 	if vm.State != "running" {
-		t.Fatalf("expected recreated VM to be running, got %q", vm.State)
+		t.Fatalf("expected existing VM to still be running, got %q", vm.State)
 	}
-	if vm.VCPU != 4 {
-		t.Fatalf("expected recreated VM vcpu 4, got %d", vm.VCPU)
-	}
-	if vm.MemoryMiB != 8192 {
-		t.Fatalf("expected recreated VM memory 8192, got %d", vm.MemoryMiB)
+	if vm.VCPU != 2 || vm.MemoryMiB != 4096 {
+		t.Fatalf("expected existing VM resources unchanged (2 vcpu / 4096 MiB), got %d vcpu / %d MiB", vm.VCPU, vm.MemoryMiB)
 	}
 }
 

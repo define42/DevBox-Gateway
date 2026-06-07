@@ -177,6 +177,31 @@ func waitForDashboardVMRemoval(t *testing.T, client *http.Client, baseURL, vmNam
 	t.Fatalf("VM %s was not removed from dashboard data in time", vmName)
 }
 
+func TestGatewayRejectsDuplicateVMCreate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	ldapURL, cleanupLDAP := startGlauth(ctx, t, "")
+	defer cleanupLDAP()
+
+	settings := newGatewayIntegrationSettings(t, ldapURL)
+	server := startGatewayTestServer(t, settings)
+
+	assertGatewayRedirect(t, server.client, http.MethodPost, server.baseURL+"/login", url.Values{
+		"username": {"johndoe"},
+		"password": {"dogood"},
+	}, http.StatusSeeOther, "/api/dashboard")
+
+	shortName := uniqueGatewayVMShortName("dup")
+	fullName := "johndoe-" + shortName
+	t.Cleanup(func() { _ = virt.RemoveVM(fullName, settings) })
+
+	// First create succeeds; creating again with the same name must be refused
+	// with a "delete it first" message instead of clobbering the existing VM.
+	createGatewayVM(t, server, shortName)
+	assertGatewayVMCreateConflict(t, server, shortName)
+}
+
 func TestGatewayHTTPSLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

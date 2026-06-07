@@ -79,6 +79,20 @@ func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) s
 	return fullName
 }
 
+// assertGatewayVMCreateConflict asserts that creating a VM whose name already
+// exists is refused with 409 and a message telling the user to delete it first.
+func assertGatewayVMCreateConflict(t *testing.T, server gatewayTestServer, shortName string) {
+	t.Helper()
+
+	assertGatewayStatusContains(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard", url.Values{
+		"vm_name":             {shortName},
+		"vm_password":         {"devbox-pass"},
+		"vm_password_confirm": {"devbox-pass"},
+		"vm_vcpu":             {"2"},
+		"vm_memory_mib":       {"4096"},
+	}, http.StatusConflict, "already exists")
+}
+
 func waitForGatewayVMState(t *testing.T, server gatewayTestServer, vmName, state string) dashboard.VM {
 	t.Helper()
 

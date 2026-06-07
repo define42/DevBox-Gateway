@@ -198,11 +198,14 @@ func DestroyExistingDomain(conn *libvirt.Connect, vmName string) error {
 	return nil
 }
 
-// ensureVMReplaceable verifies that any existing domain with the same name may be
-// replaced by the requesting user before the boot path destroys and recreates it.
-// A missing domain is fine (nothing to replace); an existing domain owned by a
-// different user is refused so a boot cannot clobber another user's VM.
-func ensureVMReplaceable(conn *libvirt.Connect, vmName, requester string) error {
+// ErrVMAlreadyExists indicates a domain with the requested name already exists.
+// Creation never destroys an existing VM, so the user must delete it first.
+var ErrVMAlreadyExists = errors.New("vm with this name already exists")
+
+// ensureVMNameAvailable refuses creation when a domain with the same name already
+// exists, so a boot can never destroy or overwrite an existing VM (the user must
+// delete it first). A missing domain means the name is free to use.
+func ensureVMNameAvailable(conn *libvirt.Connect, vmName string) error {
 	dom, err := conn.LookupDomainByName(vmName)
 	if err != nil {
 		if errors.Is(err, libvirt.ERR_NO_DOMAIN) {
@@ -210,18 +213,8 @@ func ensureVMReplaceable(conn *libvirt.Connect, vmName, requester string) error 
 		}
 		return fmt.Errorf("lookup existing domain %s: %w", vmName, err)
 	}
-	defer func() {
-		_ = dom.Free()
-	}()
-
-	owner, hasOwner, err := domainOwner(dom)
-	if err != nil {
-		return fmt.Errorf("read owner for existing domain %s: %w", vmName, err)
-	}
-	if !ownerAllowsReplace(owner, hasOwner, requester) {
-		return fmt.Errorf("vm %s already exists and is owned by another user", vmName)
-	}
-	return nil
+	_ = dom.Free()
+	return fmt.Errorf("%w: %s", ErrVMAlreadyExists, vmName)
 }
 
 func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
@@ -343,7 +336,7 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword strin
 	if err := ensureBootStoragePool(conn, poolName, poolPath); err != nil {
 		return vmName, err
 	}
-	if err := ensureVMReplaceable(conn, vmName, user.GetName()); err != nil {
+	if err := ensureVMNameAvailable(conn, vmName); err != nil {
 		return vmName, err
 	}
 	if err := resetExistingVMArtifacts(conn, settings, poolName, vmName, seedIso); err != nil {

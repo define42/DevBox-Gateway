@@ -320,7 +320,15 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			return
 		}
 
-		if vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, settings, input.vcpu, input.memoryMiB); err != nil {
+		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, settings, input.vcpu, input.memoryMiB)
+		if errors.Is(err, virt.ErrVMAlreadyExists) {
+			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
+				OK:    false,
+				Error: fmt.Sprintf("A VM named %q already exists. Delete it before creating a new one.", input.name),
+			})
+			return
+		}
+		if err != nil {
 			log.Printf("boot new vm %q failed: %v", vmName, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
