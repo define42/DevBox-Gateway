@@ -1,7 +1,9 @@
 package virt
 
 import (
+	"encoding/xml"
 	"fmt"
+	"strings"
 )
 
 const ubuntuDomainXML = `<domain type='kvm'>
@@ -73,7 +75,26 @@ const ubuntuDomainXML = `<domain type='kvm'>
   </devices>
 </domain>`
 
-// UbuntuDomain returns the libvirt domain XML for a standard Ubuntu VM.
+// UbuntuDomain returns the libvirt domain XML for a standard Ubuntu VM. Every
+// interpolated value is XML-escaped so a name or path can never alter the
+// document structure, even if it reaches here unvalidated.
 func UbuntuDomain(name, seedIso, storagePoolName, serialSocketPath, vncSocketPath string, vcpu int, memoryMiB int) string {
-	return fmt.Sprintf(ubuntuDomainXML, name, memoryMiB, memoryMiB, vcpu, storagePoolName, name, storagePoolName, seedIso, vncSocketPath, vncSocketPath, serialSocketPath)
+	return fmt.Sprintf(
+		ubuntuDomainXML,
+		xmlValue(name), memoryMiB, memoryMiB, vcpu,
+		xmlValue(storagePoolName), xmlValue(name),
+		xmlValue(storagePoolName), xmlValue(seedIso),
+		xmlValue(vncSocketPath), xmlValue(vncSocketPath),
+		xmlValue(serialSocketPath),
+	)
+}
+
+// xmlValue escapes a string for safe inclusion in the domain XML in both element
+// text and single-quoted attribute positions.
+func xmlValue(s string) string {
+	var buf strings.Builder
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		return ""
+	}
+	return buf.String()
 }

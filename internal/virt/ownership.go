@@ -127,3 +127,17 @@ func ownedByUser(owner string, hasOwner bool, username string) bool {
 
 	return strings.TrimSpace(owner) == username
 }
+
+// ownerAllowsReplace reports whether the boot/recreate path may destroy an
+// existing domain of the same name. Replacement is allowed only when the
+// existing domain has no owner metadata (a legacy VM) or is owned by the
+// requesting user. This prevents one user from clobbering another user's VM by
+// choosing a name that, once prefixed with the requester's username, collides
+// with it (e.g. user "alice" creating "test-vm" vs user "alice-test" creating
+// "vm" — both resolve to domain "alice-test-vm").
+func ownerAllowsReplace(owner string, hasOwner bool, requester string) bool {
+	if !hasOwner {
+		return true
+	}
+	return strings.TrimSpace(owner) == strings.TrimSpace(requester)
+}

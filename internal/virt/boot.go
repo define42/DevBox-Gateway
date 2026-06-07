@@ -10,6 +10,7 @@ import (
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/hash"
 	"rdptlsgateway/internal/types"
+	"rdptlsgateway/internal/vmname"
 	"strings"
 
 	"libvirt.org/go/libvirt"
@@ -197,6 +198,32 @@ func DestroyExistingDomain(conn *libvirt.Connect, vmName string) error {
 	return nil
 }
 
+// ensureVMReplaceable verifies that any existing domain with the same name may be
+// replaced by the requesting user before the boot path destroys and recreates it.
+// A missing domain is fine (nothing to replace); an existing domain owned by a
+// different user is refused so a boot cannot clobber another user's VM.
+func ensureVMReplaceable(conn *libvirt.Connect, vmName, requester string) error {
+	dom, err := conn.LookupDomainByName(vmName)
+	if err != nil {
+		if errors.Is(err, libvirt.ERR_NO_DOMAIN) {
+			return nil
+		}
+		return fmt.Errorf("lookup existing domain %s: %w", vmName, err)
+	}
+	defer func() {
+		_ = dom.Free()
+	}()
+
+	owner, hasOwner, err := domainOwner(dom)
+	if err != nil {
+		return fmt.Errorf("read owner for existing domain %s: %w", vmName, err)
+	}
+	if !ownerAllowsReplace(owner, hasOwner, requester) {
+		return fmt.Errorf("vm %s already exists and is owned by another user", vmName)
+	}
+	return nil
+}
+
 func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
 	poolName = config.DefaultVirtStoragePoolName
 	poolPath = config.VirtStoragePoolPath(nil)
@@ -263,11 +290,22 @@ func InitVirt(settings *config.SettingsType) error {
 }
 
 // BootNewVM creates or recreates a VM for the user and starts it with owner metadata.
+// The resulting VM (VDI) name is always "<username>-<hostname>", enforced via
+// vmname.Compose; an invalid owner or hostname is rejected before anything is created.
 // guestUsername is the login account provisioned inside the guest (and used for RDP);
 // it falls back to the owning user's name when empty. guestPassword is the password
 // for that guest account; it falls back to the owner's gateway password when empty.
 func BootNewVM(name string, user *types.User, guestUsername, guestPassword string, settings *config.SettingsType, vcpu int, memoryMiB int) (vmName string, err error) {
-	vmName = user.GetName() + "-" + name
+	if user == nil {
+		return "", fmt.Errorf("vm owner is required")
+	}
+	name = strings.TrimSpace(name)
+	// Enforce the VDI naming invariant ("<username>-<hostname>") at the single
+	// construction point so no caller can bypass it.
+	vmName, err = vmname.Compose(user.GetName(), name)
+	if err != nil {
+		return "", err
+	}
 	guestUsername = strings.TrimSpace(guestUsername)
 	if guestUsername == "" {
 		guestUsername = user.GetName()
@@ -303,6 +341,9 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword strin
 	}()
 
 	if err := ensureBootStoragePool(conn, poolName, poolPath); err != nil {
+		return vmName, err
+	}
+	if err := ensureVMReplaceable(conn, vmName, user.GetName()); err != nil {
 		return vmName, err
 	}
 	if err := resetExistingVMArtifacts(conn, settings, poolName, vmName, seedIso); err != nil {

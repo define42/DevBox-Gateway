@@ -14,6 +14,7 @@ import (
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/types"
 	"rdptlsgateway/internal/virt"
+	"rdptlsgateway/internal/vmname"
 	"strconv"
 	"strings"
 
@@ -28,13 +29,16 @@ const (
 	expiresValue      = "0"
 	rdpFilename       = "rdpgw.rdp"
 	maxFormBodyBytes  = 1 << 20
-	maxVMNameLength   = 63
+	// maxVMNameLength and maxLoginUsernameLength mirror the canonical limits in
+	// the vmname package, which is the single source of truth for VDI naming.
+	maxVMNameLength   = vmname.MaxHostnameLength
 	maxVMNameFieldLen = 128
 	// maxGuestUsernameLength matches the conventional Linux useradd limit.
 	maxGuestUsernameLength = 32
 	// maxGuestPasswordLength bounds the optional guest account password set at
 	// VM creation time.
 	maxGuestPasswordLength = 128
+	maxLoginUsernameLength = vmname.MaxUsernameLength
 )
 
 func parseFormWithBodyLimit(w http.ResponseWriter, req *http.Request) error {
@@ -61,6 +65,14 @@ func extractCredentials(w http.ResponseWriter, r *http.Request) (string, string,
 	return username, password, true, nil
 }
 
+// validateLoginUsername normalizes and constrains the login username before it
+// is trusted downstream. The username becomes the owner half of every VDI name,
+// so the rules live in the vmname package (the single source of truth) and this
+// is a thin wrapper for the login handler.
+func validateLoginUsername(username string) (string, error) {
+	return vmname.ValidateUsername(username)
+}
+
 func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		username, password, ok, err := extractCredentials(w, r)
@@ -70,6 +82,13 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 		}
 		if !ok {
 			serveLogin(w, "Missing credentials.")
+			return
+		}
+
+		username, err = validateLoginUsername(username)
+		if err != nil {
+			log.Printf("rejected login attempt: %v", err)
+			serveLogin(w, "Invalid credentials.")
 			return
 		}
 
@@ -231,50 +250,77 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 	})
 }
 
+// createVMInput holds the validated dashboard create-VM form fields.
+type createVMInput struct {
+	name          string
+	vcpu          int
+	memoryMiB     int
+	user          *types.User
+	guestUsername string
+	guestPassword string
+}
+
+// parseCreateVMInput validates and collects the create-VM form fields. It writes
+// the error response and returns ok=false when any field is invalid or the
+// session is missing.
+func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager) (createVMInput, bool) {
+	if err := parseFormWithBodyLimit(w, req); err != nil {
+		log.Printf("dashboard form parse failed: %v", err)
+		dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
+			OK:    false,
+			Error: "Invalid form submission.",
+		})
+		return createVMInput{}, false
+	}
+
+	name, err := validateVMName(req.FormValue("vm_name"))
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
+	vcpu, err := parseDashboardVCPU(req.FormValue("vm_vcpu"))
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
+	memoryMiB, err := parseDashboardMemoryMiB(req.FormValue("vm_memory_mib"))
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
+	user, ok := sessionManager.UserFromContext(req.Context())
+	if !ok {
+		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
+			OK:    false,
+			Error: "Login required.",
+		})
+		return createVMInput{}, false
+	}
+	guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.GetName())
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
+	guestPassword, err := validateGuestPassword(req.FormValue("vm_password"), req.FormValue("vm_password_confirm"))
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
+
+	return createVMInput{
+		name:          name,
+		vcpu:          vcpu,
+		memoryMiB:     memoryMiB,
+		user:          user,
+		guestUsername: guestUsername,
+		guestPassword: guestPassword,
+	}, true
+}
+
 func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
 	registerHiddenPost(group, "/dashboard", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		if err := parseFormWithBodyLimit(w, req); err != nil {
-			log.Printf("dashboard form parse failed: %v", err)
-			dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
-				OK:    false,
-				Error: "Invalid form submission.",
-			})
-			return
-		}
-
-		name, err := validateVMName(req.FormValue("vm_name"))
-		if handleDashboardFormError(w, "dashboard create", err) {
-			return
-		}
-		vcpu, err := parseDashboardVCPU(req.FormValue("vm_vcpu"))
-		if handleDashboardFormError(w, "dashboard create", err) {
-			return
-		}
-		memoryMiB, err := parseDashboardMemoryMiB(req.FormValue("vm_memory_mib"))
-		if handleDashboardFormError(w, "dashboard create", err) {
-			return
-		}
-		user, ok := sessionManager.UserFromContext(req.Context())
+		input, ok := parseCreateVMInput(w, req, sessionManager)
 		if !ok {
-			dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
-				OK:    false,
-				Error: "Login required.",
-			})
 			return
 		}
 
-		guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.GetName())
-		if handleDashboardFormError(w, "dashboard create", err) {
-			return
-		}
-
-		guestPassword, err := validateGuestPassword(req.FormValue("vm_password"), req.FormValue("vm_password_confirm"))
-		if handleDashboardFormError(w, "dashboard create", err) {
-			return
-		}
-
-		if vmName, err := virt.BootNewVM(name, user, guestUsername, guestPassword, settings, vcpu, memoryMiB); err != nil {
+		if vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, settings, input.vcpu, input.memoryMiB); err != nil {
 			log.Printf("boot new vm %q failed: %v", vmName, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
@@ -400,27 +446,11 @@ func writeDashboardVMActionOwnershipError(w http.ResponseWriter, name, username,
 	})
 }
 
+// validateVMName validates the user-chosen hostname half of a VDI name. The
+// rules live in the vmname package; this is a thin wrapper for the dashboard
+// handlers.
 func validateVMName(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", fmt.Errorf("vm name is required")
-	}
-	if len(name) > maxVMNameLength {
-		return "", fmt.Errorf("vm name must be %d characters or fewer", maxVMNameLength)
-	}
-	if strings.HasPrefix(name, "-") || strings.HasSuffix(name, "-") {
-		return "", fmt.Errorf("vm name cannot start or end with a hyphen")
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9':
-		case r == '-':
-		default:
-			return "", fmt.Errorf("vm name must use lowercase letters, numbers, or hyphens")
-		}
-	}
-	return name, nil
+	return vmname.ValidateHostname(name)
 }
 
 // validateGuestUsername validates the optional guest login name provisioned

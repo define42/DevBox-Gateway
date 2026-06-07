@@ -252,6 +252,51 @@ func TestValidateGuestUsername(t *testing.T) {
 	}
 }
 
+func TestValidateLoginUsername(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"simple", "johndoe", "johndoe", false},
+		{"trimmed", "  johndoe  ", "johndoe", false},
+		{"email/upn form", "john.doe+test@example.com", "john.doe+test@example.com", false},
+		{"digits and hyphen", "dev-user1", "dev-user1", false},
+		{"uppercase allowed", "JohnDoe", "JohnDoe", false},
+		{"empty", "", "", true},
+		{"whitespace only", "   ", "", true},
+		{"path traversal", "../../etc/passwd", "", true},
+		{"forward slash", "a/b", "", true},
+		{"backslash", `a\b`, "", true},
+		{"xml angle bracket", "a<b", "", true},
+		{"xml ampersand", "a&b", "", true},
+		{"double quote", `a"b`, "", true},
+		{"single quote", "a'b", "", true},
+		{"inner space", "john doe", "", true},
+		{"newline", "john\ndoe", "", true},
+		{"too long", strings.Repeat("a", maxLoginUsernameLength+1), "", true},
+		{"max length", strings.Repeat("a", maxLoginUsernameLength), strings.Repeat("a", maxLoginUsernameLength), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := validateLoginUsername(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestValidateGuestPassword(t *testing.T) {
 	tests := []struct {
 		name    string

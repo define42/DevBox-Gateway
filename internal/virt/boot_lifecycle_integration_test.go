@@ -437,3 +437,41 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 		t.Fatalf("expected VM name prefix %q, got %q", user.GetName()+"-", vmName)
 	}
 }
+
+// TestBootNewVMNameUsesLoginUserNotGuestUser locks the VDI naming invariant: the
+// name is always "<login-username>-<chosen-hostname>", taken from the session
+// user and the vm_name field. The separately supplied guest account name
+// (vm_username) must never leak into the VM name. It uses the same fast-fail
+// (bad base image) path as the sibling test so no VM is actually booted.
+func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
+	settings := newBootTestSettings(t)
+	user := newBootTestUser(t, "loginuser")
+	poolName := uniquePoolName("login-user-name-pool")
+	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
+	}
+	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/"); err != nil {
+		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
+	}
+
+	const chosenName = "web"
+	const guestUsername = "differentguest"
+
+	vmName, err := BootNewVM(chosenName, user, guestUsername, "", settings, 2, 4096)
+	if err == nil {
+		t.Fatal("expected BootNewVM to fail without a valid base image URL")
+	}
+	if !strings.Contains(err.Error(), "failed to ensure base image") {
+		t.Fatalf("expected base image failure (proving the boot logic ran), got %v", err)
+	}
+
+	want := user.GetName() + "-" + chosenName
+	if vmName != want {
+		t.Fatalf("VM name must be <login-username>-<chosen-name>: want %q, got %q", want, vmName)
+	}
+	if strings.Contains(vmName, guestUsername) {
+		t.Fatalf("guest username %q must not appear in VM name %q", guestUsername, vmName)
+	}
+}
