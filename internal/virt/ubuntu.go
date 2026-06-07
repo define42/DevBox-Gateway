@@ -43,10 +43,14 @@ const ubuntuDomainXML = `<domain type='kvm'>
       <readonly/>
     </disk>
 
-    <!-- Network (user-mode NAT, like -netdev user) -->
+    <!-- Network: shared NAT bridge (libvirt 'default'). port isolated='yes'
+         enforces VDI-to-VDI isolation on the host bridge so guests cannot reach
+         each other, while still allowing DHCP/DNS from the gateway and NAT to
+         the internet. -->
 <interface type='network'>
   <source network='default'/>
   <model type='virtio'/>
+  <port isolated='yes'/>
 </interface>
 
     <!-- Graphics -->

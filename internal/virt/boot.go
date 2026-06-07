@@ -266,6 +266,10 @@ func InitVirt(settings *config.SettingsType) error {
 		_, _ = conn.Close()
 	}()
 
+	if err := ensureLibvirtVersion(conn); err != nil {
+		return err
+	}
+
 	poolName, poolPath := storagePoolConfig(settings)
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
 	if err != nil {
