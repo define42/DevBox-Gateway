@@ -97,6 +97,14 @@ function bootstrap() {
               <label class="form-label" for="vm-username">Username</label>
               <input class="form-control" id="vm-username" name="vm_username" autocomplete="off" pattern="[a-z_][a-z0-9_-]*" maxlength="32" title="Login user created inside the DevBox. Lowercase letters, numbers, hyphens, or underscores. Must start with a letter or underscore. Max 32 characters." autocapitalize="none" spellcheck="false">
             </div>
+            <div class="col-12 col-md-6 col-lg-3">
+              <label class="form-label" for="vm-password">Password</label>
+              <input class="form-control" id="vm-password" name="vm_password" type="password" autocomplete="new-password" maxlength="128" title="Password for the account created inside the DevBox. Max 128 characters." autocapitalize="none" spellcheck="false" required>
+            </div>
+            <div class="col-12 col-md-6 col-lg-3">
+              <label class="form-label" for="vm-password-confirm">Confirm Password</label>
+              <input class="form-control" id="vm-password-confirm" name="vm_password_confirm" type="password" autocomplete="new-password" maxlength="128" title="Re-enter the password to confirm it matches." autocapitalize="none" spellcheck="false" required>
+            </div>
             <div class="col-6 col-md-3 col-lg-2">
               <label class="form-label" for="vm-cpu">vCPU</label>
               <select class="form-select" id="vm-cpu" name="vm_vcpu" required>
@@ -166,6 +174,8 @@ function bootstrap() {
     const form = root.querySelector("#create-form");
     const input = root.querySelector("#vm-name");
     const usernameInput = root.querySelector("#vm-username");
+    const passwordInput = root.querySelector("#vm-password");
+    const passwordConfirmInput = root.querySelector("#vm-password-confirm");
     const cpuSelect = root.querySelector("#vm-cpu");
     const memorySelect = root.querySelector("#vm-memory");
     const createButton = root.querySelector("#create-button");
@@ -189,6 +199,8 @@ function bootstrap() {
     if (!form ||
         !input ||
         !usernameInput ||
+        !passwordInput ||
+        !passwordConfirmInput ||
         !cpuSelect ||
         !memorySelect ||
         !createButton ||
@@ -214,6 +226,8 @@ function bootstrap() {
     const formEl = form;
     const inputEl = input;
     const usernameInputEl = usernameInput;
+    const passwordInputEl = passwordInput;
+    const passwordConfirmInputEl = passwordConfirmInput;
     const cpuSelectEl = cpuSelect;
     const memorySelectEl = memorySelect;
     const createButtonEl = createButton;
@@ -766,6 +780,8 @@ function bootstrap() {
         state.busy = isBusy;
         inputEl.disabled = isBusy;
         usernameInputEl.disabled = isBusy;
+        passwordInputEl.disabled = isBusy;
+        passwordConfirmInputEl.disabled = isBusy;
         cpuSelectEl.disabled = isBusy;
         memorySelectEl.disabled = isBusy;
         createButtonEl.disabled = isBusy;
@@ -918,7 +934,7 @@ function bootstrap() {
             loadInFlight = false;
         }
     }
-    async function createVM(name, username, vcpu, memoryMiB) {
+    async function createVM(name, username, password, passwordConfirm, vcpu, memoryMiB) {
         if (state.busy) {
             return;
         }
@@ -928,6 +944,8 @@ function bootstrap() {
             const body = new URLSearchParams({
                 vm_name: name,
                 vm_username: username,
+                vm_password: password,
+                vm_password_confirm: passwordConfirm,
                 vm_vcpu: vcpu,
                 vm_memory_mib: memoryMiB,
             });
@@ -952,6 +970,9 @@ function bootstrap() {
             setActionMessage(result.data.message || "VM creation started.");
             inputEl.value = "";
             usernameInputEl.value = defaultUsername;
+            passwordInputEl.value = "";
+            passwordConfirmInputEl.value = "";
+            passwordConfirmInputEl.setCustomValidity("");
             cpuSelectEl.value = DEFAULT_VCPU;
             memorySelectEl.value = DEFAULT_MEMORY_MIB;
             await loadVMs();
@@ -1042,12 +1063,20 @@ function bootstrap() {
     async function shutdownVM(name) {
         await actionVM(name, "/api/dashboard/shutdown", "VM stop requested.", "Failed to stop VM.");
     }
+    // Keep the native "passwords must match" message in sync as the user types,
+    // so the confirm field reflects the current match state on the next submit.
+    const syncPasswordMatch = () => {
+        passwordConfirmInputEl.setCustomValidity(passwordInputEl.value === passwordConfirmInputEl.value ? "" : "Passwords do not match.");
+    };
+    passwordInputEl.addEventListener("input", syncPasswordMatch);
+    passwordConfirmInputEl.addEventListener("input", syncPasswordMatch);
     formEl.addEventListener("submit", (event) => {
         event.preventDefault();
+        syncPasswordMatch();
         if (!formEl.reportValidity()) {
             return;
         }
-        void createVM(inputEl.value.trim(), usernameInputEl.value.trim(), cpuSelectEl.value, memorySelectEl.value);
+        void createVM(inputEl.value.trim(), usernameInputEl.value.trim(), passwordInputEl.value, passwordConfirmInputEl.value, cpuSelectEl.value, memorySelectEl.value);
     });
     terminalBackdropEl.addEventListener("click", () => {
         closeTerminal();

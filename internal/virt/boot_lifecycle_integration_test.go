@@ -316,7 +316,7 @@ func TestBootNewVMRecreatesExistingVM(t *testing.T) {
 	user := newBootTestUser(t, "recreateuser")
 	shortName := "recreate-vm"
 
-	vmName, err := BootNewVM(shortName, user, "", settings, 2, 4096)
+	vmName, err := BootNewVM(shortName, user, "", "", settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestBootNewVMRecreatesExistingVM(t *testing.T) {
 	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
 	firstUUID := lookupDomainUUID(t, conn, vmName)
 
-	recreatedName, err := BootNewVM(shortName, user, "", settings, 4, 8192)
+	recreatedName, err := BootNewVM(shortName, user, "", "", settings, 4, 8192)
 	if err != nil {
 		t.Fatalf("BootNewVM recreate: %v", err)
 	}
@@ -367,7 +367,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("metadata-vm", user, "", settings, 2, 4096)
+	vmName, err := BootNewVM("metadata-vm", user, "", "", settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
 	}
 
-	vmName, err := BootNewVM("vm", user, "", settings, 2, 4096)
+	vmName, err := BootNewVM("vm", user, "", "", settings, 2, 4096)
 	if err == nil {
 		t.Fatal("expected BootNewVM to fail without a valid base image URL")
 	}

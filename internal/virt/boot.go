@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
+	"rdptlsgateway/internal/hash"
 	"rdptlsgateway/internal/types"
 	"strings"
 
@@ -263,13 +264,25 @@ func InitVirt(settings *config.SettingsType) error {
 
 // BootNewVM creates or recreates a VM for the user and starts it with owner metadata.
 // guestUsername is the login account provisioned inside the guest (and used for RDP);
-// it falls back to the owning user's name when empty.
-func BootNewVM(name string, user *types.User, guestUsername string, settings *config.SettingsType, vcpu int, memoryMiB int) (vmName string, err error) {
+// it falls back to the owning user's name when empty. guestPassword is the password
+// for that guest account; it falls back to the owner's gateway password when empty.
+func BootNewVM(name string, user *types.User, guestUsername, guestPassword string, settings *config.SettingsType, vcpu int, memoryMiB int) (vmName string, err error) {
 	vmName = user.GetName() + "-" + name
 	guestUsername = strings.TrimSpace(guestUsername)
 	if guestUsername == "" {
 		guestUsername = user.GetName()
 	}
+
+	// The guest account password defaults to the owner's gateway password
+	// (preserving prior behavior) but can be overridden per VM at creation.
+	cloudInitPasswordHash := user.GetCloudInitPasswordHash()
+	if guestPassword != "" {
+		cloudInitPasswordHash, err = hash.CloudInitPasswordHash(guestPassword)
+		if err != nil {
+			return vmName, fmt.Errorf("hash guest password: %w", err)
+		}
+	}
+
 	if err := validateBootResources(vcpu, memoryMiB); err != nil {
 		return vmName, err
 	}
@@ -295,7 +308,7 @@ func BootNewVM(name string, user *types.User, guestUsername string, settings *co
 	if err := resetExistingVMArtifacts(conn, settings, poolName, vmName, seedIso); err != nil {
 		return vmName, err
 	}
-	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, name, guestUsername, user); err != nil {
+	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash); err != nil {
 		return vmName, err
 	}
 	if err := StartVMWithOwner(vmName, seedIso, poolName, vmSerialSocketPath, vmVNCSocketPath, user.GetName(), guestUsername, vcpu, memoryMiB); err != nil {
@@ -565,7 +578,7 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, settings *config.SettingsTy
 	return nil
 }
 
-func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, poolName, vmName, seedIso, hostname, guestUsername string, user *types.User) error {
+func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, poolName, vmName, seedIso, hostname, guestUsername, cloudInitPasswordHash string) error {
 	baseImage, err := ensureBaseImage(settings)
 	if err != nil {
 		return fmt.Errorf("failed to ensure base image: %w", err)
@@ -573,7 +586,7 @@ func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, 
 	if err := copyAndResizeVolumeWithSettings(conn, settings, poolName, vmName, baseImage, 40*1024*1024*1024); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
-	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, poolName, seedIso, guestUsername, user.GetCloudInitPasswordHash(), hostname); err != nil {
+	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, poolName, seedIso, guestUsername, cloudInitPasswordHash, hostname); err != nil {
 		return fmt.Errorf("failed to create seed ISO: %w", err)
 	}
 	return nil

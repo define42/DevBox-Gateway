@@ -32,6 +32,9 @@ const (
 	maxVMNameFieldLen = 128
 	// maxGuestUsernameLength matches the conventional Linux useradd limit.
 	maxGuestUsernameLength = 32
+	// maxGuestPasswordLength bounds the optional guest account password set at
+	// VM creation time.
+	maxGuestPasswordLength = 128
 )
 
 func parseFormWithBodyLimit(w http.ResponseWriter, req *http.Request) error {
@@ -266,7 +269,12 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			return
 		}
 
-		if vmName, err := virt.BootNewVM(name, user, guestUsername, settings, vcpu, memoryMiB); err != nil {
+		guestPassword, err := validateGuestPassword(req.FormValue("vm_password"), req.FormValue("vm_password_confirm"))
+		if handleDashboardFormError(w, "dashboard create", err) {
+			return
+		}
+
+		if vmName, err := virt.BootNewVM(name, user, guestUsername, guestPassword, settings, vcpu, memoryMiB); err != nil {
 			log.Printf("boot new vm %q failed: %v", vmName, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
@@ -435,6 +443,28 @@ func validateGuestUsername(raw, fallback string) (string, error) {
 		default:
 			return "", fmt.Errorf("username must start with a lowercase letter or underscore and use only lowercase letters, numbers, hyphens, or underscores")
 		}
+	}
+	return raw, nil
+}
+
+// validateGuestPassword validates the mandatory guest account password set at VM
+// creation. The password must be supplied twice (raw and confirm) and the two
+// values must match. The raw value is intentionally not trimmed because
+// surrounding whitespace can be a meaningful part of a password.
+func validateGuestPassword(raw, confirm string) (string, error) {
+	if raw == "" {
+		return "", fmt.Errorf("password is required")
+	}
+	if len(raw) > maxGuestPasswordLength {
+		return "", fmt.Errorf("password must be %d characters or fewer", maxGuestPasswordLength)
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("password must not contain control characters")
+		}
+	}
+	if raw != confirm {
+		return "", fmt.Errorf("passwords do not match")
 	}
 	return raw, nil
 }

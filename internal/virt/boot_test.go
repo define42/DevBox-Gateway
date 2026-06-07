@@ -265,7 +265,7 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(testVMName, user, "", settings, 4, 4096)
+	vmName, err := virt.BootNewVM(testVMName, user, "", "", settings, 4, 4096)
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}

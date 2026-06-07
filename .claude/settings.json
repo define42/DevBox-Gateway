@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -iE \"\\\\.ts$|tsconfig|package.json\")",
+      "Bash(npx --yes typescript@latest tsc -p tsconfig.json)",
+      "Bash(grep -nA3 \"test\" makefile)",
+      "Bash(git --no-pager diff -- handlers.go internal/virt/boot.go ui/dashboard.ts)",
+      "Bash(gofmt -w handlers.go handlers_coverage_test.go gateway_integration_helpers_test.go internal/virt/boot.go)",
+      "Bash(TMPDIR=/tmp/short go test ./internal/console/ -run TestDialDashboardSerialSocketReturnsNotReadyForMissingSocket)"
+    ]
+  }
+}

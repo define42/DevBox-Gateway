@@ -70,9 +70,11 @@ func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) s
 	createClient.Timeout = 2 * time.Minute
 
 	assertGatewayStatus(t, &createClient, http.MethodPost, server.baseURL+"/api/dashboard", url.Values{
-		"vm_name":       {shortName},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"4096"},
+		"vm_name":             {shortName},
+		"vm_password":         {"devbox-pass"},
+		"vm_password_confirm": {"devbox-pass"},
+		"vm_vcpu":             {"2"},
+		"vm_memory_mib":       {"4096"},
 	}, http.StatusOK)
 	return fullName
 }

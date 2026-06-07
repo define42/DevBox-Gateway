@@ -65,7 +65,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 		t.Fatalf("create user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(vmShortName, user, "", settings, 2, 4096)
+	vmName, err := virt.BootNewVM(vmShortName, user, "", "", settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("boot VM %s: %v", vmShortName, err)
 	}
