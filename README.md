@@ -29,6 +29,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Features](#features)
 - [Architecture](#architecture)
 - [Quick start (Docker Compose)](#quick-start-docker-compose)
+- [Installing the RPM](#installing-the-rpm)
 - [Login flow](#login-flow)
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
@@ -124,6 +125,65 @@ This stops any previous stack, rebuilds the images, and starts:
   `testldap/default-config.cfg` for local development.
 
 To stop everything: `docker compose stop`.
+
+## Installing the RPM
+
+For a native (non-container) deployment on an RPM-based distribution
+(Fedora / RHEL / Rocky / Alma / openSUSE …), each tagged release publishes a
+`rdp-tls-gateway-<version>-1.x86_64.rpm` artifact on the
+[GitHub Releases](https://github.com/define42/rdp-tls-gateway/releases) page. The
+RPM version matches the container image tag for the same release.
+
+The package installs:
+
+| Path                                            | Purpose                                              |
+|-------------------------------------------------|------------------------------------------------------|
+| `/usr/bin/rdp-tls-gateway`                       | The gateway binary.                                  |
+| `/usr/lib/systemd/system/rdp-tls-gateway.service`| systemd unit (runs as root, binds `:443`).          |
+| `/etc/rdp-tls-gateway/rdp-tls-gateway.conf`      | Config file, marked `%config(noreplace)` so your edits survive upgrades. |
+
+It depends on `libvirt-libs` and `ca-certificates`, and recommends
+`libvirt-daemon-kvm` and `qemu-kvm` to host the virtual desktops locally.
+
+1. **Install** (let `dnf` pull in the dependencies):
+
+   ```sh
+   sudo dnf install ./rdp-tls-gateway-<version>-1.x86_64.rpm
+   ```
+
+2. **Satisfy the runtime prerequisites** — the same ones as the Docker quick
+   start: a running libvirt daemon, a storage pool, write access to
+   `DATA_ROOT_DIR` (default `/data`), and at least one base image in
+   `<DATA_ROOT_DIR>/baseimages` (the gateway refuses to start with an empty
+   library). See [Libvirt and VM storage](#libvirt-and-vm-storage).
+
+3. **Configure** the gateway by editing the config file (every setting is
+   documented inline; see [Configuration](#configuration)):
+
+   ```sh
+   sudo nano /etc/rdp-tls-gateway/rdp-tls-gateway.conf
+   ```
+
+4. **Enable and start** the service (installation does not start it
+   automatically):
+
+   ```sh
+   sudo systemctl enable --now rdp-tls-gateway
+   ```
+
+5. **Check status and logs**:
+
+   ```sh
+   systemctl status rdp-tls-gateway
+   journalctl -u rdp-tls-gateway -f
+   ```
+
+To upgrade, install the newer RPM (`sudo dnf upgrade ./rdp-tls-gateway-*.rpm`);
+your config file is preserved and the service is restarted automatically. To
+remove it: `sudo dnf remove rdp-tls-gateway`.
+
+> Building the RPM yourself instead of downloading it is covered under
+> [Building from source](#building-from-source).
 
 ## Login flow
 
@@ -306,6 +366,21 @@ docker compose build
 The multi-stage `Dockerfile` compiles the TypeScript UI and the Go binary in a
 `golang:1.25-alpine` builder and ships only the resulting binary plus
 `libvirt-libs` and `ca-certificates` in the runtime image.
+
+### Building the RPM
+
+To produce the same RPM the [release workflow](#installing-the-rpm) publishes,
+run (overriding `VERSION` as needed):
+
+```sh
+make rpm VERSION=1.4.0
+```
+
+This compiles the UI and a `CGO_ENABLED=1` binary into `dist/`, then packages it
+together with the systemd unit and `rdp-tls-gateway.conf` into
+`dist/rdp-tls-gateway-<version>-1.x86_64.rpm` using the pure-Go
+[`cmd/mkrpm`](cmd/mkrpm) helper — no `rpmbuild` or spec file required. Run `go run
+./cmd/mkrpm -h` to see the available packaging flags.
 
 ### UI (TypeScript)
 
