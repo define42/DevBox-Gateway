@@ -100,6 +100,25 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release_branches: main
 
+      # -------------------------------
+      # RPM package (main only, when a new tag is cut). The RPM version uses the
+      # same numeric version the container release is tagged with (new_version is
+      # new_tag without the leading "v", as RPM versioning requires).
+      # -------------------------------
+      - name: Set up Node (for the UI TypeScript build)
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install TypeScript
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        run: npm install -g typescript@5.5.4
+
+      - name: Build RPM package
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        run: make rpm VERSION=${{ steps.tag.outputs.new_version }}
+
       - name: Create GitHub release
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
         uses: ncipollo/release-action@v1
@@ -107,6 +126,7 @@ jobs:
           tag: ${{ steps.tag.outputs.new_tag }}
           name: Release ${{ steps.tag.outputs.new_tag }}
           body: ${{ steps.tag.outputs.changelog }}
+          artifacts: "dist/*.rpm"
 
       # -------------------------------
       # Container build & push (GHCR)

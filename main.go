@@ -104,6 +104,14 @@ func bootGateway() (*gatewayRuntime, error) {
 	virt.GetInstance()
 
 	rdp.InitLogging()
+
+	// Configuration lives in a KEY=VALUE config file (default
+	// /etc/rdp-tls-gateway/rdp-tls-gateway.conf, overridable via CONFIG_FILE).
+	// Explicit environment variables still take precedence, so containers and
+	// development setups can override individual values.
+	if err := config.LoadConfigFile(config.ConfigFilePath()); err != nil {
+		return nil, fmt.Errorf("failed to load config file: %w", err)
+	}
 	settings := config.NewSettingType(true)
 	sessionManager := session.NewManager()
 	configureSessionManager(sessionManager, settings)

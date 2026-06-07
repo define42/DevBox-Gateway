@@ -1,0 +1,22 @@
+[Unit]
+Description=RDP TLS SNI gateway with libvirt-backed virtual desktops
+Documentation=https://github.com/define42/rdp-tls-gateway
+After=network-online.target libvirtd.service
+# libvirtd is a soft dependency: the gateway talks to a local libvirt daemon by
+# default, but it may also be pointed at a remote one, so do not hard-require it.
+Wants=network-online.target libvirtd.service
+
+[Service]
+Type=simple
+# The gateway reads its configuration directly from
+# /etc/rdp-tls-gateway/rdp-tls-gateway.conf (see CONFIG_FILE to relocate it).
+ExecStart=/usr/bin/rdp-tls-gateway
+Restart=on-failure
+RestartSec=5s
+# The gateway listens on :443 by default; allow binding the privileged port
+# without granting full root networking privileges.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

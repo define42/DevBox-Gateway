@@ -167,9 +167,20 @@ offer the legacy Standard RDP Security will be rejected.
 
 ## Configuration
 
-All runtime configuration is read from environment variables and registered in
+All runtime configuration is registered in
 [`internal/config/config.go`](internal/config/config.go). On start-up the
-gateway prints a table of every setting and its effective value.
+gateway loads a config file, then applies any matching environment variables on
+top, and prints a table of every setting and its effective value.
+
+**Config file.** The gateway reads a `KEY=VALUE` config file on start-up
+(default `/etc/rdp-tls-gateway/rdp-tls-gateway.conf`, overridable with the
+`CONFIG_FILE` environment variable). Blank lines and `#` comments are ignored,
+an optional leading `export` is stripped, and values may be wrapped in single or
+double quotes. A missing file is not an error — the gateway then runs purely on
+environment variables and built-in defaults. The RPM ships a fully commented
+template at this path. Each key below is both a config-file key and an
+environment variable; **an explicit environment variable always overrides the
+file**, which keeps container and development overrides working.
 
 | Variable                  | Default                                                                                                          | Description                                                                                       |
 |---------------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
