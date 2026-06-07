@@ -8,13 +8,13 @@ import (
 
 func TestConfigFilePath(t *testing.T) {
 	t.Setenv(ConfigFileEnv, "")
-	if got := ConfigFilePath(); got != DefaultConfigFile {
-		t.Fatalf("ConfigFilePath() = %q, want default %q", got, DefaultConfigFile)
+	if got := FilePath(); got != DefaultConfigFile {
+		t.Fatalf("FilePath() = %q, want default %q", got, DefaultConfigFile)
 	}
 
 	t.Setenv(ConfigFileEnv, "  /tmp/custom.env  ")
-	if got := ConfigFilePath(); got != "/tmp/custom.env" {
-		t.Fatalf("ConfigFilePath() = %q, want %q", got, "/tmp/custom.env")
+	if got := FilePath(); got != "/tmp/custom.env" {
+		t.Fatalf("FilePath() = %q, want %q", got, "/tmp/custom.env")
 	}
 }
 

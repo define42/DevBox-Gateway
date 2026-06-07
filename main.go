@@ -109,7 +109,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	// /etc/rdp-tls-gateway/rdp-tls-gateway.conf, overridable via CONFIG_FILE).
 	// Explicit environment variables still take precedence, so containers and
 	// development setups can override individual values.
-	if err := config.LoadConfigFile(config.ConfigFilePath()); err != nil {
+	if err := config.LoadConfigFile(config.FilePath()); err != nil {
 		return nil, fmt.Errorf("failed to load config file: %w", err)
 	}
 	settings := config.NewSettingType(true)

@@ -18,9 +18,9 @@ const ConfigFileEnv = "CONFIG_FILE"
 // unset. It matches the path the RPM installs and the systemd unit references.
 const DefaultConfigFile = "/etc/rdp-tls-gateway/rdp-tls-gateway.conf"
 
-// ConfigFilePath returns the config file path, honoring the CONFIG_FILE
-// environment variable and falling back to DefaultConfigFile.
-func ConfigFilePath() string {
+// FilePath returns the config file path, honoring the CONFIG_FILE environment
+// variable and falling back to DefaultConfigFile.
+func FilePath() string {
 	if p := strings.TrimSpace(os.Getenv(ConfigFileEnv)); p != "" {
 		return p
 	}
