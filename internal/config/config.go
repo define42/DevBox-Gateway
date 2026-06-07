@@ -53,10 +53,11 @@ const (
 )
 
 const (
-	acmeDataSubdir   = "acme"
-	imageDataSubdir  = "image"
-	serialDataSubdir = "serial"
-	vncDataSubdir    = "vnc"
+	acmeDataSubdir      = "acme"
+	imageDataSubdir     = "image"
+	baseImageDataSubdir = "baseimages"
+	serialDataSubdir    = "serial"
+	vncDataSubdir       = "vnc"
 )
 
 // NewSettingType builds the gateway settings from defaults and environment overrides.
@@ -72,8 +73,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", true)
 
-	s.SetString(BASE_IMAGE_URL, "URL to download base VDI image if not found locally",
-		"https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img")
+	s.SetString(BASE_IMAGE_DIR, "Directory of selectable base VDI images (.img/.qcow2/.raw); must contain at least one image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetString(CERT_FILE, "TLS certificate PEM for clients (front side)", "")
@@ -130,6 +130,18 @@ func ACMEStorageDir(settings *SettingsType) string {
 // ImageDir resolves the VM image directory below the data root.
 func ImageDir(settings *SettingsType) string {
 	return filepath.Join(DataRootDir(settings), imageDataSubdir)
+}
+
+// BaseImageDir resolves the directory holding selectable base VDI images. An
+// explicit BASE_IMAGE_DIR overrides the default <DATA_ROOT_DIR>/baseimages so
+// operators can bind-mount an image library wherever they like.
+func BaseImageDir(settings *SettingsType) string {
+	if settings != nil {
+		if configured := strings.TrimSpace(settings.Get(BASE_IMAGE_DIR)); configured != "" {
+			return filepath.Clean(configured)
+		}
+	}
+	return filepath.Join(DataRootDir(settings), baseImageDataSubdir)
 }
 
 // SerialSocketDir resolves the VM serial socket directory below the data root.
@@ -349,7 +361,7 @@ const (
 	RDP_DISABLE_DRIVES     = "RDP_DISABLE_DRIVES"
 	SNI_HASH_SECRET        = "SNI_HASH_SECRET"
 	VIRT_STORAGE_POOL_NAME = "VIRT_STORAGE_POOL_NAME"
-	BASE_IMAGE_URL         = "BASE_IMAGE_URL"
+	BASE_IMAGE_DIR         = "BASE_IMAGE_DIR"
 	TIMEOUT                = "TIMEOUT"
 )
 

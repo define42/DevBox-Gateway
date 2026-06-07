@@ -242,10 +242,18 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 			})
 			return
 		}
+		baseImages, err := virt.ListBaseImages(settings)
+		if err != nil {
+			// A listing failure should not blank the whole dashboard; the create
+			// form just shows no selectable images.
+			log.Printf("list base images: %v", err)
+			baseImages = nil
+		}
 		dashboard.WriteJSON(w, http.StatusOK, dashboard.DataResponse{
-			Filename: rdpFilename,
-			Username: user.Name,
-			VMs:      vmRows,
+			Filename:   rdpFilename,
+			Username:   user.Name,
+			VMs:        vmRows,
+			BaseImages: baseImages,
 		})
 	})
 }
@@ -258,12 +266,13 @@ type createVMInput struct {
 	user          *types.User
 	guestUsername string
 	guestPassword string
+	baseImage     string
 }
 
 // parseCreateVMInput validates and collects the create-VM form fields. It writes
 // the error response and returns ok=false when any field is invalid or the
 // session is missing.
-func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager) (createVMInput, bool) {
+func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.SettingsType) (createVMInput, bool) {
 	if err := parseFormWithBodyLimit(w, req); err != nil {
 		log.Printf("dashboard form parse failed: %v", err)
 		dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
@@ -301,6 +310,10 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	if handleDashboardFormError(w, "dashboard create", err) {
 		return createVMInput{}, false
 	}
+	baseImage, err := validateBaseImage(req.FormValue("vm_base_image"), settings)
+	if handleDashboardFormError(w, "dashboard create", err) {
+		return createVMInput{}, false
+	}
 
 	return createVMInput{
 		name:          name,
@@ -309,18 +322,19 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 		user:          user,
 		guestUsername: guestUsername,
 		guestPassword: guestPassword,
+		baseImage:     baseImage,
 	}, true
 }
 
 func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
 	registerHiddenPost(group, "/dashboard", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		input, ok := parseCreateVMInput(w, req, sessionManager)
+		input, ok := parseCreateVMInput(w, req, sessionManager, settings)
 		if !ok {
 			return
 		}
 
-		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, settings, input.vcpu, input.memoryMiB)
+		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, input.baseImage, settings, input.vcpu, input.memoryMiB)
 		if errors.Is(err, virt.ErrVMAlreadyExists) {
 			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
 				OK:    false,
@@ -505,6 +519,27 @@ func validateGuestPassword(raw, confirm string) (string, error) {
 		return "", fmt.Errorf("passwords do not match")
 	}
 	return raw, nil
+}
+
+// validateBaseImage confirms the user-selected base image is one of the images
+// currently offered by the gateway. The authoritative path-traversal guard
+// lives in virt.BootNewVM; this exists to return a friendly 400 instead of a
+// generic create failure when the selection is empty or unknown.
+func validateBaseImage(raw string, settings *config.SettingsType) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("base image is required")
+	}
+	available, err := virt.ListBaseImages(settings)
+	if err != nil {
+		return "", fmt.Errorf("unable to list base images")
+	}
+	for _, name := range available {
+		if name == raw {
+			return raw, nil
+		}
+	}
+	return "", fmt.Errorf("selected base image is not available")
 }
 
 func parseDashboardVMName(w http.ResponseWriter, req *http.Request, username string) (string, error) {

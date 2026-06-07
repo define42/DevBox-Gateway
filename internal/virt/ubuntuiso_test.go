@@ -144,7 +144,7 @@ func TestPowerLifecycleAndResourceGuards(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("power-vm", user, "", "", settings, 2, 4096)
+	vmName, err := BootNewVM("power-vm", user, "", "", testBaseImageName, settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -185,10 +185,10 @@ func TestBootNewVMRejectsInvalidResources(t *testing.T) {
 
 	settings := config.NewSettingType(false)
 
-	if _, err := BootNewVM("bad-vm", user, "", "", settings, 0, 4096); err == nil {
+	if _, err := BootNewVM("bad-vm", user, "", "", testBaseImageName, settings, 0, 4096); err == nil {
 		t.Fatal("expected invalid vcpu error")
 	}
-	if _, err := BootNewVM("bad-vm", user, "", "", settings, 2, 0); err == nil {
+	if _, err := BootNewVM("bad-vm", user, "", "", testBaseImageName, settings, 2, 0); err == nil {
 		t.Fatal("expected invalid memory error")
 	}
 }

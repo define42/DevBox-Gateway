@@ -1,112 +1,103 @@
 package virt
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
-	"sync/atomic"
 	"testing"
 )
 
-func TestEnsureBaseImageDownloadsAndReusesExistingFile(t *testing.T) {
-	var requests int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&requests, 1)
-		_, _ = w.Write([]byte("fake-image-data"))
-	}))
-	defer server.Close()
+// newBaseImageSettings returns settings whose BaseImageDir is seeded with the
+// given files (name -> contents). A nil map leaves the directory absent.
+func newBaseImageSettings(t *testing.T, files map[string][]byte) *config.SettingsType {
+	t.Helper()
 
 	settings := config.NewSettingType(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, server.URL+"/resolute.qcow2"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
+	if len(files) == 0 {
+		return settings
 	}
 
-	imagePath, err := ensureBaseImage(settings)
+	dir := config.BaseImageDir(settings)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create base image dir: %v", err)
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatalf("write base image %s: %v", name, err)
+		}
+	}
+	return settings
+}
+
+func TestListBaseImagesFiltersAndSorts(t *testing.T) {
+	settings := newBaseImageSettings(t, map[string][]byte{
+		"b.img":     []byte("x"),
+		"a.qcow2":   []byte("x"),
+		"c.RAW":     []byte("x"),
+		"notes.txt": []byte("x"),
+		"empty.img": {},
+	})
+	// A directory with a matching extension must be ignored.
+	if err := os.MkdirAll(filepath.Join(config.BaseImageDir(settings), "sub.img"), 0o755); err != nil {
+		t.Fatalf("create sub dir: %v", err)
+	}
+
+	got, err := ListBaseImages(settings)
 	if err != nil {
-		t.Fatalf("ensure base image: %v", err)
+		t.Fatalf("ListBaseImages: %v", err)
 	}
 
-	data, err := os.ReadFile(imagePath)
-	if err != nil {
-		t.Fatalf("read base image: %v", err)
+	want := []string{"a.qcow2", "b.img", "c.RAW"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
-	if got := string(data); got != "fake-image-data" {
-		t.Fatalf("unexpected base image contents %q", got)
-	}
-
-	server.Close()
-
-	reusedPath, err := ensureBaseImage(settings)
-	if err != nil {
-		t.Fatalf("ensure existing base image: %v", err)
-	}
-	if reusedPath != imagePath {
-		t.Fatalf("expected reused path %q, got %q", imagePath, reusedPath)
-	}
-	if got := atomic.LoadInt32(&requests); got != 1 {
-		t.Fatalf("expected one download request, got %d", got)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
 	}
 }
 
-func TestBaseImageURLAndPathValidationInvalidURL(t *testing.T) {
-	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "://bad-url"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
-	if _, _, err := baseImageURLAndPath(settings); err == nil {
-		t.Fatal("expected invalid base image URL error")
-	}
-}
+func TestListBaseImagesMissingDir(t *testing.T) {
+	settings := newBaseImageSettings(t, nil)
 
-func TestBaseImageURLAndPathValidationMissingImageName(t *testing.T) {
-	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
-		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
-	if _, _, err := baseImageURLAndPath(settings); err == nil {
-		t.Fatal("expected missing base image filename error")
-	}
-}
-
-func TestBaseImageURLAndPathUsesDerivedImageDir(t *testing.T) {
-	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/base.qcow2"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
-	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, "/srv/vm-root"); err != nil {
-		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
-	}
-	_, imagePath, err := baseImageURLAndPath(settings)
+	got, err := ListBaseImages(settings)
 	if err != nil {
-		t.Fatalf("baseImageURLAndPath: %v", err)
+		t.Fatalf("ListBaseImages on missing dir: %v", err)
 	}
-	if want := filepath.Join("/srv/vm-root", "image", "base.qcow2"); imagePath != want {
-		t.Fatalf("expected image path %q, got %q", want, imagePath)
+	if len(got) != 0 {
+		t.Fatalf("expected no images, got %v", got)
 	}
 }
 
-func TestBaseImageURLAndPathValidationValidPath(t *testing.T) {
-	settings := config.NewSettingType(false)
-	rootDir := filepath.Join(t.TempDir(), "gateway-root")
-	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
-		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
+func TestEnsureBaseImagesAvailable(t *testing.T) {
+	if err := EnsureBaseImagesAvailable(newBaseImageSettings(t, nil)); err == nil {
+		t.Fatal("expected error when the base image library is empty")
 	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/base.qcow2"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
+
+	populated := newBaseImageSettings(t, map[string][]byte{"base.img": []byte("data")})
+	if err := EnsureBaseImagesAvailable(populated); err != nil {
+		t.Fatalf("expected success with one image, got %v", err)
 	}
-	_, imagePath, err := baseImageURLAndPath(settings)
+}
+
+func TestResolveBaseImagePath(t *testing.T) {
+	settings := newBaseImageSettings(t, map[string][]byte{"base.img": []byte("data")})
+
+	path, err := resolveBaseImagePath(settings, "base.img")
 	if err != nil {
-		t.Fatalf("baseImageURLAndPath: %v", err)
+		t.Fatalf("resolveBaseImagePath: %v", err)
 	}
-	if want := filepath.Join(rootDir, "image", "base.qcow2"); imagePath != want {
-		t.Fatalf("expected image path %q, got %q", want, imagePath)
+	if want := filepath.Join(config.BaseImageDir(settings), "base.img"); path != want {
+		t.Fatalf("expected %q, got %q", want, path)
+	}
+
+	for _, bad := range []string{"", "   ", "missing.img", "../escape.img", "sub/base.img", `sub\base.img`, ".", ".."} {
+		if _, err := resolveBaseImagePath(settings, bad); err == nil {
+			t.Fatalf("expected error for selection %q", bad)
+		}
 	}
 }

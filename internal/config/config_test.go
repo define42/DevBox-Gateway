@@ -38,6 +38,9 @@ func TestDerivedDataPathsDefault(t *testing.T) {
 	if got := ImageDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "image") {
 		t.Fatalf("expected image dir under default root, got %q", got)
 	}
+	if got := BaseImageDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "baseimages") {
+		t.Fatalf("expected base image dir under default root, got %q", got)
+	}
 	if got := SerialSocketDir(s); got != filepath.Join(filepath.Clean(DefaultDataRootDir), "serial") {
 		t.Fatalf("expected serial dir under default root, got %q", got)
 	}
@@ -64,6 +67,9 @@ func TestDerivedDataPathsCustomRoot(t *testing.T) {
 	if got := ImageDir(s); got != filepath.Join(root, "image") {
 		t.Fatalf("expected image dir %q, got %q", filepath.Join(root, "image"), got)
 	}
+	if got := BaseImageDir(s); got != filepath.Join(root, "baseimages") {
+		t.Fatalf("expected base image dir %q, got %q", filepath.Join(root, "baseimages"), got)
+	}
 	if got := SerialSocketDir(s); got != filepath.Join(root, "serial") {
 		t.Fatalf("expected serial dir %q, got %q", filepath.Join(root, "serial"), got)
 	}
@@ -87,6 +93,9 @@ func TestDerivedDataPathsNilSettings(t *testing.T) {
 	if got := ImageDir(nil); got != filepath.Join(root, "image") {
 		t.Fatalf("expected nil-settings image dir %q, got %q", filepath.Join(root, "image"), got)
 	}
+	if got := BaseImageDir(nil); got != filepath.Join(root, "baseimages") {
+		t.Fatalf("expected nil-settings base image dir %q, got %q", filepath.Join(root, "baseimages"), got)
+	}
 	if got := SerialSocketDir(nil); got != filepath.Join(root, "serial") {
 		t.Fatalf("expected nil-settings serial dir %q, got %q", filepath.Join(root, "serial"), got)
 	}
@@ -95,6 +104,22 @@ func TestDerivedDataPathsNilSettings(t *testing.T) {
 	}
 	if got := VirtStoragePoolPath(nil); got != filepath.Join(root, "image") {
 		t.Fatalf("expected nil-settings storage pool path %q, got %q", filepath.Join(root, "image"), got)
+	}
+}
+
+func TestBaseImageDirExplicitOverride(t *testing.T) {
+	t.Setenv(DATA_ROOT_DIR, "/srv/gateway-data")
+	t.Setenv(BASE_IMAGE_DIR, " /mnt/images/ ")
+
+	s := NewSettingType(false)
+
+	// An explicit BASE_IMAGE_DIR wins over the data-root default and is cleaned.
+	if got := BaseImageDir(s); got != filepath.Clean("/mnt/images") {
+		t.Fatalf("expected explicit base image dir %q, got %q", filepath.Clean("/mnt/images"), got)
+	}
+	// The storage pool path is unaffected by BASE_IMAGE_DIR.
+	if got := VirtStoragePoolPath(s); got != filepath.Join(filepath.Clean("/srv/gateway-data"), "image") {
+		t.Fatalf("expected storage pool path under data root, got %q", got)
 	}
 }
 

@@ -3,6 +3,8 @@ services:
     build: ./
     restart: always
       #    privileged: true
+    environment:
+      - BASE_IMAGE_DIR=/data/img
     ports:
       - "443:443"
     volumes:

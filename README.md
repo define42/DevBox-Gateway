@@ -107,6 +107,9 @@ Requirements on the host:
 - A `virbr0` bridge for the macvlan network (the default libvirt NAT bridge).
 - Write access to `/data/` on the host (used for ACME data, VM images, and
   serial / VNC sockets).
+- At least one base disk image in `/data/baseimages` (`.img`, `.qcow2`, or
+  `.raw`). The gateway will not start with an empty library — see
+  [Libvirt and VM storage](#libvirt-and-vm-storage) for a download example.
 
 Start the stack:
 
@@ -135,7 +138,7 @@ Sign in with the seeded test account:
 
 A successful login redirects to `/api/dashboard`, where you can:
 
-- Create a new VM (name, vCPU count, memory).
+- Create a new VM (name, base image, vCPU count, memory).
 - Start / restart / shutdown / remove existing VMs that you own.
 - Update CPU and memory allocation.
 - Open a serial console or noVNC session in the browser.
@@ -181,7 +184,7 @@ gateway prints a table of every setting and its effective value.
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
 | `DATA_ROOT_DIR`           | `/data`                                                                                                          | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets).        |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
-| `BASE_IMAGE_URL`          | `https://github.com/define42/rocky9-desktop-cloud-image/releases/download/v0.0.18/rocky9-desktop-cloudimg-amd64-v0.0.18.img` | Base disk image URL used when bootstrapping a new VM that has no local backing image. |
+| `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable base VDI images (`.img`, `.qcow2`, `.raw`). Users pick one per VM in the dashboard. The gateway refuses to start if it is empty. |
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | LDAP server URL.                                                                                  |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |
@@ -244,13 +247,28 @@ The dashboard manages VMs through libvirt. The gateway expects:
   `docker-compose.yml`).
 - A storage pool named by `VIRT_STORAGE_POOL_NAME` (default `desktop`) backed
   by `$DATA_ROOT_DIR/image` on the host.
+- A base image library directory (`BASE_IMAGE_DIR`, default
+  `$DATA_ROOT_DIR/baseimages`) containing at least one `.img`, `.qcow2`, or
+  `.raw` disk image.
 - Network reachability from the gateway container to each VM's RDP port over
   the `virbr0` bridge. The compose file attaches the gateway to a macvlan on
   `virbr0` with a fixed address of `192.168.122.254`.
 
-When a VM is created from the dashboard and the configured base image is not
-present locally, it is downloaded from `BASE_IMAGE_URL` into
-`$DATA_ROOT_DIR/image`.
+Base images are operator-supplied: place one or more disk images in
+`BASE_IMAGE_DIR`, and the dashboard create form lets each user pick which image
+to clone for a new VM. **If the directory contains no usable image at startup,
+the gateway fails to boot** with a clear error, so populate it first.
+
+Before the first run, populate the library, for example:
+
+```sh
+mkdir -p /data/baseimages
+curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
+  https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img
+```
+
+Because `docker-compose.yml` already bind-mounts `/data/`, files dropped in
+`/data/baseimages` on the host are visible to the gateway container.
 
 ## Building from source
 

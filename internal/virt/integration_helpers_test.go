@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path"
@@ -17,7 +16,15 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-const legacyDefaultImageDir = "/data/desktop"
+const (
+	legacyDefaultImageDir = "/data/desktop"
+
+	// testBaseImageURL is the real, bootable image integration tests stage into
+	// the base-image library. It is test-only and intentionally independent of
+	// production configuration (BASE_IMAGE_DIR carries no URL).
+	testBaseImageURL  = "https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img"
+	testBaseImageName = "resolute-desktop-cloudimg-amd64-v0.0.9.img"
+)
 
 func newTestLibvirtConn(t *testing.T) *libvirt.Connect {
 	t.Helper()
@@ -92,21 +99,45 @@ func newInitVirtSettings(t *testing.T, rootDir string) *config.SettingsType {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("virt-test-pool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	stageExistingBaseImageFromDefaultRoot(t, settings)
+	// InitVirt only requires a non-empty image library (it does not clone), so a
+	// tiny placeholder avoids a real multi-gigabyte download here.
+	seedDummyBaseImage(t, settings)
 	return settings
 }
 
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) {
+// seedDummyBaseImage writes a tiny placeholder image into the library so checks
+// that only need a non-empty library (e.g. InitVirt) pass without downloading a
+// real image. It returns the seeded file name.
+func seedDummyBaseImage(t *testing.T, settings *config.SettingsType) string {
+	t.Helper()
+
+	dir := config.BaseImageDir(settings)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create base image dir %s: %v", dir, err)
+	}
+	const name = "test-base.img"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("seed dummy base image: %v", err)
+	}
+	return name
+}
+
+// stageExistingBaseImageFromDefaultRoot makes a real, bootable base image
+// available in the settings' BaseImageDir and returns the staged file name to
+// pass to BootNewVM. It is idempotent so callers can use it both to satisfy the
+// boot-time library check and to learn the selectable image name.
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
 	t.Helper()
 
 	if settings == nil {
-		return
+		return ""
 	}
-	sourcePath := ensureAccessibleBaseImageSourcePath(t, settings.Get(config.BASE_IMAGE_URL))
+	sourcePath := ensureAccessibleBaseImageSourcePath(t, testBaseImageURL)
 	if sourcePath == "" {
-		return
+		return ""
 	}
-	stageBootBaseImage(t, sourcePath, filepath.Join(config.ImageDir(settings), filepath.Base(sourcePath)))
+	stageBootBaseImage(t, sourcePath, filepath.Join(config.BaseImageDir(settings), testBaseImageName))
+	return testBaseImageName
 }
 
 func ensureAccessibleBaseImageSourcePath(t *testing.T, baseImageURL string) string {
@@ -239,15 +270,19 @@ func writeCachedBaseImage(t *testing.T, cachedPath string, body io.Reader) {
 	}
 }
 
-func newImageServer(t *testing.T, payload []byte, status int) *httptest.Server {
-	t.Helper()
-
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(status)
-		if _, err := w.Write(payload); err != nil {
-			t.Errorf("write image payload: %v", err)
-		}
-	}))
+// nonEmptyFileExists reports whether path is an existing, non-empty regular
+// file. It is a test helper (the production downloader that once needed it was
+// removed with the move to an operator-managed image library).
+func nonEmptyFileExists(path string) (bool, error) {
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return info.Size() > 0, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func waitForWorkerStop(t *testing.T, done <-chan struct{}) {

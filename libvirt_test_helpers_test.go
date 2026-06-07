@@ -3,16 +3,22 @@ package main
 import (
 	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
 	"syscall"
 	"testing"
 )
 
-const legacyDefaultImageDir = "/data/desktop"
+const (
+	legacyDefaultImageDir = "/data/desktop"
+
+	// testBaseImageURL/testBaseImageName describe the real, bootable image
+	// integration tests stage into the base-image library. They are test-only
+	// (production no longer downloads images).
+	testBaseImageURL  = "https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img"
+	testBaseImageName = "resolute-desktop-cloudimg-amd64-v0.0.9.img"
+)
 
 func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
 	t.Helper()
@@ -30,34 +36,28 @@ func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
 	return dir
 }
 
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) {
+// stageExistingBaseImageFromDefaultRoot makes a real, bootable base image
+// available in the settings' BaseImageDir and returns the staged file name (for
+// BootNewVM), downloading to a shared cache when not already present locally.
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
 	t.Helper()
 
 	if settings == nil {
-		return
+		return ""
 	}
-	parsedURL, err := url.Parse(settings.Get(config.BASE_IMAGE_URL))
-	if err != nil {
-		return
-	}
-	imageName := path.Base(parsedURL.Path)
-	if imageName == "." || imageName == "/" || imageName == "" {
-		return
-	}
-
-	sourcePath, ok := findExistingBaseImageSourcePath(imageName)
+	sourcePath, ok := findExistingBaseImageSourcePath(testBaseImageName)
 	if !ok {
-		sourcePath = ensureCachedBaseImageSourcePath(t, settings, imageName)
+		sourcePath = ensureCachedBaseImageSourcePath(t, testBaseImageName)
 	}
-	targetPath := filepath.Join(config.ImageDir(settings), imageName)
+	targetPath := filepath.Join(config.BaseImageDir(settings), testBaseImageName)
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		t.Fatalf("create image dir %s: %v", filepath.Dir(targetPath), err)
 	}
 	if _, err := os.Stat(targetPath); err == nil {
-		return
+		return testBaseImageName
 	}
 	if err := os.Link(sourcePath, targetPath); err == nil {
-		return
+		return testBaseImageName
 	}
 
 	sourceFile, err := os.Open(sourcePath)
@@ -75,9 +75,10 @@ func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settin
 	if _, err := io.Copy(targetFile, sourceFile); err != nil {
 		t.Fatalf("copy base image into test root: %v", err)
 	}
+	return testBaseImageName
 }
 
-func ensureCachedBaseImageSourcePath(t *testing.T, settings *config.SettingsType, imageName string) string {
+func ensureCachedBaseImageSourcePath(t *testing.T, imageName string) string {
 	t.Helper()
 
 	cacheDir := filepath.Join(os.TempDir(), "rdptlsgateway-test-base-image-cache")
@@ -92,7 +93,7 @@ func ensureCachedBaseImageSourcePath(t *testing.T, settings *config.SettingsType
 			return
 		}
 
-		downloadCachedBaseImage(t, settings.Get(config.BASE_IMAGE_URL), cachedPath)
+		downloadCachedBaseImage(t, testBaseImageURL, cachedPath)
 	})
 
 	return cachedPath

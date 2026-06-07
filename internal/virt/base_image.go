@@ -3,133 +3,91 @@ package virt
 
 import (
 	"fmt"
-	"log"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
-	"syscall"
+	"sort"
+	"strings"
 )
 
-func baseImageURLAndPath(settings *config.SettingsType) (string, string, error) {
-	baseImageURL := settings.Get(config.BASE_IMAGE_URL)
-	parsedURL, err := url.Parse(baseImageURL)
-	if err != nil {
-		return "", "", fmt.Errorf("parse base image URL %q: %w", baseImageURL, err)
-	}
-
-	imageName := path.Base(parsedURL.Path)
-	if imageName == "." || imageName == "/" || imageName == "" {
-		return "", "", fmt.Errorf("invalid base image URL %q", baseImageURL)
-	}
-
-	imageDir := config.ImageDir(settings)
-	if imageDir == "." {
-		return "", "", fmt.Errorf("invalid image directory derived from %q", settings.Get(config.DATA_ROOT_DIR))
-	}
-
-	return baseImageURL, filepath.Join(imageDir, imageName), nil
-}
-
-func ensureBaseImage(settings *config.SettingsType) (string, error) {
-	baseImageURL, baseImagePath, err := baseImageURLAndPath(settings)
-	if err != nil {
-		return "", err
-	}
-
-	exists, err := nonEmptyFileExists(baseImagePath)
-	if err != nil {
-		return "", fmt.Errorf("stat base image %s: %w", baseImagePath, err)
-	}
-	if exists {
-		return baseImagePath, nil
-	}
-
-	if err := ensureBaseImageDir(baseImagePath); err != nil {
-		return "", err
-	}
-
-	return ensureLockedBaseImage(baseImageURL, baseImagePath)
-}
-
-func nonEmptyFileExists(path string) (bool, error) {
-	info, err := os.Stat(path)
-	switch {
-	case err == nil:
-		return info.Size() > 0, nil
-	case os.IsNotExist(err):
-		return false, nil
+// isBaseImageName reports whether name has a recognised base-image extension
+// (.img, .qcow2, or .raw, case-insensitive).
+func isBaseImageName(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".img", ".qcow2", ".raw":
+		return true
 	default:
-		return false, err
+		return false
 	}
 }
 
-func ensureBaseImageDir(baseImagePath string) error {
-	imageDir := filepath.Dir(baseImagePath)
-	if err := os.MkdirAll(imageDir, 0o755); err != nil {
-		return fmt.Errorf("create image directory %s: %w", imageDir, err)
+// ListBaseImages returns the sorted file names of selectable base images found
+// in the configured base-image directory. Only regular, non-empty files whose
+// extension is one of .img/.qcow2/.raw are returned. A missing directory yields
+// an empty list (not an error) so callers can treat "directory absent" the same
+// as "no images yet".
+func ListBaseImages(settings *config.SettingsType) ([]string, error) {
+	dir := config.BaseImageDir(settings)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read base image directory %s: %w", dir, err)
 	}
-	return nil
+
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() || !isBaseImageName(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
-func ensureLockedBaseImage(baseImageURL, baseImagePath string) (string, error) {
-	lockFile, err := os.OpenFile(baseImagePath+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+// resolveBaseImagePath validates the user-selected base image name and returns
+// its absolute path. The name must be a bare file name (no path separators or
+// "."/"..") and must match one of the images currently in the base-image
+// directory. This is the single guard against path traversal or selecting an
+// arbitrary host file.
+func resolveBaseImagePath(settings *config.SettingsType, selected string) (string, error) {
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		return "", fmt.Errorf("base image is required")
+	}
+	if selected != filepath.Base(selected) || selected == "." || selected == ".." || strings.ContainsAny(selected, `/\`) {
+		return "", fmt.Errorf("invalid base image %q", selected)
+	}
+
+	available, err := ListBaseImages(settings)
 	if err != nil {
-		return "", fmt.Errorf("open base image lock: %w", err)
-	}
-	defer func() { _ = lockFile.Close() }()
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return "", fmt.Errorf("lock base image %s: %w", baseImagePath, err)
-	}
-	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	}()
-
-	exists, err := nonEmptyFileExists(baseImagePath)
-	if err != nil {
-		return "", fmt.Errorf("stat base image %s after lock: %w", baseImagePath, err)
-	}
-	if exists {
-		return baseImagePath, nil
-	}
-
-	if err := downloadBaseImageToPath(baseImageURL, baseImagePath); err != nil {
 		return "", err
 	}
-
-	return baseImagePath, nil
+	for _, name := range available {
+		if name == selected {
+			return filepath.Join(config.BaseImageDir(settings), selected), nil
+		}
+	}
+	return "", fmt.Errorf("base image %q is not available", selected)
 }
 
-func downloadBaseImageToPath(baseImageURL, baseImagePath string) error {
-	tmpPath, err := createTemporaryBaseImagePath(filepath.Dir(baseImagePath), filepath.Base(baseImagePath))
+// EnsureBaseImagesAvailable returns an error when no selectable base image
+// exists, so the gateway refuses to boot with an empty image library instead of
+// silently having nothing to clone VMs from.
+func EnsureBaseImagesAvailable(settings *config.SettingsType) error {
+	images, err := ListBaseImages(settings)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(tmpPath) }()
-
-	log.Printf("Base image %s not found, downloading...", baseImageURL)
-	if err := downloadWithProgress(baseImageURL, tmpPath); err != nil {
-		return fmt.Errorf("download base image: %w", err)
-	}
-	if err := os.Rename(tmpPath, baseImagePath); err != nil {
-		return fmt.Errorf("move base image into place: %w", err)
+	if len(images) == 0 {
+		return fmt.Errorf("no base images found in %s; place at least one .img/.qcow2/.raw file there", config.BaseImageDir(settings))
 	}
 	return nil
-}
-
-func createTemporaryBaseImagePath(imageDir, imageName string) (string, error) {
-	tmpFile, err := os.CreateTemp(imageDir, imageName+".*.part")
-	if err != nil {
-		return "", fmt.Errorf("create temporary base image file: %w", err)
-	}
-
-	tmpPath := tmpFile.Name()
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("close temporary base image file: %w", err)
-	}
-
-	return tmpPath, nil
 }

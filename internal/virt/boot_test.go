@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
 	typesUser "rdptlsgateway/internal/types"
@@ -25,6 +23,7 @@ const (
 	testPassword          = "dogood"
 	testTimeout           = 30 * time.Second
 	legacyDefaultImageDir = "/data/desktop"
+	testBaseImageName     = "resolute-desktop-cloudimg-amd64-v0.0.9.img"
 )
 
 func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
@@ -162,34 +161,29 @@ func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
 	return settings
 }
 
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) {
+// stageExistingBaseImageFromDefaultRoot copies a locally available base image
+// into the settings' BaseImageDir and returns its file name (for BootNewVM). It
+// is best-effort: when no source image is found it returns "" and the caller's
+// BootNewVM will fail clearly.
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
 	t.Helper()
 
 	if settings == nil {
-		return
+		return ""
 	}
-	parsedURL, err := url.Parse(settings.Get(config.BASE_IMAGE_URL))
-	if err != nil {
-		return
-	}
-	imageName := path.Base(parsedURL.Path)
-	if imageName == "." || imageName == "/" || imageName == "" {
-		return
-	}
-
-	sourcePath, ok := findExistingBaseImageSourcePath(imageName)
+	sourcePath, ok := findExistingBaseImageSourcePath(testBaseImageName)
 	if !ok {
-		return
+		return ""
 	}
-	targetPath := filepath.Join(config.ImageDir(settings), imageName)
+	targetPath := filepath.Join(config.BaseImageDir(settings), testBaseImageName)
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		t.Fatalf("Failed to create image directory %s: %v", filepath.Dir(targetPath), err)
 	}
 	if _, err := os.Stat(targetPath); err == nil {
-		return
+		return testBaseImageName
 	}
 	if err := os.Link(sourcePath, targetPath); err == nil {
-		return
+		return testBaseImageName
 	}
 
 	sourceFile, err := os.Open(sourcePath)
@@ -207,6 +201,7 @@ func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settin
 	if _, err := io.Copy(targetFile, sourceFile); err != nil {
 		t.Fatalf("Failed to copy base image into test root: %v", err)
 	}
+	return testBaseImageName
 }
 
 func findExistingBaseImageSourcePath(imageName string) (string, bool) {
@@ -265,7 +260,7 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(testVMName, user, "", "", settings, 4, 4096)
+	vmName, err := virt.BootNewVM(testVMName, user, "", "", testBaseImageName, settings, 4, 4096)
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}

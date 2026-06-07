@@ -62,6 +62,7 @@ type DashboardDataResponse = {
     filename?: string;
     username?: string;
     vms?: DashboardVM[];
+    baseImages?: string[];
     error?: string;
 };
 
@@ -206,6 +207,12 @@ function bootstrap(): void {
               <input class="form-control" id="vm-name" name="vm_name" autocomplete="off" pattern="[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?" maxlength="63" title="Lowercase letters, numbers, and hyphens only. Must start/end with a letter or number. Max 63 characters." autocapitalize="none" spellcheck="false" required>
             </div>
             <div class="col-12 col-md-6 col-lg-3">
+              <label class="form-label" for="vm-base-image">Base Image</label>
+              <select class="form-select" id="vm-base-image" name="vm_base_image" title="Disk image cloned for the new DevBox." required>
+                <option value="" disabled selected>Loading base images...</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-6 col-lg-3">
               <label class="form-label" for="vm-username">Username</label>
               <input class="form-control" id="vm-username" name="vm_username" autocomplete="off" pattern="[a-z_][a-z0-9_-]*" maxlength="32" title="Login user created inside the DevBox. Lowercase letters, numbers, hyphens, or underscores. Must start with a letter or underscore. Max 32 characters." autocapitalize="none" spellcheck="false">
             </div>
@@ -291,6 +298,7 @@ function bootstrap(): void {
     const passwordConfirmInput = root.querySelector<HTMLInputElement>("#vm-password-confirm");
     const cpuSelect = root.querySelector<HTMLSelectElement>("#vm-cpu");
     const memorySelect = root.querySelector<HTMLSelectElement>("#vm-memory");
+    const baseImageSelect = root.querySelector<HTMLSelectElement>("#vm-base-image");
     const createButton = root.querySelector<HTMLButtonElement>("#create-button");
     const actionArea = root.querySelector<HTMLDivElement>("#action-area");
     const listArea = root.querySelector<HTMLDivElement>("#vm-list");
@@ -318,6 +326,7 @@ function bootstrap(): void {
         !passwordConfirmInput ||
         !cpuSelect ||
         !memorySelect ||
+        !baseImageSelect ||
         !createButton ||
         !actionArea ||
         !listArea ||
@@ -347,6 +356,7 @@ function bootstrap(): void {
     const passwordConfirmInputEl = passwordConfirmInput;
     const cpuSelectEl = cpuSelect;
     const memorySelectEl = memorySelect;
+    const baseImageSelectEl = baseImageSelect;
     const createButtonEl = createButton;
     const actionAreaEl = actionArea;
     const listAreaEl = listArea;
@@ -374,6 +384,7 @@ function bootstrap(): void {
     let terminalResizeFrame = 0;
     let defaultUsername = "";
     let usernameInitialized = false;
+    let baseImages: string[] = [];
 
     const terminalResizeObserver = new ResizeObserver(() => {
         requestTerminalFit();
@@ -942,6 +953,42 @@ function bootstrap(): void {
         listAreaEl.appendChild(wrap);
     }
 
+    // updateCreateAvailability keeps the base image picker and the create button
+    // disabled while busy or when the gateway offers no base images to clone.
+    function updateCreateAvailability(): void {
+        const noImages = baseImages.length === 0;
+        baseImageSelectEl.disabled = state.busy || noImages;
+        createButtonEl.disabled = state.busy || noImages;
+    }
+
+    // renderBaseImageOptions rebuilds the picker from the latest list, preserving
+    // a still-valid selection. An empty list shows a disabled placeholder so the
+    // required field blocks submission.
+    function renderBaseImageOptions(): void {
+        const previous = baseImageSelectEl.value;
+        baseImageSelectEl.innerHTML = "";
+        if (baseImages.length === 0) {
+            const option = document.createElement("option");
+            option.value = "";
+            option.textContent = "No base images available";
+            option.disabled = true;
+            option.selected = true;
+            baseImageSelectEl.appendChild(option);
+            updateCreateAvailability();
+            return;
+        }
+        for (const image of baseImages) {
+            const option = document.createElement("option");
+            option.value = image;
+            option.textContent = image;
+            baseImageSelectEl.appendChild(option);
+        }
+        if (baseImages.includes(previous)) {
+            baseImageSelectEl.value = previous;
+        }
+        updateCreateAvailability();
+    }
+
     function setBusy(isBusy: boolean): void {
         state.busy = isBusy;
         inputEl.disabled = isBusy;
@@ -950,7 +997,7 @@ function bootstrap(): void {
         passwordConfirmInputEl.disabled = isBusy;
         cpuSelectEl.disabled = isBusy;
         memorySelectEl.disabled = isBusy;
-        createButtonEl.disabled = isBusy;
+        updateCreateAvailability();
         renderVMList();
     }
 
@@ -1084,6 +1131,8 @@ function bootstrap(): void {
                 return;
             }
             state.vms = result.data.vms || [];
+            baseImages = result.data.baseImages || [];
+            renderBaseImageOptions();
             if (result.data.filename) {
                 state.filename = result.data.filename;
             }
@@ -1109,7 +1158,7 @@ function bootstrap(): void {
         }
     }
 
-    async function createVM(name: string, username: string, password: string, passwordConfirm: string, vcpu: string, memoryMiB: string): Promise<void> {
+    async function createVM(name: string, username: string, password: string, passwordConfirm: string, vcpu: string, memoryMiB: string, baseImage: string): Promise<void> {
         if (state.busy) {
             return;
         }
@@ -1123,6 +1172,7 @@ function bootstrap(): void {
                 vm_password_confirm: passwordConfirm,
                 vm_vcpu: vcpu,
                 vm_memory_mib: memoryMiB,
+                vm_base_image: baseImage,
             });
             const result = await requestJSON<DashboardActionResponse>("/api/dashboard", {
                 method: "POST",
@@ -1270,6 +1320,7 @@ function bootstrap(): void {
             passwordConfirmInputEl.value,
             cpuSelectEl.value,
             memorySelectEl.value,
+            baseImageSelectEl.value,
         );
     });
 
@@ -1317,6 +1368,7 @@ function bootstrap(): void {
     renderVMList();
     renderTerminal();
     renderVNC();
+    updateCreateAvailability();
     void loadVMs();
 
     const refreshHandle = window.setInterval(() => {

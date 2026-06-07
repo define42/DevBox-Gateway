@@ -34,12 +34,7 @@ func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 
 	rootDir := newLibvirtAccessibleTempDir(t, "rdptlsgateway-root-")
 	poolName := uniquePoolName("boot-lifecycle-pool")
-	baseSettings := config.NewSettingType(false)
-	baseImageURL, _, err := baseImageURLAndPath(baseSettings)
-	if err != nil {
-		t.Fatalf("baseImageURLAndPath: %v", err)
-	}
-	baseImagePath := ensureAccessibleBaseImageSourcePath(t, baseImageURL)
+	baseImagePath := ensureAccessibleBaseImageSourcePath(t, testBaseImageURL)
 	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 	usePermissiveLibvirtVolumeMode(t)
 
@@ -49,22 +44,14 @@ func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, baseImageURL); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
 
-	stageBootBaseImage(t, baseImagePath, filepath.Join(config.ImageDir(settings), filepath.Base(baseImagePath)))
+	stageBootBaseImage(t, baseImagePath, filepath.Join(config.BaseImageDir(settings), testBaseImageName))
 }
 
 func existingBootBaseImagePath(t *testing.T) string {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
-	baseImageURL, _, err := baseImageURLAndPath(settings)
-	if err != nil {
-		t.Fatalf("baseImageURLAndPath: %v", err)
-	}
-	return ensureAccessibleBaseImageSourcePath(t, baseImageURL)
+	return ensureAccessibleBaseImageSourcePath(t, testBaseImageURL)
 }
 
 func stageBootBaseImage(t *testing.T, sourcePath, targetPath string) {
@@ -317,7 +304,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	user := newBootTestUser(t, "recreateuser")
 	shortName := "recreate-vm"
 
-	vmName, err := BootNewVM(shortName, user, "", "", settings, 2, 4096)
+	vmName, err := BootNewVM(shortName, user, "", "", testBaseImageName, settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -330,7 +317,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 
 	// Creating again with the same name must be refused (no silent recreate) so
 	// the existing VM is preserved; the user is expected to delete it first.
-	if _, err := BootNewVM(shortName, user, "", "", settings, 4, 8192); !errors.Is(err, ErrVMAlreadyExists) {
+	if _, err := BootNewVM(shortName, user, "", "", testBaseImageName, settings, 4, 8192); !errors.Is(err, ErrVMAlreadyExists) {
 		t.Fatalf("expected ErrVMAlreadyExists on duplicate create, got %v", err)
 	}
 
@@ -363,7 +350,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("metadata-vm", user, "", "", settings, 2, 4096)
+	vmName, err := BootNewVM("metadata-vm", user, "", "", testBaseImageName, settings, 2, 4096)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -418,16 +405,14 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
-
-	vmName, err := BootNewVM("vm", user, "", "", settings, 2, 4096)
+	// The image library under this test's data root is empty, so resolving the
+	// selected base image fails fast before any VM is created.
+	vmName, err := BootNewVM("vm", user, "", "", testBaseImageName, settings, 2, 4096)
 	if err == nil {
-		t.Fatal("expected BootNewVM to fail without a valid base image URL")
+		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}
-	if !strings.Contains(err.Error(), "failed to ensure base image") {
-		t.Fatalf("expected base image failure, got %v", err)
+	if !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("expected base image resolution failure, got %v", err)
 	}
 	if !strings.HasPrefix(vmName, user.GetName()+"-") {
 		t.Fatalf("expected VM name prefix %q, got %q", user.GetName()+"-", vmName)
@@ -438,7 +423,7 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 // name is always "<login-username>-<chosen-hostname>", taken from the session
 // user and the vm_name field. The separately supplied guest account name
 // (vm_username) must never leak into the VM name. It uses the same fast-fail
-// (bad base image) path as the sibling test so no VM is actually booted.
+// (empty image library) path as the sibling test so no VM is actually booted.
 func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 	settings := newBootTestSettings(t)
 	user := newBootTestUser(t, "loginuser")
@@ -448,19 +433,17 @@ func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/"); err != nil {
-		t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-	}
-
 	const chosenName = "web"
 	const guestUsername = "differentguest"
 
-	vmName, err := BootNewVM(chosenName, user, guestUsername, "", settings, 2, 4096)
+	// Empty image library => BootNewVM fails fast at base image resolution, but
+	// only after composing the VM name, which is what this test inspects.
+	vmName, err := BootNewVM(chosenName, user, guestUsername, "", testBaseImageName, settings, 2, 4096)
 	if err == nil {
-		t.Fatal("expected BootNewVM to fail without a valid base image URL")
+		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}
-	if !strings.Contains(err.Error(), "failed to ensure base image") {
-		t.Fatalf("expected base image failure (proving the boot logic ran), got %v", err)
+	if !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("expected base image resolution failure (proving the boot logic ran), got %v", err)
 	}
 
 	want := user.GetName() + "-" + chosenName

@@ -3,8 +3,6 @@ package virt
 import (
 	"context"
 	"encoding/xml"
-	"net/http"
-	"os"
 	"path/filepath"
 	"rdptlsgateway/internal/config"
 	"strings"
@@ -230,76 +228,27 @@ func assertStorageVolXMLPermissions(t *testing.T, permissions *storageVolumePerm
 	}
 }
 
-func TestInitVirtWithExistingAndDownloadedBaseImage(t *testing.T) {
-	t.Run("existing image", func(t *testing.T) {
+func TestInitVirtRequiresBaseImage(t *testing.T) {
+	t.Run("with image", func(t *testing.T) {
 		rootDir := t.TempDir()
 		settings := newInitVirtSettings(t, rootDir)
 		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
 		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
-		existingPath := filepath.Join(config.ImageDir(settings), "existing.img")
-		if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, "https://example.test/existing.img"); err != nil {
-			t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
-		}
-		if err := os.MkdirAll(filepath.Dir(existingPath), 0o755); err != nil {
-			t.Fatalf("create image dir: %v", err)
-		}
-		if err := os.WriteFile(existingPath, []byte("present"), 0o644); err != nil {
-			t.Fatalf("write existing base image: %v", err)
-		}
-
 		if err := InitVirt(settings); err != nil {
-			t.Fatalf("InitVirt with existing image: %v", err)
+			t.Fatalf("InitVirt with a populated image library: %v", err)
 		}
 	})
 
-	t.Run("download image", func(t *testing.T) {
-		rootDir := t.TempDir()
-		settings := newInitVirtSettings(t, rootDir)
-		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
-		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
-
-		server := newImageServer(t, []byte("downloaded-image"), http.StatusOK)
-		defer server.Close()
-		if err := settings.OverwriteForTestString(config.BASE_IMAGE_URL, server.URL+"/download.img"); err != nil {
-			t.Fatalf("overwrite BASE_IMAGE_URL: %v", err)
+	t.Run("empty library", func(t *testing.T) {
+		settings := config.NewSettingType(false)
+		if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
+			t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 		}
-
-		if err := InitVirt(settings); err != nil {
-			t.Fatalf("InitVirt with download: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(config.ImageDir(settings), "download.img")); err != nil {
-			t.Fatalf("expected downloaded base image to exist: %v", err)
+		if err := InitVirt(settings); err == nil {
+			t.Fatal("expected InitVirt to fail with an empty base image library")
 		}
 	})
-}
-
-func TestDownloadWithProgress(t *testing.T) {
-	server := newImageServer(t, []byte("tiny-image"), http.StatusOK)
-	defer server.Close()
-
-	target := filepath.Join(t.TempDir(), "image.bin")
-	if err := downloadWithProgress(server.URL+"/image.bin", target); err != nil {
-		t.Fatalf("downloadWithProgress: %v", err)
-	}
-
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("read downloaded file: %v", err)
-	}
-	if string(data) != "tiny-image" {
-		t.Fatalf("expected downloaded payload %q, got %q", "tiny-image", string(data))
-	}
-}
-
-func TestDownloadWithProgressRejectsNonOKStatus(t *testing.T) {
-	server := newImageServer(t, []byte("not-found"), http.StatusNotFound)
-	defer server.Close()
-
-	target := filepath.Join(t.TempDir(), "missing.bin")
-	if err := downloadWithProgress(server.URL+"/missing.bin", target); err == nil {
-		t.Fatal("expected non-OK download error")
-	}
 }
 
 func TestSingletonWorkerStop(t *testing.T) {

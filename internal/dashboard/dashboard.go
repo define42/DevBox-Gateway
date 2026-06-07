@@ -42,10 +42,11 @@ type VM struct {
 
 // DataResponse is the API response for /api/dashboard/data.
 type DataResponse struct {
-	Filename string `json:"filename"`
-	Username string `json:"username,omitempty"`
-	VMs      []VM   `json:"vms"`
-	Error    string `json:"error,omitempty"`
+	Filename   string   `json:"filename"`
+	Username   string   `json:"username,omitempty"`
+	VMs        []VM     `json:"vms"`
+	BaseImages []string `json:"baseImages,omitempty"`
+	Error      string   `json:"error,omitempty"`
 }
 
 // ActionResponse is the API response envelope used by dashboard actions.

@@ -75,6 +75,7 @@ func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) s
 		"vm_password_confirm": {"devbox-pass"},
 		"vm_vcpu":             {"2"},
 		"vm_memory_mib":       {"4096"},
+		"vm_base_image":       {testBaseImageName},
 	}, http.StatusOK)
 	return fullName
 }
@@ -90,6 +91,7 @@ func assertGatewayVMCreateConflict(t *testing.T, server gatewayTestServer, short
 		"vm_password_confirm": {"devbox-pass"},
 		"vm_vcpu":             {"2"},
 		"vm_memory_mib":       {"4096"},
+		"vm_base_image":       {testBaseImageName},
 	}, http.StatusConflict, "already exists")
 }
 
