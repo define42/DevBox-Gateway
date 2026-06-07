@@ -77,8 +77,11 @@ func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*SeedUser
 		},
 		Users: []SeedUser{
 			{
-				Name:       username,
-				Sudo:       "ALL=(ALL) NOPASSWD:ALL",
+				Name: username,
+				// Require the account password to escalate to root (sudo prompts)
+				// rather than passwordless sudo, so a hijacked desktop session
+				// cannot silently become root without knowing the password.
+				Sudo:       "ALL=(ALL) ALL",
 				Shell:      "/bin/bash",
 				LockPasswd: false,
 				Passwd:     cloudInitPasswordHash,
