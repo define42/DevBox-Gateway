@@ -8,15 +8,17 @@ import (
 	"log"
 	"net/http"
 	"rdptlsgateway/internal/config"
-	consolepkg "rdptlsgateway/internal/console"
-	dashboard "rdptlsgateway/internal/dashboard"
 	"rdptlsgateway/internal/ldap"
+	"rdptlsgateway/internal/localauth"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/types"
 	"rdptlsgateway/internal/virt"
 	"rdptlsgateway/internal/vmname"
 	"strconv"
 	"strings"
+
+	consolepkg "rdptlsgateway/internal/console"
+	dashboard "rdptlsgateway/internal/dashboard"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -92,15 +94,26 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 			return
 		}
 
-		user, err := ldap.AuthenticateAccess(username, password, settings)
+		user, err := authenticateLogin(username, password, settings)
 		if err != nil {
-			log.Printf("ldap auth failed for %s: %v", username, err)
+			log.Printf("auth failed for %s: %v", username, err)
 			serveLogin(w, "Invalid credentials.")
 			return
 		}
 
 		completeLogin(sessionManager, w, r, user, password)
 	}
+}
+
+// authenticateLogin authorizes a login attempt. Local users (matched against the
+// LOCAL_USER_SHA256 digests) are checked first so the gateway works without a
+// directory and without an LDAP round-trip; otherwise the credentials are
+// validated against LDAP.
+func authenticateLogin(username, password string, settings *config.SettingsType) (*types.User, error) {
+	if localauth.Validate(username, password, settings) {
+		return types.NewUser(username, password)
+	}
+	return ldap.AuthenticateAccess(username, password, settings)
 }
 
 func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User, password string) {

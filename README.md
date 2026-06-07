@@ -36,6 +36,7 @@ else is treated as an RDP X.224 Connection Request.
   - [Disabling clipboard and drive redirection](#disabling-clipboard-and-drive-redirection)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
+  - [Local users](#local-users)
   - [Libvirt and VM storage](#libvirt-and-vm-storage)
 - [Building from source](#building-from-source)
 - [Testing and linting](#testing-and-linting)
@@ -284,6 +285,7 @@ file**, which keeps container and development overrides working.
 | `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Domain appended to bare usernames before they are substituted into `LDAP_USER_FILTER`.            |
 | `LDAP_STARTTLS`           | `false`                                                                                                          | When `true`, upgrade plain LDAP connections with StartTLS.                                        |
 | `LDAP_SKIP_TLS_VERIFY`    | `true`                                                                                                           | When `true`, skip TLS certificate verification against the LDAP server.                           |
+| `LOCAL_USER_SHA256`       | _(empty)_                                                                                                        | `;`-delimited list of `sha256("username:password")` hex digests for local users authenticated without LDAP. Checked before LDAP. |
 | `RDP_DISABLE_CLIPBOARD`   | `false`                                                                                                          | When `true`, strip the `cliprdr` virtual channel from every proxied session.                      |
 | `RDP_DISABLE_DRIVES`      | `false`                                                                                                          | When `true`, strip the `rdpdr` virtual channel from every proxied session.                        |
 
@@ -331,6 +333,32 @@ For local development, the bundled `glauth` container is configured in
 adjust `LDAP_BASE_DN`, `LDAP_USER_FILTER`, and `LDAP_USER_DOMAIN` to match.
 Prefer `ldaps://` or `LDAP_STARTTLS=true` and set
 `LDAP_SKIP_TLS_VERIFY=false` once your CA chain is trusted.
+
+### Local users
+
+Alongside LDAP, a small set of accounts can be authenticated offline against a
+static list of digests in `LOCAL_USER_SHA256` — useful for a break-glass admin
+or a deployment without a directory. Each entry is the lowercase hex
+`sha256("<username>:<password>")`, and multiple entries are separated by `;`.
+
+Generate a digest:
+
+```sh
+printf '%s:%s' alice 's3cret' | sha256sum
+```
+
+Then configure one or more (whitespace around entries is ignored):
+
+```sh
+LOCAL_USER_SHA256=2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b;<another-digest>
+```
+
+Local users are checked **before** LDAP, so a successful local match skips the
+directory entirely (no LDAP round-trip, and it keeps working if LDAP is down). A
+login that doesn't match any digest falls through to LDAP as usual. Leave
+`LOCAL_USER_SHA256` empty to disable local users. Because the credential is a
+plain salt-less digest, treat the config file as a secret and use strong,
+unique passwords.
 
 ### Libvirt and VM storage
 

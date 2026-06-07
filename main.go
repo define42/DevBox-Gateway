@@ -34,6 +34,7 @@ import (
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/ldap"
+	"rdptlsgateway/internal/localauth"
 	"rdptlsgateway/internal/rdp"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
@@ -266,6 +267,9 @@ func (l *singleConnListener) Close() error {
 
 func configureSessionManager(sessionManager *session.Manager, settings *config.SettingsType) {
 	sessionManager.SetSessionValidator(func(username, password string) (bool, error) {
+		if localauth.Validate(username, password, settings) {
+			return true, nil
+		}
 		return ldap.ValidateSessionAccess(username, password, settings)
 	})
 }

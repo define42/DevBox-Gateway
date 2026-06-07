@@ -73,6 +73,8 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", true)
 
+	s.SetString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
+
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable base VDI images (.img/.qcow2/.raw); must contain at least one image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
@@ -356,6 +358,7 @@ const (
 	LDAP_USER_DOMAIN       = "LDAP_USER_DOMAIN"
 	LDAP_STARTTLS          = "LDAP_STARTTLS"
 	LDAP_SKIP_TLS_VERIFY   = "LDAP_SKIP_TLS_VERIFY"
+	LOCAL_USER_SHA256      = "LOCAL_USER_SHA256"
 	LISTEN_ADDR            = "LISTEN_ADDR"
 	RDP_DISABLE_CLIPBOARD  = "RDP_DISABLE_CLIPBOARD"
 	RDP_DISABLE_DRIVES     = "RDP_DISABLE_DRIVES"
