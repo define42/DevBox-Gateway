@@ -270,6 +270,10 @@ func configureSessionManager(sessionManager *session.Manager, settings *config.S
 		if localauth.Validate(username, password, settings) {
 			return true, nil
 		}
+		if !ldap.Configured(settings) {
+			// Local-users-only mode: a non-local session is no longer valid.
+			return false, nil
+		}
 		return ldap.ValidateSessionAccess(username, password, settings)
 	})
 }

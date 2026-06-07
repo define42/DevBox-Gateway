@@ -113,6 +113,10 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 	if localauth.Validate(username, password, settings) {
 		return types.NewUser(username, password)
 	}
+	if !ldap.Configured(settings) {
+		// Local-users-only mode: no directory to fall back to.
+		return nil, errors.New("invalid credentials")
+	}
 	return ldap.AuthenticateAccess(username, password, settings)
 }
 

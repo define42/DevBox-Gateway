@@ -12,6 +12,13 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+// Configured reports whether an LDAP directory is configured. When LDAP_URL is
+// empty the gateway runs in local-users-only mode (see internal/localauth) and
+// callers should skip LDAP entirely rather than attempt a dial.
+func Configured(settings *config.SettingsType) bool {
+	return strings.TrimSpace(settings.Get(config.LDAP_URL)) != ""
+}
+
 // AuthenticateAccess authenticates a user against LDAP and returns the gateway user model.
 func AuthenticateAccess(username, password string, settings *config.SettingsType) (*types.User, error) {
 	conn, err := dialLDAP(settings)

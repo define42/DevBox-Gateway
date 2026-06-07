@@ -8,6 +8,18 @@ import (
 	ldaplib "github.com/go-ldap/ldap/v3"
 )
 
+func TestConfigured(t *testing.T) {
+	t.Setenv(config.LDAP_URL, "ldaps://ldap:389")
+	if !Configured(config.NewSettingType(false)) {
+		t.Fatal("expected Configured=true when LDAP_URL is set")
+	}
+
+	t.Setenv(config.LDAP_URL, "   ")
+	if Configured(config.NewSettingType(false)) {
+		t.Fatal("expected Configured=false when LDAP_URL is blank")
+	}
+}
+
 func TestIsLDAPCredentialErrorNonLDAP(t *testing.T) {
 	if isLDAPCredentialError(errors.New("not an ldap error")) {
 		t.Fatal("expected isLDAPCredentialError=false for generic error")

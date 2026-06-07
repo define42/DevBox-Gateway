@@ -360,6 +360,13 @@ login that doesn't match any digest falls through to LDAP as usual. Leave
 plain salt-less digest, treat the config file as a secret and use strong,
 unique passwords.
 
+**Local users only (no LDAP).** Set `LDAP_URL=` (empty) to run without a
+directory at all. The gateway then authenticates solely against
+`LOCAL_USER_SHA256` and never attempts an LDAP connection — a login that matches
+no digest is simply rejected. With the default non-empty `LDAP_URL`, the gateway
+still treats LDAP as a fallback, so for a clean local-only deployment clear
+`LDAP_URL` as well.
+
 ### Libvirt and VM storage
 
 The dashboard manages VMs through libvirt. The gateway expects:
