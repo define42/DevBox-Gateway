@@ -7,7 +7,7 @@ import (
 )
 
 func TestUbuntuDomainUsesManagedVNCSocket(t *testing.T) {
-	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", "/tmp/alice-devbox.serial.sock", 4, 4096)
+	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
 
 	// libvirt allocates and labels the VNC socket; the domain XML must not pin an
 	// explicit graphics socket path (that is what broke socket bind under SELinux).

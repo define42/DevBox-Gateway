@@ -244,14 +244,9 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 		t.Fatalf("CreateUbuntuSeedISOToPool: %v", err)
 	}
 
-	// The VNC socket is libvirt-managed; the serial socket is gateway-owned, so
-	// its directory must exist before libvirt binds it (production does this via
-	// prepareBootSerialSocketPath in BootNewVM).
-	if _, err := ensureSerialSocketDir(settings); err != nil {
-		t.Fatalf("ensureSerialSocketDir: %v", err)
-	}
-	serialPath := serialSocketPath(settings, vmName)
-	if err := StartVM(vmName, seedISO, poolName, serialPath, vcpu, memoryMB); err != nil {
+	// VNC socket and serial PTY are both libvirt-managed; the gateway prepares no
+	// console sockets.
+	if err := StartVM(vmName, seedISO, poolName, vcpu, memoryMB); err != nil {
 		t.Fatalf("StartVM: %v", err)
 	}
 

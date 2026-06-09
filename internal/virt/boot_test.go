@@ -101,9 +101,9 @@ func waitForSerialSocket(t *testing.T, vmName string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		conn, err := virt.DialSerialSocket(vmName, time.Second)
+		console, err := virt.OpenSerialConsole(vmName)
 		if err == nil {
-			_ = conn.Close()
+			_ = console.Close()
 			return
 		}
 		if errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
@@ -114,7 +114,7 @@ func waitForSerialSocket(t *testing.T, vmName string, timeout time.Duration) {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		t.Fatalf("DialSerialSocket(%s) failed: %v", vmName, err)
+		t.Fatalf("OpenSerialConsole(%s) failed: %v", vmName, err)
 	}
 
 	t.Fatalf("serial socket for %s was not ready within %s: %v", vmName, timeout, lastErr)

@@ -2,28 +2,22 @@ package console
 
 import (
 	"errors"
-	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 )
 
 func TestDashboardConsoleRouteRejectsUnauthorizedRequests(t *testing.T) {
 	sessionManager := session.NewManager()
-	settings := config.NewSettingType(false)
 
 	router := chi.NewRouter()
 	router.Use(sessionManager.LoadAndSave)
-	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(sessionManager, settings))
+	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(sessionManager))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/console/alice-devbox/ws", nil)
 	rec := httptest.NewRecorder()
@@ -90,71 +84,9 @@ func TestParseDashboardVMPathParam(t *testing.T) {
 	}
 }
 
-func TestDialDashboardSerialSocket(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "dashboard.serial.sock")
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("listen on unix socket: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = listener.Close()
-	})
-
-	acceptedCh := make(chan net.Conn, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		conn, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			errCh <- acceptErr
-			return
-		}
-		acceptedCh <- conn
-	}()
-
-	clientConn, err := dialDashboardSerialSocket(socketPath, time.Second)
-	if err != nil {
-		t.Fatalf("dialDashboardSerialSocket(%q): %v", socketPath, err)
-	}
-	defer func() { _ = clientConn.Close() }()
-
-	var serverConn net.Conn
-	select {
-	case serverConn = <-acceptedCh:
-	case err := <-errCh:
-		t.Fatalf("accept dashboard serial socket: %v", err)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for accepted dashboard serial socket")
-	}
-	defer func() { _ = serverConn.Close() }()
-
-	want := []byte("hello from terminal")
-	if _, err := clientConn.Write(want); err != nil {
-		t.Fatalf("write to dashboard serial socket: %v", err)
-	}
-
-	got := make([]byte, len(want))
-	if _, err := io.ReadFull(serverConn, got); err != nil {
-		t.Fatalf("read from accepted dashboard serial socket: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Fatalf("expected payload %q, got %q", string(want), string(got))
-	}
-}
-
-func TestDialDashboardSerialSocketReturnsNotReadyForMissingSocket(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "missing.serial.sock")
-
-	conn, err := dialDashboardSerialSocket(socketPath, time.Second)
-	if err == nil {
-		if conn != nil {
-			_ = conn.Close()
-		}
-		t.Fatal("expected missing socket dial to fail")
-	}
-	if !errors.Is(err, virt.ErrSerialConsoleNotReady) {
-		t.Fatalf("expected ErrSerialConsoleNotReady, got %v", err)
-	}
-}
+// The serial console no longer dials a socket path — virt.OpenSerialConsole
+// streams it via libvirt's OpenConsole, which needs a live domain and is covered
+// by the virt package's integration test (waitForSerialSocket).
 
 func TestWriteDashboardSerialSocketError(t *testing.T) {
 	tests := []struct {

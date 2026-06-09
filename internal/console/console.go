@@ -9,20 +9,17 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/virt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
 // HandleDashboardConsoleWS serves the serial console websocket endpoint.
-func HandleDashboardConsoleWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
+func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
@@ -46,7 +43,10 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 			return
 		}
 
-		serialConn, err := openDashboardSerialSocket(name, settings.GetDuration(config.TIMEOUT))
+		// The serial socket is libvirt-managed; the gateway cannot connect to its
+		// path directly, so OpenSerialConsole has libvirt stream the console (same
+		// reason VNC uses OpenVNCConn).
+		console, err := virt.OpenSerialConsole(name)
 		if err != nil {
 			writeDashboardSerialSocketError(w, name, err)
 			return
@@ -58,32 +58,13 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager, settings *config.
 
 		ws, err := dashboardSocketUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			_ = serialConn.Close()
+			_ = console.Close()
 			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
 			return
 		}
 
-		bridgeDashboardSocket("terminal", name, ws, serialConn)
+		bridgeSerialConsole(name, ws, console)
 	}
-}
-
-func openDashboardSerialSocket(name string, timeout time.Duration) (net.Conn, error) {
-	socketPath, err := virt.SerialSocketPathForDomain(name)
-	if err != nil {
-		return nil, err
-	}
-	return dialDashboardSerialSocket(socketPath, timeout)
-}
-
-func dialDashboardSerialSocket(socketPath string, timeout time.Duration) (net.Conn, error) {
-	serialConn, err := net.DialTimeout("unix", socketPath, timeout)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, virt.ErrSerialConsoleNotReady
-		}
-		return nil, fmt.Errorf("dial serial socket %s: %w", socketPath, err)
-	}
-	return serialConn, nil
 }
 
 func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err error) {
@@ -187,6 +168,83 @@ func writeDashboardVNCOwnershipError(w http.ResponseWriter, name, username strin
 
 	log.Printf("user %q attempted to access VNC for vm %q not owned by them", username, name)
 	http.Error(w, "You do not have permission to access this VM VNC session.", http.StatusForbidden)
+}
+
+// bridgeSerialConsole proxies a libvirt serial console stream to the websocket.
+// The stream cannot be freed while a Recv/Send is in flight, so on shutdown it
+// only Interrupts (to unblock both goroutines) and frees the session via Close
+// after both have returned.
+func bridgeSerialConsole(name string, ws *websocket.Conn, console *virt.SerialConsole) {
+	var wg sync.WaitGroup
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			_ = console.Interrupt()
+			_ = ws.Close()
+		})
+	}
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		defer stop()
+		pumpConsoleToWebsocket(name, ws, console)
+	}()
+	go func() {
+		defer wg.Done()
+		defer stop()
+		pumpWebsocketToConsole(ws, console)
+	}()
+
+	wg.Wait()
+	_ = console.Close()
+}
+
+func pumpConsoleToWebsocket(name string, ws *websocket.Conn, console *virt.SerialConsole) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := console.Recv(buf)
+		if n > 0 {
+			if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !isExpectedConsoleClose(err) {
+				log.Printf("dashboard terminal recv for vm %q ended: %v", name, err)
+			}
+			return
+		}
+	}
+}
+
+func pumpWebsocketToConsole(ws *websocket.Conn, console *virt.SerialConsole) {
+	for {
+		messageType, payload, err := ws.ReadMessage()
+		if err != nil {
+			return
+		}
+		if messageType != websocket.BinaryMessage && messageType != websocket.TextMessage {
+			continue
+		}
+		if err := sendAllToConsole(console, payload); err != nil {
+			return
+		}
+	}
+}
+
+func sendAllToConsole(console *virt.SerialConsole, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := console.Send(payload)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return io.ErrShortWrite
+		}
+		payload = payload[n:]
+	}
+	return nil
 }
 
 func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn net.Conn) {

@@ -13,7 +13,7 @@ import (
 func TestUbuntuDomainEscapesValues(t *testing.T) {
 	const malicious = `evil</name><devices><disk device='disk'/></devices><name>x`
 
-	xmlDoc := UbuntuDomain(malicious, "seed.iso", "pool", "/tmp/s.sock", 2, 2048)
+	xmlDoc := UbuntuDomain(malicious, "seed.iso", "pool", 2, 2048)
 
 	if strings.Contains(xmlDoc, "</name><devices><disk") {
 		t.Fatalf("injected XML must not appear unescaped:\n%s", xmlDoc)

@@ -182,7 +182,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	apiCfg.SchemasPath = ""
 	api := humachi.New(router, apiCfg)
 	registerAPI(api, sessionManager, settings)
-	router.Get("/api/dashboard/console/{name}/ws", consolepkg.HandleDashboardConsoleWS(sessionManager, settings))
+	router.Get("/api/dashboard/console/{name}/ws", consolepkg.HandleDashboardConsoleWS(sessionManager))
 	router.Get("/api/dashboard/vnc/{name}/ws", consolepkg.HandleDashboardVNCWS(sessionManager))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {

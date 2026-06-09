@@ -66,11 +66,12 @@ const ubuntuDomainXML = `<domain type='kvm'>
       <model type='virtio' heads='1' primary='yes'/>
     </video>
 
-    <!-- Serial console: explicit unix socket path. Unlike VNC, libvirt itself
-         opens this socket (as root) and passes the fd to QEMU, so it is not
-         subject to svirt's confinement and the gateway-chosen path is fine. -->
-    <serial type='unix'>
-      <source mode='bind' path='%s'/>
+    <!-- Serial console: a libvirt-managed PTY. The gateway reads it via libvirt's
+         OpenConsole stream (see OpenSerialConsole), so it never touches the PTY
+         device directly — which keeps it working under SELinux. OpenConsole
+         requires a PTY-backed console, hence type='pty' rather than a unix
+         socket. -->
+    <serial type='pty'>
       <target port='0'/>
     </serial>
 
@@ -85,18 +86,17 @@ const ubuntuDomainXML = `<domain type='kvm'>
 </domain>`
 
 // UbuntuDomain returns the libvirt domain XML for a standard Ubuntu VM. The VNC
-// socket is libvirt-managed (no explicit path) so libvirt allocates and
-// SELinux-labels it under its per-domain runtime dir, while the serial socket
-// uses the gateway-chosen serialSocketPath (libvirt opens it as root and passes
-// the fd to QEMU, so svirt does not block it). Every interpolated value is
-// XML-escaped so a name or path can never alter the document structure.
-func UbuntuDomain(name, seedIso, storagePoolName, serialSocketPath string, vcpu int, memoryMiB int) string {
+// socket and serial console are both libvirt-managed (no gateway-chosen paths):
+// libvirt allocates and SELinux-labels the VNC socket under its per-domain
+// runtime dir, and the serial console is a PTY. The gateway reaches both only
+// through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
+// Every interpolated value is XML-escaped so a name can never alter the document.
+func UbuntuDomain(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) string {
 	return fmt.Sprintf(
 		ubuntuDomainXML,
 		xmlValue(name), memoryMiB, memoryMiB, vcpu,
 		xmlValue(storagePoolName), xmlValue(name),
 		xmlValue(storagePoolName), xmlValue(seedIso),
-		xmlValue(serialSocketPath),
 	)
 }
 

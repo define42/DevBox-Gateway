@@ -4,28 +4,18 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"net"
-	"os"
 	"path/filepath"
-	"rdptlsgateway/internal/config"
-	"strconv"
 	"strings"
-	"time"
 
 	"libvirt.org/go/libvirt"
 )
 
-const (
-	serialSocketSubdir = "serial"
-	serialSocketSuffix = ".serial.sock"
-)
-
 var (
-	// ErrSerialConsoleNotConfigured reports that the domain does not expose a serial console socket.
+	// ErrSerialConsoleNotConfigured reports that the domain does not expose a serial console.
 	ErrSerialConsoleNotConfigured = errors.New("serial console not configured")
 	// ErrSerialConsoleNotRunning reports that the domain is not running.
 	ErrSerialConsoleNotRunning = errors.New("serial console not running")
-	// ErrSerialConsoleNotReady reports that the serial console socket path does not exist yet.
+	// ErrSerialConsoleNotReady reports that the serial console is not ready yet.
 	ErrSerialConsoleNotReady = errors.New("serial console not ready")
 )
 
@@ -42,43 +32,16 @@ type domainSerialDeviceXML struct {
 	} `xml:"source"`
 }
 
-func serialSocketDir(settings *config.SettingsType) string {
-	return config.SerialSocketDir(settings)
-}
-
-func serialSocketPath(settings *config.SettingsType, name string) string {
-	return filepath.Join(serialSocketDir(settings), name+serialSocketSuffix)
-}
-
-func ensureSerialSocketDir(settings *config.SettingsType) (string, error) {
-	return ensureSocketDir(serialSocketDir(settings), "serial")
-}
-
-func removeSerialSocket(settings *config.SettingsType, name string) error {
-	return removeSocketPath(serialSocketPath(settings, name), "serial")
-}
-
-func cleanupDomainSerialSocket(dom *libvirt.Domain) error {
-	socketPath, ok, err := domainSerialSocketPath(dom)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-	return removeSocketPath(socketPath, "serial")
-}
-
 func serialSocketPathFromDomainXML(xmlDesc string) (string, bool, error) {
 	var parsed domainSerialXML
 	if err := xml.Unmarshal([]byte(xmlDesc), &parsed); err != nil {
 		return "", false, fmt.Errorf("parse domain xml: %w", err)
 	}
 
+	// A serial with an allocated source path (a PTY like /dev/pts/N on a running
+	// domain, or a unix socket) indicates a usable console. A stopped domain's PTY
+	// serial has no source path yet, so this reports the console as unavailable.
 	for _, serial := range parsed.Devices.Serials {
-		if strings.TrimSpace(serial.Type) != "unix" {
-			continue
-		}
 		path := filepath.Clean(strings.TrimSpace(serial.Source.Path))
 		if path == "" || path == "." {
 			continue
@@ -100,102 +63,86 @@ func domainSerialSocketPath(dom *libvirt.Domain) (string, bool, error) {
 	return serialSocketPathFromDomainXML(xmlDesc)
 }
 
-// SerialSocketPathForDomain returns the serial socket path for a running domain.
-func SerialSocketPathForDomain(name string) (string, error) {
+// SerialConsole is an open serial-console session backed by a libvirt console
+// stream. libvirt performs the underlying socket access itself (as root, over its
+// RPC stream), so the gateway never connects to the serial unix socket directly —
+// which a non-root or SELinux-confined gateway cannot do because libvirt labels
+// that socket with the VM's svirt MCS categories. This is the serial analog of
+// OpenVNCConn and how `virsh console` works.
+//
+// Recv and Send may be called concurrently from one reader and one writer
+// goroutine. Interrupt unblocks any in-flight Recv/Send; Close must be called
+// only after both goroutines have returned (so it never frees the stream while a
+// C call is still using it).
+type SerialConsole struct {
+	conn   *libvirt.Connect
+	dom    *libvirt.Domain
+	stream *libvirt.Stream
+}
+
+// OpenSerialConsole opens the default serial console of a running domain.
+func OpenSerialConsole(name string) (*SerialConsole, error) {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
-		return "", fmt.Errorf("connect libvirt: %w", err)
+		return nil, fmt.Errorf("connect libvirt: %w", err)
 	}
-	defer func() {
-		_, _ = conn.Close()
-	}()
 
 	dom, err := conn.LookupDomainByName(name)
 	if err != nil {
-		return "", fmt.Errorf("lookup domain %s: %w", name, err)
+		_, _ = conn.Close()
+		return nil, fmt.Errorf("lookup domain %s: %w", name, err)
 	}
-	defer func() {
-		_ = dom.Free()
-	}()
 
 	active, err := dom.IsActive()
 	if err != nil {
-		return "", fmt.Errorf("check domain active %s: %w", name, err)
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, fmt.Errorf("check domain active %s: %w", name, err)
 	}
 	if !active {
-		return "", ErrSerialConsoleNotRunning
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, ErrSerialConsoleNotRunning
 	}
 
-	socketPath, ok, err := domainSerialSocketPath(dom)
+	// Blocking stream (flags 0): Recv/Send block until data/EOF, so no libvirt
+	// event loop is required.
+	stream, err := conn.NewStream(0)
 	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", ErrSerialConsoleNotConfigured
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, fmt.Errorf("new console stream for %s: %w", name, err)
 	}
 
-	return socketPath, nil
+	// devname "" selects the domain's default console; FORCE evicts a stale
+	// client still holding it.
+	if err := dom.OpenConsole("", stream, libvirt.DOMAIN_CONSOLE_FORCE); err != nil {
+		_ = stream.Free()
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, fmt.Errorf("open console for %s: %w", name, err)
+	}
+
+	return &SerialConsole{conn: conn, dom: dom, stream: stream}, nil
 }
 
-// DialSerialSocket connects to the serial socket for a running domain.
-func DialSerialSocket(name string, timeout time.Duration) (net.Conn, error) {
-	socketPath, err := SerialSocketPathForDomain(name)
-	if err != nil {
-		return nil, err
-	}
+// Recv reads console output into p. It blocks until data is available and
+// returns io.EOF when the console closes.
+func (s *SerialConsole) Recv(p []byte) (int, error) { return s.stream.Recv(p) }
 
-	serialConn, err := net.DialTimeout("unix", socketPath, timeout)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, ErrSerialConsoleNotReady
-		}
-		return nil, fmt.Errorf("dial serial socket %s: %w", socketPath, err)
-	}
-	return serialConn, nil
-}
+// Send writes p to the console. It may perform a partial write (callers should
+// loop until all bytes are sent).
+func (s *SerialConsole) Send(p []byte) (int, error) { return s.stream.Send(p) }
 
-func socketOwnership() (int, int, bool, error) {
-	owner, hasOwner, err := parseSocketOwnershipEnv(volumeOwnerEnv)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	group, hasGroup, err := parseSocketOwnershipEnv(volumeGroupEnv)
-	if err != nil {
-		return 0, 0, false, err
-	}
-	if !hasOwner && !hasGroup {
-		return 0, 0, false, nil
-	}
+// Interrupt aborts the stream, unblocking any in-flight Recv/Send so the
+// reader/writer goroutines can exit before Close.
+func (s *SerialConsole) Interrupt() error { return s.stream.Abort() }
 
-	if !hasOwner {
-		owner = -1
-	}
-	if !hasGroup {
-		group = -1
-	}
-
-	return owner, group, true, nil
-}
-
-func parseSocketOwnershipEnv(envVar string) (int, bool, error) {
-	raw := strings.TrimSpace(os.Getenv(envVar))
-	if raw == "" {
-		return 0, false, nil
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, false, fmt.Errorf("invalid %s %q: %w", envVar, raw, err)
-	}
-	return value, true, nil
-}
-
-func removeSocketPath(socketPath, socketLabel string) error {
-	socketPath = filepath.Clean(strings.TrimSpace(socketPath))
-	if socketPath == "" || socketPath == "." {
-		return nil
-	}
-	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove %s socket %s: %w", socketLabel, socketPath, err)
-	}
+// Close releases the stream, domain, and libvirt connection. Call it only after
+// every Recv/Send has returned.
+func (s *SerialConsole) Close() error {
+	_ = s.stream.Free()
+	_ = s.dom.Free()
+	_, _ = s.conn.Close()
 	return nil
 }

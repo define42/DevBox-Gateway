@@ -17,16 +17,16 @@ import (
 )
 
 // StartVM defines and starts a VM without attaching owner metadata.
-func StartVM(name, seedIso, storagePoolName, serialSocketPath string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, serialSocketPath, "", "", vcpu, memoryMiB)
+func StartVM(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) error {
+	return startVM(name, seedIso, storagePoolName, "", "", vcpu, memoryMiB)
 }
 
 // StartVMWithOwner defines and starts a VM while attaching owner and guest-user metadata.
-func StartVMWithOwner(name, seedIso, storagePoolName, serialSocketPath, owner, guestUser string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, serialSocketPath, owner, guestUser, vcpu, memoryMiB)
+func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser string, vcpu int, memoryMiB int) error {
+	return startVM(name, seedIso, storagePoolName, owner, guestUser, vcpu, memoryMiB)
 }
 
-func startVM(name, seedIso, storagePoolName, serialSocketPath, owner, guestUser string, vcpu int, memoryMiB int) error {
+func startVM(name, seedIso, storagePoolName, owner, guestUser string, vcpu int, memoryMiB int) error {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
 		return err
@@ -35,12 +35,9 @@ func startVM(name, seedIso, storagePoolName, serialSocketPath, owner, guestUser 
 		_, _ = conn.Close()
 	}()
 
-	// The VNC socket is libvirt-managed; only the serial socket is gateway-owned.
-	if err := removeSocketPath(serialSocketPath, "serial"); err != nil {
-		return err
-	}
-
-	dom, err := conn.DomainDefineXML(UbuntuDomain(name, seedIso, storagePoolName, serialSocketPath, vcpu, memoryMiB))
+	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
+	// owns no console sockets.
+	dom, err := conn.DomainDefineXML(UbuntuDomain(name, seedIso, storagePoolName, vcpu, memoryMiB))
 	if err != nil {
 		return err
 	}
@@ -349,10 +346,6 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 
 	seedIso := vmName + "_seed.iso"
 	poolName, poolPath := storagePoolConfig(settings)
-	vmSerialSocketPath, err := prepareBootSerialSocketPath(settings, vmName)
-	if err != nil {
-		return vmName, err
-	}
 
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
@@ -368,13 +361,13 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 	if err := ensureVMNameAvailable(conn, vmName); err != nil {
 		return vmName, err
 	}
-	if err := resetExistingVMArtifacts(conn, settings, poolName, vmName, seedIso); err != nil {
+	if err := resetExistingVMArtifacts(conn, poolName, vmName, seedIso); err != nil {
 		return vmName, err
 	}
 	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash, baseImagePath); err != nil {
 		return vmName, err
 	}
-	if err := StartVMWithOwner(vmName, seedIso, poolName, vmSerialSocketPath, user.GetName(), guestUsername, vcpu, memoryMiB); err != nil {
+	if err := StartVMWithOwner(vmName, seedIso, poolName, user.GetName(), guestUsername, vcpu, memoryMiB); err != nil {
 		return vmName, fmt.Errorf("failed to start VM: %w", err)
 	}
 
@@ -400,11 +393,8 @@ func RemoveVM(name string, settings *config.SettingsType) error {
 	if err := RemoveVolumes(conn, poolName, name, seedIso); err != nil {
 		return err
 	}
-	// The VNC socket is libvirt-managed (removed with the destroyed domain); the
-	// gateway-owned serial socket is removed here.
-	if err := removeSerialSocket(settings, name); err != nil {
-		return err
-	}
+	// The VNC socket and serial PTY are libvirt-managed and removed with the
+	// destroyed domain; nothing for the gateway to clean up.
 	return nil
 }
 
@@ -687,17 +677,6 @@ func validateBootResources(vcpu int, memoryMiB int) error {
 	return nil
 }
 
-// prepareBootSerialSocketPath ensures the serial socket directory exists and
-// returns the gateway-owned serial socket path. The VNC socket is libvirt-managed
-// (allocated and SELinux-labeled under the per-domain runtime dir), so no VNC
-// directory is prepared here.
-func prepareBootSerialSocketPath(settings *config.SettingsType, vmName string) (string, error) {
-	if _, err := ensureSerialSocketDir(settings); err != nil {
-		return "", fmt.Errorf("failed to ensure serial socket directory: %w", err)
-	}
-	return serialSocketPath(settings, vmName), nil
-}
-
 func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) error {
 	pool, err := ensureStoragePool(conn, poolName, poolPath)
 	if err != nil {
@@ -707,18 +686,15 @@ func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) err
 	return nil
 }
 
-func resetExistingVMArtifacts(conn *libvirt.Connect, settings *config.SettingsType, poolName, vmName, seedIso string) error {
+func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso string) error {
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
 		return fmt.Errorf("failed to destroy existing domain: %w", err)
 	}
 	if err := RemoveVolumes(conn, poolName, vmName, seedIso); err != nil {
 		return fmt.Errorf("failed to remove existing volumes: %w", err)
 	}
-	// The VNC socket is libvirt-managed (removed with the destroyed domain); only
-	// the gateway-owned serial socket needs cleaning up.
-	if err := removeSerialSocket(settings, vmName); err != nil {
-		return fmt.Errorf("failed to remove existing serial socket: %w", err)
-	}
+	// The VNC socket and serial PTY are libvirt-managed and removed with the
+	// destroyed domain; nothing for the gateway to clean up.
 	return nil
 }
 

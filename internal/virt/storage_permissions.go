@@ -17,8 +17,6 @@ import (
 const (
 	fixedLibvirtVolumeMode     = "0666"
 	fixedLibvirtVolumeFileMode = 0o666
-	volumeOwnerEnv             = "LIBVIRT_VOLUME_OWNER"
-	volumeGroupEnv             = "LIBVIRT_VOLUME_GROUP"
 )
 
 type storagePoolXML struct {

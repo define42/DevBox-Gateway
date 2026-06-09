@@ -2,48 +2,36 @@ package virt
 
 import (
 	"path/filepath"
-	"rdptlsgateway/internal/config"
 	"strings"
 	"testing"
 )
 
-func TestUbuntuDomainWithSerialSocketIncludesUnixSerial(t *testing.T) {
-	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", "/tmp/alice-devbox.serial.sock", 4, 4096)
+func TestUbuntuDomainUsesManagedSerialPTY(t *testing.T) {
+	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
 
-	if !strings.Contains(xml, "<serial type='unix'>") {
-		t.Fatalf("expected unix serial device in domain XML, got %s", xml)
+	// The serial console is a libvirt-managed PTY (read via OpenConsole); the
+	// domain XML must not pin a gateway-chosen unix socket path.
+	if !strings.Contains(xml, "<serial type='pty'>") {
+		t.Fatalf("expected pty serial device in domain XML, got %s", xml)
 	}
-	if !strings.Contains(xml, "path='/tmp/alice-devbox.serial.sock'") {
-		t.Fatalf("expected serial socket path in domain XML, got %s", xml)
-	}
-	if strings.Contains(xml, "<console type='pty'/>") {
-		t.Fatalf("did not expect legacy pty console in domain XML, got %s", xml)
-	}
-}
-
-func TestSerialSocketDirUsesDerivedDataRoot(t *testing.T) {
-	t.Setenv(config.DATA_ROOT_DIR, "/srv/libvirt/devboxes")
-
-	settings := config.NewSettingType(false)
-	got := serialSocketDir(settings)
-	want := filepath.Join("/srv/libvirt/devboxes", serialSocketSubdir)
-	if got != want {
-		t.Fatalf("expected serial socket dir %q, got %q", want, got)
+	if strings.Contains(xml, "type='unix'") || strings.Contains(xml, "mode='bind'") {
+		t.Fatalf("did not expect a unix serial socket in domain XML, got %s", xml)
 	}
 }
 
 func TestSerialSocketPathFromDomainXML(t *testing.T) {
-	xml := `<domain><devices><serial type='unix'><source mode='bind' path='/tmp/test.serial.sock'/><target port='0'/></serial></devices></domain>`
+	// A running PTY serial exposes its allocated device via <source path>.
+	xml := `<domain><devices><serial type='pty'><source path='/dev/pts/3'/><target port='0'/></serial></devices></domain>`
 
 	path, ok, err := serialSocketPathFromDomainXML(xml)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected unix serial socket to be detected")
+		t.Fatal("expected serial console to be detected")
 	}
-	if path != filepath.Clean("/tmp/test.serial.sock") {
-		t.Fatalf("expected serial socket path %q, got %q", "/tmp/test.serial.sock", path)
+	if path != filepath.Clean("/dev/pts/3") {
+		t.Fatalf("expected serial console path %q, got %q", "/dev/pts/3", path)
 	}
 }
 
