@@ -182,61 +182,27 @@ func setSameOriginHeader(req *http.Request) {
 	req.Header.Set("Origin", "http://example.com")
 }
 
-func TestSameOriginRequest(t *testing.T) {
+func TestSameOriginRequestAllowsMatchingHeaders(t *testing.T) {
 	tests := []struct {
 		name    string
 		target  string
 		origin  string
 		referer string
-		want    bool
 	}{
 		{
 			name:   "matching origin",
 			target: "http://example.com/api/dashboard",
 			origin: "http://example.com",
-			want:   true,
 		},
 		{
 			name:   "matching origin with port",
 			target: "http://example.com:8443/api/dashboard",
 			origin: "http://example.com:8443",
-			want:   true,
-		},
-		{
-			name:   "sibling host rejected",
-			target: "http://example.com/api/dashboard",
-			origin: "http://admin.example.com",
-			want:   false,
-		},
-		{
-			name:   "scheme mismatch rejected",
-			target: "https://example.com/api/dashboard",
-			origin: "http://example.com",
-			want:   false,
 		},
 		{
 			name:    "matching referer",
 			target:  "http://example.com/api/dashboard",
 			referer: "http://example.com/api/dashboard",
-			want:    true,
-		},
-		{
-			name:    "origin takes precedence over referer",
-			target:  "http://example.com/api/dashboard",
-			origin:  "http://evil.example.com",
-			referer: "http://example.com/api/dashboard",
-			want:    false,
-		},
-		{
-			name:   "null origin rejected",
-			target: "http://example.com/api/dashboard",
-			origin: "null",
-			want:   false,
-		},
-		{
-			name:   "missing origin and referer rejected",
-			target: "http://example.com/api/dashboard",
-			want:   false,
 		},
 	}
 
@@ -250,8 +216,59 @@ func TestSameOriginRequest(t *testing.T) {
 				req.Header.Set("Referer", tc.referer)
 			}
 
-			if got := sameOriginRequest(req); got != tc.want {
-				t.Fatalf("expected %t, got %t", tc.want, got)
+			if !sameOriginRequest(req) {
+				t.Fatal("expected request to pass same-origin check")
+			}
+		})
+	}
+}
+
+func TestSameOriginRequestRejectsInvalidHeaders(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		origin  string
+		referer string
+	}{
+		{
+			name:   "sibling host rejected",
+			target: "http://example.com/api/dashboard",
+			origin: "http://admin.example.com",
+		},
+		{
+			name:   "scheme mismatch rejected",
+			target: "https://example.com/api/dashboard",
+			origin: "http://example.com",
+		},
+		{
+			name:    "origin takes precedence over referer",
+			target:  "http://example.com/api/dashboard",
+			origin:  "http://evil.example.com",
+			referer: "http://example.com/api/dashboard",
+		},
+		{
+			name:   "null origin rejected",
+			target: "http://example.com/api/dashboard",
+			origin: "null",
+		},
+		{
+			name:   "missing origin and referer rejected",
+			target: "http://example.com/api/dashboard",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.target, nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.referer != "" {
+				req.Header.Set("Referer", tc.referer)
+			}
+
+			if sameOriginRequest(req) {
+				t.Fatal("expected request to fail same-origin check")
 			}
 		})
 	}
