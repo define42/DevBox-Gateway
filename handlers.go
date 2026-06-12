@@ -7,6 +7,7 @@ import (
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"rdptlsgateway/internal/config"
 	"rdptlsgateway/internal/ldap"
 	"rdptlsgateway/internal/localauth"
@@ -30,6 +31,7 @@ const (
 	pragmaValue       = "no-cache"
 	expiresValue      = "0"
 	rdpFilename       = "rdpgw.rdp"
+	forbiddenOrigin   = "Forbidden request origin."
 	maxFormBodyBytes  = 1 << 20
 	// maxVMNameLength and maxLoginUsernameLength mirror the canonical limits in
 	// the vmname package, which is the single source of truth for VDI naming.
@@ -153,11 +155,43 @@ func handleLoginGet(w http.ResponseWriter, _ *http.Request) {
 
 func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !sameOriginRequest(r) {
+			http.Error(w, forbiddenOrigin, http.StatusForbidden)
+			return
+		}
 		if err := sessionManager.DestroySession(r.Context()); err != nil {
 			log.Printf("session destroy failed: %v", err)
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
+}
+
+func sameOriginRequest(r *http.Request) bool {
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		return matchesRequestOrigin(origin, r)
+	}
+	return matchesRequestOrigin(strings.TrimSpace(r.Header.Get("Referer")), r)
+}
+
+func matchesRequestOrigin(raw string, r *http.Request) bool {
+	if raw == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, requestScheme(r)) && strings.EqualFold(parsed.Host, r.Host)
+}
+
+func requestScheme(r *http.Request) string {
+	if r.URL != nil && r.URL.Scheme != "" {
+		return r.URL.Scheme
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
@@ -167,7 +201,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	router.Handle("/static/*", noCacheStaticFileServer())
 	router.Post("/login", handleLoginPost(sessionManager, settings))
 	router.Get("/login", handleLoginGet)
-	router.HandleFunc("/logout", handleLogout(sessionManager))
+	router.Post("/logout", handleLogout(sessionManager))
 
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -232,7 +266,21 @@ func registerHiddenGet(group huma.API, path string, body dashboardRouteBody) {
 }
 
 func registerHiddenPost(group huma.API, path string, body dashboardRouteBody) {
-	huma.Post(group, path, streamRoute(body), hiddenStreamOperation)
+	huma.Post(group, path, streamRoute(requireSameOriginDashboardPost(body)), hiddenStreamOperation)
+}
+
+func requireSameOriginDashboardPost(body dashboardRouteBody) dashboardRouteBody {
+	return func(ctx huma.Context) {
+		req, w := humachi.Unwrap(ctx)
+		if !sameOriginRequest(req) {
+			dashboard.WriteJSON(w, http.StatusForbidden, dashboard.ActionResponse{
+				OK:    false,
+				Error: forbiddenOrigin,
+			})
+			return
+		}
+		body(ctx)
+	}
 }
 
 func registerDashboardPageRoute(group huma.API) {

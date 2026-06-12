@@ -199,7 +199,9 @@ function bootstrap(): void {
               <h1 class="h4 mb-1">Available DevBoxes</h1>
               <p class="text-body-secondary mb-0">Live inventory.</p>
             </div>
-            <a class="btn btn-outline-secondary btn-sm" href="/logout">Logout</a>
+            <form method="post" action="/logout" class="m-0">
+              <button class="btn btn-outline-secondary btn-sm" type="submit">Logout</button>
+            </form>
           </div>
           <form class="row g-3 align-items-end" id="create-form">
             <div class="col-12 col-md-6 col-lg-3">

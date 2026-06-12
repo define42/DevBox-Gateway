@@ -1,2 +1,4 @@
 *.img
 dist/
+coverage.out
+coverage.html

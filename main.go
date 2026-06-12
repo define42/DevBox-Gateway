@@ -237,13 +237,21 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 	_ = clientTLS.SetDeadline(time.Time{})
 
 	srv := &http.Server{
-		Handler:     mux,
+		Handler:     withRequestScheme(mux, "https"),
 		ReadTimeout: settings.GetDuration(config.TIMEOUT),
 	}
 	ln := newSingleConnListener(clientTLS)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("https serve: %v", err)
 	}
+}
+
+func withRequestScheme(next http.Handler, scheme string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := r.Clone(r.Context())
+		req.URL.Scheme = scheme
+		next.ServeHTTP(w, req)
+	})
 }
 
 type singleConnListener struct {

@@ -62,3 +62,25 @@ func TestVendoredDashboardAssetsServed(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
+	sessionManager := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sessionManager, settings)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `method="post" action="/logout"`) {
+		t.Fatal("expected dashboard JavaScript to submit logout with POST")
+	}
+	if strings.Contains(body, `href="/logout"`) {
+		t.Fatal("dashboard JavaScript must not expose logout as a GET navigation")
+	}
+}

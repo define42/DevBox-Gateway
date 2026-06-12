@@ -178,6 +178,85 @@ func TestHandleLoginGet(t *testing.T) {
 	}
 }
 
+func setSameOriginHeader(req *http.Request) {
+	req.Header.Set("Origin", "http://example.com")
+}
+
+func TestSameOriginRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  string
+		origin  string
+		referer string
+		want    bool
+	}{
+		{
+			name:   "matching origin",
+			target: "http://example.com/api/dashboard",
+			origin: "http://example.com",
+			want:   true,
+		},
+		{
+			name:   "matching origin with port",
+			target: "http://example.com:8443/api/dashboard",
+			origin: "http://example.com:8443",
+			want:   true,
+		},
+		{
+			name:   "sibling host rejected",
+			target: "http://example.com/api/dashboard",
+			origin: "http://admin.example.com",
+			want:   false,
+		},
+		{
+			name:   "scheme mismatch rejected",
+			target: "https://example.com/api/dashboard",
+			origin: "http://example.com",
+			want:   false,
+		},
+		{
+			name:    "matching referer",
+			target:  "http://example.com/api/dashboard",
+			referer: "http://example.com/api/dashboard",
+			want:    true,
+		},
+		{
+			name:    "origin takes precedence over referer",
+			target:  "http://example.com/api/dashboard",
+			origin:  "http://evil.example.com",
+			referer: "http://example.com/api/dashboard",
+			want:    false,
+		},
+		{
+			name:   "null origin rejected",
+			target: "http://example.com/api/dashboard",
+			origin: "null",
+			want:   false,
+		},
+		{
+			name:   "missing origin and referer rejected",
+			target: "http://example.com/api/dashboard",
+			want:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.target, nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.referer != "" {
+				req.Header.Set("Referer", tc.referer)
+			}
+
+			if got := sameOriginRequest(req); got != tc.want {
+				t.Fatalf("expected %t, got %t", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestValidateVMName(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -592,7 +671,7 @@ func TestLoginGetServesPage(t *testing.T) {
 	}
 }
 
-func TestLogoutRedirects(t *testing.T) {
+func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sm, settings)
@@ -603,11 +682,53 @@ func TestLogoutRedirects(t *testing.T) {
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.10") {
+		t.Fatal("expected GET /logout to leave the session active")
+	}
+}
+
+func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.10") {
+		t.Fatal("expected rejected logout to leave the session active")
+	}
+}
+
+func TestLogoutRedirects(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	setSameOriginHeader(req)
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d", rec.Code)
 	}
 	if loc := rec.Header().Get("Location"); loc != "/login" {
 		t.Fatalf("expected redirect to /login, got %q", loc)
+	}
+	if sm.UserHasActiveSessionFromIP("alice", "192.0.2.10") {
+		t.Fatal("expected POST /logout to destroy the session")
 	}
 }
 
@@ -653,10 +774,85 @@ func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303 redirect, got %d", rec.Code)
+	}
+}
+
+func TestDashboardPostRejectsMissingSameOriginHeader(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	form := url.Values{"vm_name": {"alice-devbox"}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/dashboard/start", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp dashboard.ActionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || resp.Error != forbiddenOrigin {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestDashboardPostRejectsCrossOriginHeader(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	form := url.Values{"vm_name": {"alice-devbox"}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/dashboard/start", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://admin.example.com")
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp dashboard.ActionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.OK || resp.Error != forbiddenOrigin {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	form := url.Values{
+		"vm_name":       {"INVALID NAME!"},
+		"vm_vcpu":       {"2"},
+		"vm_memory_mib": {"4096"},
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Referer", "http://example.com/api/dashboard")
+	req.AddCookie(cookie)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected request to pass origin check and fail validation with 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -674,6 +870,7 @@ func TestDashboardPostInvalidVMName(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -696,6 +893,7 @@ func TestDashboardPostInvalidVCPU(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -718,6 +916,7 @@ func TestDashboardPostInvalidMemory(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -740,6 +939,7 @@ func TestDashboardPostMissingPassword(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -764,6 +964,7 @@ func TestDashboardPostPasswordMismatch(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -782,6 +983,7 @@ func TestDashboardPostRejectsOversizedForm(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
@@ -817,6 +1019,7 @@ func TestDashboardMutationEndpointsRejectMissingVMName(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			setSameOriginHeader(req)
 			req.AddCookie(cookie)
 			router.ServeHTTP(rec, req)
 

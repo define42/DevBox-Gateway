@@ -106,6 +106,9 @@ func gatewayRequest(t *testing.T, client *http.Client, method, rawURL string, fo
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
+	if methodRequiresSameOrigin(method) {
+		req.Header.Set("Origin", req.URL.Scheme+"://"+req.URL.Host)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -118,6 +121,15 @@ func gatewayRequest(t *testing.T, client *http.Client, method, rawURL string, fo
 		t.Fatalf("read response body: %v", err)
 	}
 	return resp, string(data)
+}
+
+func methodRequiresSameOrigin(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return false
+	default:
+		return true
+	}
 }
 
 func waitForDashboardVMRow(t *testing.T, client *http.Client, baseURL, vmName string, predicate func(dashboard.VM) bool) dashboard.VM {
@@ -260,6 +272,6 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 	}, http.StatusOK)
 	waitForDashboardVMRemoval(t, server.client, server.baseURL, fullName)
 
-	assertGatewayRedirect(t, server.client, http.MethodGet, server.baseURL+"/logout", nil, http.StatusSeeOther, "/login")
+	assertGatewayRedirect(t, server.client, http.MethodPost, server.baseURL+"/logout", nil, http.StatusSeeOther, "/login")
 	assertGatewayRedirect(t, server.client, http.MethodGet, server.baseURL+"/api/dashboard/data", nil, http.StatusSeeOther, "/login")
 }
