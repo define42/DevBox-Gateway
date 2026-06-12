@@ -248,6 +248,29 @@ func TestHandleSharedConnPeekFailure(t *testing.T) {
 	}
 }
 
+func TestHandleSharedConnSetupDeadlineClosesIdleClient(t *testing.T) {
+	t.Setenv(config.TIMEOUT, "50ms")
+	settings := config.NewSettingType(false)
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+
+	done := make(chan struct{})
+	sessionManager := session.NewManager()
+	go func() {
+		handleSharedConn(server, nil, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Error("HTTPS handler should not be called for an idle client")
+		}), sessionManager, settings)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleSharedConn did not return after setup deadline")
+	}
+}
+
 func TestBootGatewayErrors(t *testing.T) {
 	t.Run("invalid listen address", func(t *testing.T) {
 		t.Setenv(config.LISTEN_ADDR, "bad::addr")

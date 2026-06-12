@@ -171,6 +171,10 @@ func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager,
 func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.SettingsType) {
 	defer func() { _ = raw.Close() }()
 
+	if !setSetupDeadline(raw, settings) {
+		return
+	}
+
 	br := bufio.NewReader(raw)
 	first, err := br.Peek(1)
 	if err != nil {
@@ -187,6 +191,21 @@ func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler,
 }
 
 const tlsHandshakeRecordType = 0x16
+
+func setSetupDeadline(conn net.Conn, settings *config.SettingsType) bool {
+	if conn == nil || settings == nil {
+		return true
+	}
+	timeout := settings.GetDuration(config.TIMEOUT)
+	if timeout <= 0 {
+		return true
+	}
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		log.Printf("set setup deadline: %v", err)
+		return false
+	}
+	return true
+}
 
 type bufferedConn struct {
 	net.Conn
