@@ -33,6 +33,14 @@ const state = {
         open: false,
         error: "",
     },
+    info: {
+        open: false,
+        vmName: "",
+        vmDisplayName: "",
+        user: "",
+        baseImage: "",
+        created: "",
+    },
 };
 let loadInFlight = false;
 function isActiveState(vmState) {
@@ -46,6 +54,20 @@ function formatMemoryGB(memoryMiB) {
     const gb = Number(memoryMiB) / 1024;
     const formatted = Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1);
     return `${formatted} GB`;
+}
+// formatCreatedAt turns the RFC3339 UTC timestamp stored on the VM into a
+// human-readable local date/time. Unparseable or empty values fall back to a
+// placeholder so older VMs without the metadata still render cleanly.
+function formatCreatedAt(createdAt) {
+    const raw = (createdAt || "").trim();
+    if (raw === "") {
+        return "n/a";
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return raw;
+    }
+    return parsed.toLocaleString();
 }
 function buildSelect(options, selectedValue, labelFn) {
     const select = document.createElement("select");
@@ -137,6 +159,28 @@ function bootstrap() {
           <div class="terminal-modal__surface terminal-modal__surface--iframe">
             <iframe id="vnc-frame" class="vnc-modal__frame" title="NoVNC session" loading="lazy" allowfullscreen></iframe>
           </div>
+        </div>
+      </div>
+    </div>
+    <div id="info-modal" class="terminal-modal" hidden aria-hidden="true">
+      <div class="terminal-modal__backdrop" id="info-backdrop"></div>
+      <div class="terminal-modal__dialog terminal-modal__dialog--form" role="dialog" aria-modal="true" aria-labelledby="info-title">
+        <div class="terminal-modal__body">
+          <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1" id="info-title">DevBox Info</h2>
+              <p class="text-body-secondary mb-0" id="info-subtitle"></p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="info-close" type="button">Close</button>
+          </div>
+          <dl class="row mb-0">
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">User</dt>
+            <dd class="col-8 col-sm-9 mb-2" id="info-user"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Image</dt>
+            <dd class="col-8 col-sm-9 mb-2 text-break" id="info-image"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Created</dt>
+            <dd class="col-8 col-sm-9 mb-0" id="info-created"></dd>
+          </dl>
         </div>
       </div>
     </div>
@@ -232,6 +276,13 @@ function bootstrap() {
     const createBackdrop = root.querySelector("#create-backdrop");
     const createClose = root.querySelector("#create-close");
     const createError = root.querySelector("#create-error");
+    const infoModal = root.querySelector("#info-modal");
+    const infoBackdrop = root.querySelector("#info-backdrop");
+    const infoSubtitle = root.querySelector("#info-subtitle");
+    const infoUser = root.querySelector("#info-user");
+    const infoImage = root.querySelector("#info-image");
+    const infoCreated = root.querySelector("#info-created");
+    const infoClose = root.querySelector("#info-close");
     if (!form ||
         !input ||
         !usernameInput ||
@@ -262,7 +313,14 @@ function bootstrap() {
         !createModal ||
         !createBackdrop ||
         !createClose ||
-        !createError) {
+        !createError ||
+        !infoModal ||
+        !infoBackdrop ||
+        !infoSubtitle ||
+        !infoUser ||
+        !infoImage ||
+        !infoCreated ||
+        !infoClose) {
         return;
     }
     const formEl = form;
@@ -296,6 +354,13 @@ function bootstrap() {
     const createBackdropEl = createBackdrop;
     const createCloseEl = createClose;
     const createErrorEl = createError;
+    const infoModalEl = infoModal;
+    const infoBackdropEl = infoBackdrop;
+    const infoSubtitleEl = infoSubtitle;
+    const infoUserEl = infoUser;
+    const infoImageEl = infoImage;
+    const infoCreatedEl = infoCreated;
+    const infoCloseEl = infoClose;
     let terminalSocket = null;
     let terminalInstance = null;
     let terminalFitAddon = null;
@@ -462,6 +527,32 @@ function bootstrap() {
         state.vnc.vmDisplayName = "";
         state.vnc.src = "";
         renderVNC();
+    }
+    function renderInfo() {
+        infoModalEl.hidden = !state.info.open;
+        infoModalEl.setAttribute("aria-hidden", state.info.open ? "false" : "true");
+        infoSubtitleEl.textContent = state.info.vmDisplayName || state.info.vmName;
+        infoUserEl.textContent = state.info.user || "n/a";
+        infoImageEl.textContent = state.info.baseImage || "n/a";
+        infoCreatedEl.textContent = formatCreatedAt(state.info.created);
+    }
+    function openInfo(vm) {
+        state.info.open = true;
+        state.info.vmName = vm.name;
+        state.info.vmDisplayName = vm.displayName || vm.name;
+        state.info.user = (vm.user || "").trim();
+        state.info.baseImage = (vm.baseImage || "").trim();
+        state.info.created = (vm.createdAt || "").trim();
+        renderInfo();
+    }
+    function closeInfo() {
+        state.info.open = false;
+        state.info.vmName = "";
+        state.info.vmDisplayName = "";
+        state.info.user = "";
+        state.info.baseImage = "";
+        state.info.created = "";
+        renderInfo();
     }
     function closeTerminal() {
         exitFullscreenIfNeeded(terminalDialogEl);
@@ -656,20 +747,6 @@ function bootstrap() {
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
             nameCell.textContent = displayName || "n/a";
-            const userValue = (vm.user || "").trim();
-            if (userValue !== "") {
-                const userLine = document.createElement("div");
-                userLine.className = "small text-secondary fw-normal";
-                userLine.textContent = `user=${userValue}`;
-                nameCell.appendChild(userLine);
-            }
-            const baseImageValue = (vm.baseImage || "").trim();
-            if (baseImageValue !== "") {
-                const imageLine = document.createElement("div");
-                imageLine.className = "small text-secondary fw-normal";
-                imageLine.textContent = `image=${baseImageValue}`;
-                nameCell.appendChild(imageLine);
-            }
             row.appendChild(nameCell);
             const connectCell = document.createElement("td");
             connectCell.className = "align-top";
@@ -713,6 +790,14 @@ function bootstrap() {
                     openVNC(vm);
                 });
                 connectActions.appendChild(vncButton);
+                const infoButton = document.createElement("button");
+                infoButton.type = "button";
+                infoButton.className = "btn btn-sm btn-outline-secondary";
+                infoButton.textContent = "Info";
+                infoButton.addEventListener("click", () => {
+                    openInfo(vm);
+                });
+                connectActions.appendChild(infoButton);
                 connectStack.appendChild(connectActions);
                 if (ttyReady && !isActive) {
                     const note = document.createElement("div");
@@ -1226,7 +1311,17 @@ function bootstrap() {
     createCloseEl.addEventListener("click", () => {
         closeCreate();
     });
+    infoBackdropEl.addEventListener("click", () => {
+        closeInfo();
+    });
+    infoCloseEl.addEventListener("click", () => {
+        closeInfo();
+    });
     document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.info.open) {
+            closeInfo();
+            return;
+        }
         if (event.key === "Escape" && state.create.open) {
             closeCreate();
             return;

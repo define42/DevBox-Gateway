@@ -63,6 +63,13 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		}
 	}
 
+	// Record creation time once, when the domain is first defined. Starting or
+	// restarting an existing VM goes through dom.Create() elsewhere and never
+	// redefines the domain, so this timestamp is stable for the VM's lifetime.
+	if err := setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
+		return fmt.Errorf("set created-at metadata for %s: %w", name, err)
+	}
+
 	if err := dom.Create(); err != nil {
 		return err
 	}

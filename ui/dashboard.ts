@@ -48,6 +48,7 @@ type DashboardVM = {
     displayName: string;
     user?: string;
     baseImage?: string;
+    createdAt?: string;
     rdpConnect: string;
     rdpFilename?: string;
     ip: string;
@@ -93,6 +94,15 @@ type DashboardCreateState = {
     error: string;
 };
 
+type DashboardInfoState = {
+    open: boolean;
+    vmName: string;
+    vmDisplayName: string;
+    user: string;
+    baseImage: string;
+    created: string;
+};
+
 type DashboardState = {
     vms: DashboardVM[];
     filename: string;
@@ -104,6 +114,7 @@ type DashboardState = {
     terminal: DashboardTerminalState;
     vnc: DashboardVNCState;
     create: DashboardCreateState;
+    info: DashboardInfoState;
 };
 
 type RequestResult<T> = {
@@ -141,6 +152,14 @@ const state: DashboardState = {
         open: false,
         error: "",
     },
+    info: {
+        open: false,
+        vmName: "",
+        vmDisplayName: "",
+        user: "",
+        baseImage: "",
+        created: "",
+    },
 };
 
 let loadInFlight = false;
@@ -157,6 +176,21 @@ function formatMemoryGB(memoryMiB?: number | string | null): string {
     const gb = Number(memoryMiB) / 1024;
     const formatted = Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1);
     return `${formatted} GB`;
+}
+
+// formatCreatedAt turns the RFC3339 UTC timestamp stored on the VM into a
+// human-readable local date/time. Unparseable or empty values fall back to a
+// placeholder so older VMs without the metadata still render cleanly.
+function formatCreatedAt(createdAt?: string): string {
+    const raw = (createdAt || "").trim();
+    if (raw === "") {
+        return "n/a";
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return raw;
+    }
+    return parsed.toLocaleString();
 }
 
 function buildSelect<T extends string | number>(
@@ -260,6 +294,28 @@ function bootstrap(): void {
         </div>
       </div>
     </div>
+    <div id="info-modal" class="terminal-modal" hidden aria-hidden="true">
+      <div class="terminal-modal__backdrop" id="info-backdrop"></div>
+      <div class="terminal-modal__dialog terminal-modal__dialog--form" role="dialog" aria-modal="true" aria-labelledby="info-title">
+        <div class="terminal-modal__body">
+          <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1" id="info-title">DevBox Info</h2>
+              <p class="text-body-secondary mb-0" id="info-subtitle"></p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="info-close" type="button">Close</button>
+          </div>
+          <dl class="row mb-0">
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">User</dt>
+            <dd class="col-8 col-sm-9 mb-2" id="info-user"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Image</dt>
+            <dd class="col-8 col-sm-9 mb-2 text-break" id="info-image"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Created</dt>
+            <dd class="col-8 col-sm-9 mb-0" id="info-created"></dd>
+          </dl>
+        </div>
+      </div>
+    </div>
     <div id="create-modal" class="terminal-modal" hidden aria-hidden="true">
       <div class="terminal-modal__backdrop" id="create-backdrop"></div>
       <div class="terminal-modal__dialog terminal-modal__dialog--form" role="dialog" aria-modal="true" aria-labelledby="create-title">
@@ -353,6 +409,13 @@ function bootstrap(): void {
     const createBackdrop = root.querySelector<HTMLDivElement>("#create-backdrop");
     const createClose = root.querySelector<HTMLButtonElement>("#create-close");
     const createError = root.querySelector<HTMLDivElement>("#create-error");
+    const infoModal = root.querySelector<HTMLDivElement>("#info-modal");
+    const infoBackdrop = root.querySelector<HTMLDivElement>("#info-backdrop");
+    const infoSubtitle = root.querySelector<HTMLParagraphElement>("#info-subtitle");
+    const infoUser = root.querySelector<HTMLElement>("#info-user");
+    const infoImage = root.querySelector<HTMLElement>("#info-image");
+    const infoCreated = root.querySelector<HTMLElement>("#info-created");
+    const infoClose = root.querySelector<HTMLButtonElement>("#info-close");
 
     if (
         !form ||
@@ -385,7 +448,14 @@ function bootstrap(): void {
         !createModal ||
         !createBackdrop ||
         !createClose ||
-        !createError
+        !createError ||
+        !infoModal ||
+        !infoBackdrop ||
+        !infoSubtitle ||
+        !infoUser ||
+        !infoImage ||
+        !infoCreated ||
+        !infoClose
     ) {
         return;
     }
@@ -421,6 +491,13 @@ function bootstrap(): void {
     const createBackdropEl = createBackdrop;
     const createCloseEl = createClose;
     const createErrorEl = createError;
+    const infoModalEl = infoModal;
+    const infoBackdropEl = infoBackdrop;
+    const infoSubtitleEl = infoSubtitle;
+    const infoUserEl = infoUser;
+    const infoImageEl = infoImage;
+    const infoCreatedEl = infoCreated;
+    const infoCloseEl = infoClose;
 
     let terminalSocket: WebSocket | null = null;
     let terminalInstance: XTermTerminal | null = null;
@@ -596,6 +673,35 @@ function bootstrap(): void {
         state.vnc.vmDisplayName = "";
         state.vnc.src = "";
         renderVNC();
+    }
+
+    function renderInfo(): void {
+        infoModalEl.hidden = !state.info.open;
+        infoModalEl.setAttribute("aria-hidden", state.info.open ? "false" : "true");
+        infoSubtitleEl.textContent = state.info.vmDisplayName || state.info.vmName;
+        infoUserEl.textContent = state.info.user || "n/a";
+        infoImageEl.textContent = state.info.baseImage || "n/a";
+        infoCreatedEl.textContent = formatCreatedAt(state.info.created);
+    }
+
+    function openInfo(vm: DashboardVM): void {
+        state.info.open = true;
+        state.info.vmName = vm.name;
+        state.info.vmDisplayName = vm.displayName || vm.name;
+        state.info.user = (vm.user || "").trim();
+        state.info.baseImage = (vm.baseImage || "").trim();
+        state.info.created = (vm.createdAt || "").trim();
+        renderInfo();
+    }
+
+    function closeInfo(): void {
+        state.info.open = false;
+        state.info.vmName = "";
+        state.info.vmDisplayName = "";
+        state.info.user = "";
+        state.info.baseImage = "";
+        state.info.created = "";
+        renderInfo();
     }
 
     function closeTerminal(): void {
@@ -807,20 +913,6 @@ function bootstrap(): void {
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
             nameCell.textContent = displayName || "n/a";
-            const userValue = (vm.user || "").trim();
-            if (userValue !== "") {
-                const userLine = document.createElement("div");
-                userLine.className = "small text-secondary fw-normal";
-                userLine.textContent = `user=${userValue}`;
-                nameCell.appendChild(userLine);
-            }
-            const baseImageValue = (vm.baseImage || "").trim();
-            if (baseImageValue !== "") {
-                const imageLine = document.createElement("div");
-                imageLine.className = "small text-secondary fw-normal";
-                imageLine.textContent = `image=${baseImageValue}`;
-                nameCell.appendChild(imageLine);
-            }
             row.appendChild(nameCell);
 
             const connectCell = document.createElement("td");
@@ -867,6 +959,15 @@ function bootstrap(): void {
                     openVNC(vm);
                 });
                 connectActions.appendChild(vncButton);
+
+                const infoButton = document.createElement("button");
+                infoButton.type = "button";
+                infoButton.className = "btn btn-sm btn-outline-secondary";
+                infoButton.textContent = "Info";
+                infoButton.addEventListener("click", () => {
+                    openInfo(vm);
+                });
+                connectActions.appendChild(infoButton);
 
                 connectStack.appendChild(connectActions);
 
@@ -1443,7 +1544,19 @@ function bootstrap(): void {
         closeCreate();
     });
 
+    infoBackdropEl.addEventListener("click", () => {
+        closeInfo();
+    });
+
+    infoCloseEl.addEventListener("click", () => {
+        closeInfo();
+    });
+
     document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.info.open) {
+            closeInfo();
+            return;
+        }
         if (event.key === "Escape" && state.create.open) {
             closeCreate();
             return;
