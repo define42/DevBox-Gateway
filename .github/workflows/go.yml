@@ -82,7 +82,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
@@ -107,7 +107,7 @@ jobs:
       # -------------------------------
       - name: Set up Node (for the UI TypeScript build)
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
 
