@@ -1,0 +1,125 @@
+/* Shared visual theme for every gateway page (login + dashboard). Keep
+   cross-page styling here so the look stays consistent in one place. */
+
+/* Full-page mesh-style gradient backdrop: a teal glow in the upper-left, a deep
+   indigo body, and a magenta glow in the lower-right, layered over a dark base.
+   Fixed attachment keeps the gradient anchored to the viewport while content
+   scrolls, and the override beats Bootstrap's .bg-body-tertiary utility. */
+body.bg-body-tertiary {
+  min-height: 100vh;
+  background-color: #0a0e1a;
+  background-image:
+    radial-gradient(1200px 800px at 22% -5%, rgba(13, 148, 136, 0.55), transparent 60%),
+    radial-gradient(900px 700px at 100% 0%, rgba(67, 31, 122, 0.55), transparent 55%),
+    radial-gradient(1100px 800px at 100% 105%, rgba(190, 24, 93, 0.6), transparent 60%),
+    linear-gradient(160deg, #0b1326 0%, #0a0e1a 50%, #0d0a1a 100%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===== Glass surfaces ===== */
+/* Translucent, blurred cards so the gradient glows through. Applies to both the
+   login card and the dashboard card. */
+.card {
+  background-color: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 1.1rem;
+  box-shadow:
+    0 1.5rem 3.5rem rgba(2, 6, 23, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+/* ===== Headings ===== */
+/* Gradient wordmark on the page titles, echoing the backdrop colours. */
+.card h1 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  background: linear-gradient(90deg, #5eead4 0%, #818cf8 50%, #f0abfc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ===== Tables blend into the glass card ===== */
+.card .table {
+  --bs-table-bg: transparent;
+}
+.card .table > thead th {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+}
+.card .table > :not(caption) > * > * {
+  border-bottom-color: rgba(148, 163, 184, 0.12);
+}
+.card .table-hover > tbody > tr {
+  transition: background-color 0.15s ease;
+}
+.card .table-hover > tbody > tr:hover > * {
+  --bs-table-hover-bg: rgba(129, 140, 248, 0.1);
+}
+
+/* ===== Buttons: smooth, subtle lift on hover ===== */
+.btn {
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.btn:hover:not(:disabled):not(.disabled) {
+  transform: translateY(-1px);
+}
+.btn:active:not(:disabled):not(.disabled) {
+  transform: translateY(0);
+}
+
+/* Primary call-to-action gets the signature gradient fill. */
+.btn-primary {
+  border: 0;
+  background-image: linear-gradient(135deg, #2dd4bf 0%, #6366f1 55%, #d946ef 100%);
+  box-shadow: 0 0.5rem 1.25rem rgba(99, 102, 241, 0.32);
+}
+.btn-primary:hover,
+.btn-primary:focus-visible,
+.btn-primary:active {
+  background-image: linear-gradient(135deg, #2dd4bf 0%, #6366f1 45%, #d946ef 100%);
+  box-shadow: 0 0.7rem 1.6rem rgba(217, 70, 239, 0.4);
+}
+
+/* Badges (VM state) read a touch crisper on glass. */
+.badge {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ===== Brand badge (login) ===== */
+/* A rounded, gradient-filled tile holding the wordmark icon. */
+.brand-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 1rem;
+  color: #fff;
+  font-size: 1.6rem;
+  background-image: linear-gradient(135deg, #2dd4bf 0%, #6366f1 55%, #d946ef 100%);
+  box-shadow: 0 0.6rem 1.5rem rgba(99, 102, 241, 0.4);
+}
+
+/* ===== Input groups on glass ===== */
+/* Translucent leading icon cell so the field matches the frosted surface. */
+.input-group-text {
+  background-color: rgba(148, 163, 184, 0.12);
+  border-color: var(--bs-border-color);
+  color: var(--bs-secondary-color);
+}

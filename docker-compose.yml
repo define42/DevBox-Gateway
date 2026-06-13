@@ -1,6 +1,11 @@
 services:
   gateway:
-    build: ./
+    build:
+      context: ./
+      # Build with host networking so `go mod download`/`go build` can reach the
+      # module proxy. The default BuildKit network has no working outbound route
+      # in this environment (IPv6-only resolution fails), breaking the build.
+      network: host
     restart: always
       #    privileged: true
     environment:

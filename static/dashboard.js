@@ -70,6 +70,16 @@ function formatCreatedAt(createdAt) {
     }
     return parsed.toLocaleString();
 }
+// setIconLabel renders a Bootstrap Icon followed by a text label inside a button
+// (or anchor). Labels are static, but we build the nodes explicitly rather than
+// using innerHTML to keep the rendering path free of HTML string injection.
+function setIconLabel(el, iconClass, label) {
+    el.textContent = "";
+    const icon = document.createElement("i");
+    icon.className = `bi ${iconClass} me-1`;
+    icon.setAttribute("aria-hidden", "true");
+    el.append(icon, label);
+}
 function buildSelect(options, selectedValue, labelFn) {
     const select = document.createElement("select");
     for (const value of options) {
@@ -114,9 +124,9 @@ function bootstrap() {
               <p class="text-body-secondary mb-0">Live inventory.</p>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2">
-              <button class="btn btn-primary" id="open-create-button" type="button">Create DevBox</button>
+              <button class="btn btn-primary" id="open-create-button" type="button"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
               <form method="post" action="/logout" class="m-0">
-                <button class="btn btn-outline-secondary btn-sm" type="submit">Logout</button>
+                <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="bi bi-box-arrow-right me-1" aria-hidden="true"></i>Logout</button>
               </form>
             </div>
           </div>
@@ -135,8 +145,8 @@ function bootstrap() {
               <p class="text-body-secondary mb-0" id="terminal-subtitle"></p>
             </div>
             <div class="d-flex flex-wrap gap-2">
-              <button class="btn btn-outline-secondary btn-sm" id="terminal-fullscreen" type="button">Fullscreen</button>
-              <button class="btn btn-outline-secondary btn-sm" id="terminal-close" type="button">Close</button>
+              <button class="btn btn-outline-secondary btn-sm" id="terminal-fullscreen" type="button"><i class="bi bi-arrows-fullscreen me-1" aria-hidden="true"></i>Fullscreen</button>
+              <button class="btn btn-outline-secondary btn-sm" id="terminal-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
             </div>
           </div>
           <div class="terminal-hint mb-2" id="terminal-status" aria-live="polite"></div>
@@ -154,7 +164,7 @@ function bootstrap() {
               <h2 class="h5 mb-1" id="vnc-title">NoVNC</h2>
               <p class="text-body-secondary mb-0" id="vnc-subtitle"></p>
             </div>
-            <button class="btn btn-outline-secondary btn-sm" id="vnc-close" type="button">Close</button>
+            <button class="btn btn-outline-secondary btn-sm" id="vnc-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
           </div>
           <div class="terminal-hint mb-2">Browser display via the VM's QEMU VNC socket. Drag the lower-right corner to resize, and use noVNC's own fullscreen control inside the viewer.</div>
           <div class="terminal-modal__surface terminal-modal__surface--iframe">
@@ -172,7 +182,7 @@ function bootstrap() {
               <h2 class="h5 mb-1" id="info-title">DevBox Info</h2>
               <p class="text-body-secondary mb-0" id="info-subtitle"></p>
             </div>
-            <button class="btn btn-outline-secondary btn-sm" id="info-close" type="button">Close</button>
+            <button class="btn btn-outline-secondary btn-sm" id="info-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
           </div>
           <dl class="row mb-0">
             <dt class="col-4 col-sm-3 text-body-secondary fw-normal">IP Address</dt>
@@ -196,7 +206,7 @@ function bootstrap() {
               <h2 class="h5 mb-1" id="create-title">Create DevBox</h2>
               <p class="text-body-secondary mb-0">Provision a new virtual machine.</p>
             </div>
-            <button class="btn btn-outline-secondary btn-sm" id="create-close" type="button">Close</button>
+            <button class="btn btn-outline-secondary btn-sm" id="create-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
           </div>
           <div class="alert alert-danger mb-3 d-none" id="create-error" role="alert"></div>
           <form class="row g-3 align-items-end" id="create-form">
@@ -241,7 +251,7 @@ function bootstrap() {
               </select>
             </div>
             <div class="col-12 col-md-6 col-lg-4 d-grid align-self-end">
-              <button class="btn btn-primary" id="create-button" type="submit">Create DevBox</button>
+              <button class="btn btn-primary" id="create-button" type="submit"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
             </div>
           </form>
         </div>
@@ -446,7 +456,12 @@ function bootstrap() {
         terminalModalEl.setAttribute("aria-hidden", state.terminal.open ? "false" : "true");
         terminalSubtitleEl.textContent = state.terminal.vmDisplayName || state.terminal.vmName;
         terminalStatusEl.textContent = state.terminal.status;
-        terminalFullscreenEl.textContent = isFullscreenTarget(terminalDialogEl) ? "Exit Fullscreen" : "Fullscreen";
+        if (isFullscreenTarget(terminalDialogEl)) {
+            setIconLabel(terminalFullscreenEl, "bi-arrows-angle-contract", "Exit Fullscreen");
+        }
+        else {
+            setIconLabel(terminalFullscreenEl, "bi-arrows-fullscreen", "Fullscreen");
+        }
         if (state.terminal.error) {
             terminalErrorEl.textContent = state.terminal.error;
             terminalErrorEl.classList.remove("d-none");
@@ -769,14 +784,14 @@ function bootstrap() {
                         const connectButton = document.createElement("a");
                         connectButton.className = "btn btn-sm btn-success";
                         connectButton.href = vm.rdpConnect;
-                        connectButton.textContent = "RDP";
+                        setIconLabel(connectButton, "bi-display", "RDP");
                         connectButton.setAttribute("download", vm.rdpFilename || state.filename);
                         connectActions.appendChild(connectButton);
                     }
                     else {
                         const offlineBadge = document.createElement("span");
                         offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
-                        offlineBadge.textContent = "Offline";
+                        setIconLabel(offlineBadge, "bi-slash-circle", "Offline");
                         offlineBadge.setAttribute("aria-disabled", "true");
                         connectActions.appendChild(offlineBadge);
                     }
@@ -784,7 +799,7 @@ function bootstrap() {
                 const terminalButton = document.createElement("button");
                 terminalButton.type = "button";
                 terminalButton.className = "btn btn-sm btn-outline-info";
-                terminalButton.textContent = "Terminal";
+                setIconLabel(terminalButton, "bi-terminal", "Terminal");
                 terminalButton.disabled = state.busy || !ttyReady || !isActive;
                 terminalButton.addEventListener("click", () => {
                     openTerminal(vm);
@@ -793,7 +808,7 @@ function bootstrap() {
                 const vncButton = document.createElement("button");
                 vncButton.type = "button";
                 vncButton.className = "btn btn-sm btn-outline-primary";
-                vncButton.textContent = "NoVNC";
+                setIconLabel(vncButton, "bi-window-desktop", "NoVNC");
                 vncButton.disabled = state.busy || !vncReady || !isActive;
                 vncButton.addEventListener("click", () => {
                     openVNC(vm);
@@ -802,7 +817,7 @@ function bootstrap() {
                 const infoButton = document.createElement("button");
                 infoButton.type = "button";
                 infoButton.className = "btn btn-sm btn-outline-secondary";
-                infoButton.textContent = "Info";
+                setIconLabel(infoButton, "bi-info-circle", "Info");
                 infoButton.addEventListener("click", () => {
                     openInfo(vm);
                 });
@@ -877,7 +892,7 @@ function bootstrap() {
             const startButton = document.createElement("button");
             startButton.type = "button";
             startButton.className = "btn btn-sm btn-outline-success";
-            startButton.textContent = "Start";
+            setIconLabel(startButton, "bi-play-fill", "Start");
             startButton.disabled = state.busy || !hasName || isActive;
             startButton.addEventListener("click", () => {
                 void startVM(rawName);
@@ -886,7 +901,7 @@ function bootstrap() {
             const restartButton = document.createElement("button");
             restartButton.type = "button";
             restartButton.className = "btn btn-sm btn-outline-secondary";
-            restartButton.textContent = "Restart";
+            setIconLabel(restartButton, "bi-arrow-clockwise", "Restart");
             restartButton.disabled = state.busy || !hasName || !isActive;
             restartButton.addEventListener("click", () => {
                 void restartVM(rawName);
@@ -895,7 +910,7 @@ function bootstrap() {
             const shutdownButton = document.createElement("button");
             shutdownButton.type = "button";
             shutdownButton.className = "btn btn-sm btn-outline-warning";
-            shutdownButton.textContent = "Stop";
+            setIconLabel(shutdownButton, "bi-stop-fill", "Stop");
             shutdownButton.disabled = state.busy || !hasName || !isActive;
             shutdownButton.addEventListener("click", () => {
                 void shutdownVM(rawName);
@@ -904,7 +919,7 @@ function bootstrap() {
             const removeButton = document.createElement("button");
             removeButton.type = "button";
             removeButton.className = "btn btn-sm btn-outline-danger";
-            removeButton.textContent = "Remove";
+            setIconLabel(removeButton, "bi-trash", "Remove");
             removeButton.disabled = state.busy || !hasName;
             removeButton.addEventListener("click", () => {
                 if (!confirmRemoval(rawName)) {
@@ -928,7 +943,7 @@ function bootstrap() {
                 const applyButton = document.createElement("button");
                 applyButton.type = "button";
                 applyButton.className = "btn btn-sm btn-outline-primary w-auto";
-                applyButton.textContent = "Apply";
+                setIconLabel(applyButton, "bi-check-lg", "Apply");
                 applyButton.disabled = state.busy;
                 applyButton.addEventListener("click", () => {
                     void updateVMResources(rawName, vcpuSelect.value, memorySelect.value);
