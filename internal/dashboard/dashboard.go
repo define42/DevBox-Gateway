@@ -29,6 +29,7 @@ type VM struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
 	User        string `json:"user"`
+	BaseImage   string `json:"baseImage,omitempty"`
 	RDPConnect  string `json:"rdpConnect"`
 	RDPFilename string `json:"rdpFilename"`
 	IP          string `json:"ip"`
@@ -151,6 +152,7 @@ func buildDashboardRows(vmList []virt.VMInfo, settings *config.SettingsType, use
 			Name:        vm.Name,
 			DisplayName: displayName,
 			User:        rdpUser,
+			BaseImage:   strings.TrimSpace(vm.BaseImage),
 			RDPConnect:  GenerateRDP(connectHost, rdpUser),
 			RDPFilename: rdpDownloadFilename(vm.Name),
 			IP:          vm.IP,

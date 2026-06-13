@@ -18,15 +18,15 @@ import (
 
 // StartVM defines and starts a VM without attaching owner metadata.
 func StartVM(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, "", "", vcpu, memoryMiB)
+	return startVM(name, seedIso, storagePoolName, "", "", "", vcpu, memoryMiB)
 }
 
-// StartVMWithOwner defines and starts a VM while attaching owner and guest-user metadata.
-func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, owner, guestUser, vcpu, memoryMiB)
+// StartVMWithOwner defines and starts a VM while attaching owner, guest-user, and base-image metadata.
+func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) error {
+	return startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage, vcpu, memoryMiB)
 }
 
-func startVM(name, seedIso, storagePoolName, owner, guestUser string, vcpu int, memoryMiB int) error {
+func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) error {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
 		return err
@@ -54,6 +54,12 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser string, vcpu int, 
 	if strings.TrimSpace(guestUser) != "" {
 		if err := setDomainGuestUserMetadata(dom, guestUser); err != nil {
 			return fmt.Errorf("set guest user metadata for %s: %w", name, err)
+		}
+	}
+
+	if strings.TrimSpace(baseImage) != "" {
+		if err := setDomainBaseImageMetadata(dom, baseImage); err != nil {
+			return fmt.Errorf("set base image metadata for %s: %w", name, err)
 		}
 	}
 
@@ -367,7 +373,7 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash, baseImagePath); err != nil {
 		return vmName, err
 	}
-	if err := StartVMWithOwner(vmName, seedIso, poolName, user.GetName(), guestUsername, vcpu, memoryMiB); err != nil {
+	if err := StartVMWithOwner(vmName, seedIso, poolName, user.GetName(), guestUsername, baseImage, vcpu, memoryMiB); err != nil {
 		return vmName, fmt.Errorf("failed to start VM: %w", err)
 	}
 

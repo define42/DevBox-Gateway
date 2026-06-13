@@ -29,6 +29,7 @@ type VMInfo struct {
 	Name      string
 	Owner     string
 	GuestUser string
+	BaseImage string
 	State     string
 	MemoryMiB int
 	VCPU      int
@@ -88,6 +89,7 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		Name:      name,
 		Owner:     owner,
 		GuestUser: domainGuestUserForVMInfo(name, &d),
+		BaseImage: domainBaseImageForVMInfo(name, &d),
 		State:     formatState(state),
 		MemoryMiB: mem,
 		VCPU:      vcpu,
@@ -121,6 +123,18 @@ func domainGuestUserForVMInfo(name string, d *libvirt.Domain) string {
 		return ""
 	}
 	return guestUser
+}
+
+func domainBaseImageForVMInfo(name string, d *libvirt.Domain) string {
+	baseImage, hasBaseImage, err := domainBaseImage(d)
+	if err != nil {
+		log.Printf("domain base image %s: %v", name, err)
+		return ""
+	}
+	if !hasBaseImage {
+		return ""
+	}
+	return baseImage
 }
 
 // domainDisplayIPs returns (display, routing). The display string aggregates

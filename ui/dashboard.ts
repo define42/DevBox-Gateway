@@ -47,6 +47,7 @@ type DashboardVM = {
     name: string;
     displayName: string;
     user?: string;
+    baseImage?: string;
     rdpConnect: string;
     rdpFilename?: string;
     ip: string;
@@ -737,6 +738,13 @@ function bootstrap(): void {
                 userLine.className = "small text-secondary fw-normal";
                 userLine.textContent = `user=${userValue}`;
                 nameCell.appendChild(userLine);
+            }
+            const baseImageValue = (vm.baseImage || "").trim();
+            if (baseImageValue !== "") {
+                const imageLine = document.createElement("div");
+                imageLine.className = "small text-secondary fw-normal";
+                imageLine.textContent = `image=${baseImageValue}`;
+                nameCell.appendChild(imageLine);
             }
             row.appendChild(nameCell);
 

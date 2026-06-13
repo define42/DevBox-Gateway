@@ -597,6 +597,13 @@ function bootstrap() {
                 userLine.textContent = `user=${userValue}`;
                 nameCell.appendChild(userLine);
             }
+            const baseImageValue = (vm.baseImage || "").trim();
+            if (baseImageValue !== "") {
+                const imageLine = document.createElement("div");
+                imageLine.className = "small text-secondary fw-normal";
+                imageLine.textContent = `image=${baseImageValue}`;
+                nameCell.appendChild(imageLine);
+            }
             row.appendChild(nameCell);
             const connectCell = document.createElement("td");
             connectCell.className = "align-top";
