@@ -302,6 +302,16 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.SettingsType) {
+	// Over the SSH reverse tunnel the connection is an SSH channel whose deadline
+	// methods are no-ops. net/http's Hijack (used by the dashboard's WebSocket
+	// consoles) aborts a pending background read by setting a past read deadline
+	// and waiting for it; with no-op deadlines that wait never returns and the
+	// upgrade hangs. Give the HTTPS path a connection with working read deadlines.
+	// RDP keeps the raw channel, so its proxy path is unaffected.
+	if settings.GetBool(config.SSH_TUNNEL_ENABLE) {
+		raw = sshtunnel.NewReadDeadlineConn(raw)
+	}
+
 	// TLS handshake with client; get SNI
 	clientTLS := tls.Server(raw, frontTLS.GetTLSConfig())
 	if err := clientTLS.Handshake(); err != nil {
