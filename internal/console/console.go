@@ -2,6 +2,7 @@
 package console
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -77,7 +78,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			CheckOrigin: sameOriginWebsocketRequest,
 		}
 
-		ws, err := dashboardSocketUpgrader.Upgrade(hijackableResponseWriter(w), r, nil)
+		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("serial", name, w), r, nil)
 		if err != nil {
 			_ = console.Close()
 			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
@@ -145,7 +146,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			CheckOrigin: sameOriginWebsocketRequest,
 		}
 
-		ws, err := dashboardSocketUpgrader.Upgrade(hijackableResponseWriter(w), r, nil)
+		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("vnc", name, w), r, nil)
 		if err != nil {
 			_ = vncConn.Close()
 			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
@@ -410,6 +411,67 @@ func hijackableResponseWriter(w http.ResponseWriter) http.ResponseWriter {
 		}
 		w = unwrapper.Unwrap()
 	}
+}
+
+// upgradeResponseWriter returns the writer handed to gorilla's Upgrade. It
+// unwraps to the underlying http.Hijacker and, when debug logging is on, wraps
+// it to trace exactly where a WebSocket upgrade blocks: the Hijack call and the
+// first network write (the 101 handshake). This is the diagnostic for upgrades
+// that never return over the SSH tunnel.
+func upgradeResponseWriter(channel, name string, w http.ResponseWriter) http.ResponseWriter {
+	hijackable := hijackableResponseWriter(w)
+	if !debugLogging.Load() {
+		return hijackable
+	}
+	return &debugUpgradeWriter{ResponseWriter: hijackable, channel: channel, name: name}
+}
+
+// debugUpgradeWriter logs around Hijack and wraps the hijacked conn so the first
+// post-upgrade write (the 101 response) is traced start-to-finish.
+type debugUpgradeWriter struct {
+	http.ResponseWriter
+
+	channel string
+	name    string
+}
+
+func (w *debugUpgradeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *debugUpgradeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("debugUpgradeWriter: underlying response writer is not an http.Hijacker")
+	}
+	debugf("%s: hijacking connection for vm %q", w.channel, w.name)
+	conn, brw, err := hj.Hijack()
+	debugf("%s: hijack returned for vm %q (err=%v)", w.channel, w.name, err)
+	if err != nil {
+		return conn, brw, err
+	}
+	return &debugConn{Conn: conn, channel: w.channel, name: w.name}, brw, nil
+}
+
+// debugConn logs the start and completion of the first write on a hijacked
+// connection. If the "starting" line appears without the "returned" line, the
+// write to the SSH-channel-backed conn is blocking.
+type debugConn struct {
+	net.Conn
+
+	channel string
+	name    string
+	logged  atomic.Bool
+}
+
+func (c *debugConn) Write(p []byte) (int, error) {
+	first := c.logged.CompareAndSwap(false, true)
+	if first {
+		debugf("%s: first post-upgrade write of %d bytes for vm %q starting (101 handshake)", c.channel, len(p), c.name)
+	}
+	n, err := c.Conn.Write(p)
+	if first {
+		debugf("%s: first post-upgrade write returned for vm %q (n=%d err=%v)", c.channel, c.name, n, err)
+	}
+	return n, err
 }
 
 func sameOriginWebsocketRequest(r *http.Request) bool {
