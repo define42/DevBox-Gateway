@@ -73,7 +73,7 @@ func TestCopySocketToWebsocket(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- copySocketToWebsocket(serverWS, backendConn)
+		errCh <- copySocketToWebsocket("vnc", "test-vm", serverWS, backendConn)
 	}()
 
 	want := []byte("hello from serial")
@@ -119,7 +119,7 @@ func TestCopyWebsocketToSocket(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- copyWebsocketToSocket(serverWS, backendConn)
+		errCh <- copyWebsocketToSocket("vnc", "test-vm", serverWS, backendConn)
 	}()
 
 	want := []byte("hello from browser")

@@ -13,10 +13,27 @@ import (
 	"rdptlsgateway/internal/virt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
+
+// debugLogging gates verbose per-connection serial/VNC console diagnostics. It is
+// enabled from main when DEBUG_CONNECTIONS is set so the noisy step-by-step and
+// byte-count logging stays off in normal operation.
+var debugLogging atomic.Bool
+
+// SetDebugLogging toggles verbose serial/VNC console debug logging.
+func SetDebugLogging(enabled bool) {
+	debugLogging.Store(enabled)
+}
+
+func debugf(format string, args ...any) {
+	if debugLogging.Load() {
+		log.Printf("console-debug: "+format, args...)
+	}
+}
 
 // HandleDashboardConsoleWS serves the serial console websocket endpoint.
 func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc {
@@ -33,6 +50,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		debugf("serial: request from %s user=%q vm=%q", r.RemoteAddr, user.GetName(), name)
 
 		owned, err := virt.UserOwnsVM(name, user.GetName())
 		if err != nil {
@@ -43,6 +61,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			writeDashboardConsoleOwnershipError(w, name, user.GetName(), nil)
 			return
 		}
+		debugf("serial: ownership confirmed for vm %q; opening libvirt console", name)
 
 		// The serial socket is libvirt-managed; the gateway cannot connect to its
 		// path directly, so OpenSerialConsole has libvirt stream the console (same
@@ -52,6 +71,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			writeDashboardSerialSocketError(w, name, err)
 			return
 		}
+		debugf("serial: libvirt console opened for vm %q; upgrading websocket", name)
 
 		dashboardSocketUpgrader := websocket.Upgrader{
 			CheckOrigin: sameOriginWebsocketRequest,
@@ -63,6 +83,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
 			return
 		}
+		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
 
 		bridgeSerialConsole(name, ws, console)
 	}
@@ -100,6 +121,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		debugf("vnc: request from %s user=%q vm=%q", r.RemoteAddr, user.GetName(), name)
 
 		owned, err := virt.UserOwnsVM(name, user.GetName())
 		if err != nil {
@@ -110,12 +132,14 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			writeDashboardVNCOwnershipError(w, name, user.GetName(), nil)
 			return
 		}
+		debugf("vnc: ownership confirmed for vm %q; opening VNC backend", name)
 
 		vncConn, err := openDashboardVNCSocket(name)
 		if err != nil {
 			writeDashboardVNCSocketError(w, name, err)
 			return
 		}
+		debugf("vnc: backend connected for vm %q (%s); upgrading websocket", name, vncConn.RemoteAddr())
 
 		dashboardSocketUpgrader := websocket.Upgrader{
 			CheckOrigin: sameOriginWebsocketRequest,
@@ -127,6 +151,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
 			return
 		}
+		debugf("vnc: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
 
 		bridgeDashboardSocket("vnc", name, ws, vncConn)
 	}
@@ -204,7 +229,7 @@ func bridgeSerialConsole(name string, ws *websocket.Conn, console *virt.SerialCo
 	go func() {
 		defer wg.Done()
 		defer stop()
-		pumpWebsocketToConsole(ws, console)
+		pumpWebsocketToConsole(name, ws, console)
 	}()
 
 	wg.Wait()
@@ -213,10 +238,17 @@ func bridgeSerialConsole(name string, ws *websocket.Conn, console *virt.SerialCo
 
 func pumpConsoleToWebsocket(name string, ws *websocket.Conn, console *virt.SerialConsole) {
 	buf := make([]byte, 4096)
+	var total int64
+	defer func() { debugf("serial: console->ws for vm %q ended after %d bytes", name, total) }()
 	for {
 		n, err := console.Recv(buf)
 		if n > 0 {
+			if total == 0 {
+				debugf("serial: first %d bytes console->ws for vm %q: %q", n, name, previewBytes(buf[:n]))
+			}
+			total += int64(n)
 			if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
+				debugf("serial: console->ws write failed for vm %q after %d bytes: %v", name, total, werr)
 				return
 			}
 		}
@@ -229,7 +261,9 @@ func pumpConsoleToWebsocket(name string, ws *websocket.Conn, console *virt.Seria
 	}
 }
 
-func pumpWebsocketToConsole(ws *websocket.Conn, console *virt.SerialConsole) {
+func pumpWebsocketToConsole(name string, ws *websocket.Conn, console *virt.SerialConsole) {
+	var total int64
+	defer func() { debugf("serial: ws->console for vm %q ended after %d bytes", name, total) }()
 	for {
 		messageType, payload, err := ws.ReadMessage()
 		if err != nil {
@@ -238,6 +272,7 @@ func pumpWebsocketToConsole(ws *websocket.Conn, console *virt.SerialConsole) {
 		if messageType != websocket.BinaryMessage && messageType != websocket.TextMessage {
 			continue
 		}
+		total += int64(len(payload))
 		if err := sendAllToConsole(console, payload); err != nil {
 			return
 		}
@@ -274,12 +309,12 @@ func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn
 	}
 
 	go func() {
-		errCh <- copySocketToWebsocket(ws, backendConn)
+		errCh <- copySocketToWebsocket(channel, name, ws, backendConn)
 		closeOnce.Do(closeAll)
 	}()
 
 	go func() {
-		errCh <- copyWebsocketToSocket(ws, backendConn)
+		errCh <- copyWebsocketToSocket(channel, name, ws, backendConn)
 		closeOnce.Do(closeAll)
 	}()
 
@@ -288,12 +323,19 @@ func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn
 	}
 }
 
-func copySocketToWebsocket(ws *websocket.Conn, backendConn net.Conn) error {
+func copySocketToWebsocket(channel, name string, ws *websocket.Conn, backendConn net.Conn) error {
 	buf := make([]byte, 4096)
+	var total int64
+	defer func() { debugf("%s: backend->ws for vm %q ended after %d bytes", channel, name, total) }()
 	for {
 		n, err := backendConn.Read(buf)
 		if n > 0 {
+			if total == 0 {
+				debugf("%s: first %d bytes backend->ws for vm %q: %q", channel, name, n, previewBytes(buf[:n]))
+			}
+			total += int64(n)
 			if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+				debugf("%s: backend->ws write failed for vm %q after %d bytes: %v", channel, name, total, writeErr)
 				return writeErr
 			}
 		}
@@ -306,7 +348,9 @@ func copySocketToWebsocket(ws *websocket.Conn, backendConn net.Conn) error {
 	}
 }
 
-func copyWebsocketToSocket(ws *websocket.Conn, backendConn net.Conn) error {
+func copyWebsocketToSocket(channel, name string, ws *websocket.Conn, backendConn net.Conn) error {
+	var total int64
+	defer func() { debugf("%s: ws->backend for vm %q ended after %d bytes", channel, name, total) }()
 	for {
 		messageType, payload, err := ws.ReadMessage()
 		if err != nil {
@@ -315,10 +359,30 @@ func copyWebsocketToSocket(ws *websocket.Conn, backendConn net.Conn) error {
 		if messageType != websocket.BinaryMessage && messageType != websocket.TextMessage {
 			continue
 		}
+		total += int64(len(payload))
 		if err := writeAll(backendConn, payload); err != nil {
 			return err
 		}
 	}
+}
+
+// previewBytes returns a short, printable preview of a stream's first bytes for
+// debug logging (e.g. the "RFB 003.008" VNC greeting), capped so the log stays
+// readable and with non-printable bytes shown as '.'.
+func previewBytes(b []byte) string {
+	const max = 32
+	if len(b) > max {
+		b = b[:max]
+	}
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c < 0x20 || c > 0x7e {
+			out[i] = '.'
+			continue
+		}
+		out[i] = c
+	}
+	return string(out)
 }
 
 func isExpectedConsoleClose(err error) bool {

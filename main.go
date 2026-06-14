@@ -33,6 +33,7 @@ import (
 	"os/signal"
 	"rdptlsgateway/internal/cert"
 	"rdptlsgateway/internal/config"
+	consolepkg "rdptlsgateway/internal/console"
 	"rdptlsgateway/internal/rdp"
 	"rdptlsgateway/internal/session"
 	"rdptlsgateway/internal/sshtunnel"
@@ -138,6 +139,11 @@ func bootGateway() (*gatewayRuntime, error) {
 	}
 	settings := config.NewSettingType(true)
 	sessionManager := session.NewManager()
+
+	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
+	debugConns := settings.GetBool(config.DEBUG_CONNECTIONS)
+	consolepkg.SetDebugLogging(debugConns)
+	virt.SetVNCDebugLogging(debugConns)
 
 	if err := virt.InitVirt(settings); err != nil {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)

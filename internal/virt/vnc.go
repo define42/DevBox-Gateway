@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"libvirt.org/go/libvirt"
 )
@@ -20,6 +22,21 @@ var (
 	// ErrVNCNotReady reports that the VNC socket path does not exist yet.
 	ErrVNCNotReady = errors.New("vnc not ready")
 )
+
+// vncDebugLogging gates verbose VNC-backend diagnostics (which connection path
+// was used). Enabled from main when DEBUG_CONNECTIONS is set.
+var vncDebugLogging atomic.Bool
+
+// SetVNCDebugLogging toggles verbose VNC backend debug logging.
+func SetVNCDebugLogging(enabled bool) {
+	vncDebugLogging.Store(enabled)
+}
+
+func vncDebugf(format string, args ...any) {
+	if vncDebugLogging.Load() {
+		log.Printf("vnc-debug: "+format, args...)
+	}
+}
 
 type domainGraphicsXML struct {
 	Devices struct {
@@ -121,12 +138,15 @@ func OpenVNCConn(name string) (net.Conn, error) {
 	// Preferred: dial the libvirt-managed VNC unix socket directly.
 	vncConn, dialErr := net.Dial("unix", socketPath)
 	if dialErr == nil {
+		vncDebugf("vm %q: connected via direct unix socket %s", name, socketPath)
 		return vncConn, nil
 	}
+	vncDebugf("vm %q: direct dial of %s failed (%v); trying OpenGraphicsFD fallback", name, socketPath, dialErr)
 
 	// Fallback: ask libvirtd to open the socket and fd-pass it back.
 	fdConn, fdErr := openVNCViaGraphicsFD(dom, name)
 	if fdErr == nil {
+		vncDebugf("vm %q: connected via OpenGraphicsFD fallback", name)
 		return fdConn, nil
 	}
 
