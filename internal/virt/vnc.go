@@ -25,7 +25,7 @@ var (
 
 // vncDebugLogging gates verbose VNC-backend diagnostics (which connection path
 // was used). Enabled from main when DEBUG_CONNECTIONS is set.
-var vncDebugLogging atomic.Bool
+var vncDebugLogging atomic.Bool //nolint:gochecknoglobals // package-level debug toggle set once at startup
 
 // SetVNCDebugLogging toggles verbose VNC backend debug logging.
 func SetVNCDebugLogging(enabled bool) {
@@ -155,7 +155,7 @@ func OpenVNCConn(name string) (net.Conn, error) {
 	if errors.Is(dialErr, fs.ErrNotExist) {
 		return nil, ErrVNCNotReady
 	}
-	return nil, fmt.Errorf("open vnc for %s: dial %s: %w; graphics-fd fallback: %v", name, socketPath, dialErr, fdErr)
+	return nil, fmt.Errorf("open vnc for %s: dial %s: %w; graphics-fd fallback: %w", name, socketPath, dialErr, fdErr)
 }
 
 // openVNCViaGraphicsFD opens the domain's VNC stream through libvirt's

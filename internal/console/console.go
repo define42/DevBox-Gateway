@@ -22,7 +22,7 @@ import (
 // debugLogging gates verbose per-connection serial/VNC console diagnostics. It is
 // enabled from main when DEBUG_CONNECTIONS is set so the noisy step-by-step and
 // byte-count logging stays off in normal operation.
-var debugLogging atomic.Bool
+var debugLogging atomic.Bool //nolint:gochecknoglobals // package-level debug toggle set once at startup
 
 // SetDebugLogging toggles verbose serial/VNC console debug logging.
 func SetDebugLogging(enabled bool) {
@@ -370,9 +370,9 @@ func copyWebsocketToSocket(channel, name string, ws *websocket.Conn, backendConn
 // debug logging (e.g. the "RFB 003.008" VNC greeting), capped so the log stays
 // readable and with non-printable bytes shown as '.'.
 func previewBytes(b []byte) string {
-	const max = 32
-	if len(b) > max {
-		b = b[:max]
+	const maxPreview = 32
+	if len(b) > maxPreview {
+		b = b[:maxPreview]
 	}
 	out := make([]byte, len(b))
 	for i, c := range b {
