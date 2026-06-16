@@ -268,35 +268,38 @@ A successful login redirects to `/api/dashboard`, where you can:
 - Start / restart / shutdown / remove existing VMs that you own.
 - Update CPU and memory allocation.
 - Open a serial console or noVNC session in the browser.
-- Download an `.rdp` file (`rdpgw.rdp`) preconfigured for the gateway.
+- Download an `.rdp` file (named after the VM, e.g. `alice-desktop.rdp`)
+  preconfigured for the gateway.
 
 The same `johndoe` / `dogood` credentials are exercised by the LDAP
 integration tests, so they are also the recommended local smoke-test account.
 
 ## Connecting an RDP client
 
-Use any standard RDP client (mstsc, FreeRDP, Remmina, …) and point it at the
-gateway's host on port `443`. The **server name** must be set to the SNI value
-the gateway expects for your target VM: an opaque routing label of the form
-`<label>.<FRONT_DOMAIN>`, for example `a1b2c3d4….desktop.local.gd`.
+Always connect by downloading the per-VM `.rdp` file from the dashboard — do
+**not** try to point a client at the gateway by hand. Click the VM's **RDP**
+button to get a ready-to-use file (named after the VM, e.g.
+`alice-desktop.rdp`) and open it in any standard RDP client (mstsc, FreeRDP,
+Remmina, …). The file already targets the gateway on port `443` with the
+correct server name and TLS settings; there is nothing to configure manually.
 
-The label is `HMAC-SHA256(SNI_HASH_SECRET, vmName)` truncated to a DNS-safe
-length, so the VM name (which embeds the username) is never sent in cleartext
-in the TLS ClientHello. Because the label is one-way and keyed, you cannot
-construct it by hand — download the per-VM `.rdp` file from the dashboard
-(named after the VM, e.g. `alice-desktop.rdp`), which already contains the
-correct hostname and TLS settings. (DNS is unaffected: a wildcard
-`*.<FRONT_DOMAIN>` record still points every label at the gateway.)
+**The download is single-use and expires in 2 minutes.** Clicking **RDP** is
+both the download action *and* an explicit authorization: it asks the gateway
+to admit a **single** RDP connection for that VM from your current IP, valid for
+at most **2 minutes**, then hands you the file. Open it in your RDP client
+within that window. The grant is **single-use and consumed at connection
+time** — a standing dashboard login no longer implicitly authorizes RDP — so
+**any reconnect, or even a first attempt that fails before the session is up,
+requires clicking RDP again** to re-authorize and download a fresh file.
 
-**Clicking "Connect" authorizes one connection.** The dashboard's per-VM **RDP**
-button is the download action *and* an explicit authorization: it asks the
-gateway to authorize a **single** RDP connection for that VM from your current
-IP (valid for at most **2 minutes**), then it hands you the `.rdp` file. Open the
-downloaded file in your RDP client within that window. The grant is **single-use
-and consumed at connection time**: a standing dashboard login no longer
-implicitly authorizes RDP, and because each grant admits exactly one connection,
-**any reconnect — or a first attempt that fails before the session is up —
-requires clicking Connect again** to re-authorize and download a fresh file.
+You cannot build the connection by hand because the **server name** in the
+`.rdp` file is an opaque routing label of the form `<label>.<FRONT_DOMAIN>`
+(for example `a1b2c3d4….desktop.local.gd`). The label is
+`HMAC-SHA256(SNI_HASH_SECRET, vmName)` truncated to a DNS-safe length, so the VM
+name (which embeds the username) is never sent in cleartext in the TLS
+ClientHello, and because it is one-way and keyed you cannot construct it
+yourself. (DNS is unaffected: a wildcard `*.<FRONT_DOMAIN>` record still points
+every label at the gateway.)
 
 The gateway requires TLS-protected RDP (`PROTOCOL_SSL`); clients and backends
 that only offer the legacy Standard RDP Security will be rejected. Backend TLS
@@ -601,7 +604,7 @@ Build the dashboard bundle and the binary locally:
 
 ```sh
 tsc -p tsconfig.json          # compile ui/dashboard.ts → static/dashboard.js
-CGO_ENABLED=1 go build -o remotegateway
+CGO_ENABLED=1 go build -o rdp-tls-gateway
 ```
 
 Or build the production container image:
@@ -611,8 +614,9 @@ docker compose build
 ```
 
 The multi-stage `Dockerfile` compiles the TypeScript UI and the Go binary in a
-`golang:1.25-alpine` builder and ships only the resulting binary plus
-`libvirt-libs` and `ca-certificates` in the runtime image.
+`golang:1.25-alpine` builder (pinned via the `GO_VERSION` build arg) and ships
+only the resulting binary plus `libvirt-libs` and `ca-certificates` in the
+runtime image.
 
 ### Building the RPM
 
