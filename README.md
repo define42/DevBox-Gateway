@@ -288,14 +288,15 @@ construct it by hand — download the per-VM `.rdp` file from the dashboard
 correct hostname and TLS settings. (DNS is unaffected: a wildcard
 `*.<FRONT_DOMAIN>` record still points every label at the gateway.)
 
-**Clicking "Connect" authorizes the session.** The dashboard's per-VM **RDP**
+**Clicking "Connect" authorizes one connection.** The dashboard's per-VM **RDP**
 button is the download action *and* an explicit authorization: it asks the
-gateway to open a short, **2-minute** window during which RDP connections for
-that VM from your current IP are admitted, then it hands you the `.rdp` file.
-Open the downloaded file in your RDP client within that window. A standing
-dashboard login no longer implicitly authorizes RDP, so if the window lapses
-before you connect (or you later reconnect), just click **Connect** again to
-re-authorize and download a fresh file.
+gateway to authorize a **single** RDP connection for that VM from your current
+IP (valid for at most **2 minutes**), then it hands you the `.rdp` file. Open the
+downloaded file in your RDP client within that window. The grant is **single-use
+and consumed at connection time**: a standing dashboard login no longer
+implicitly authorizes RDP, and because each grant admits exactly one connection,
+**any reconnect — or a first attempt that fails before the session is up —
+requires clicking Connect again** to re-authorize and download a fresh file.
 
 The gateway requires TLS-protected RDP (`PROTOCOL_SSL`); clients that only
 offer the legacy Standard RDP Security will be rejected.
@@ -698,13 +699,17 @@ Some integration tests (e.g. `ldap_integration_test.go`,
   only.
 - Backend TLS verification is disabled by design (VMs typically use self-signed
   certs). Treat the network between the gateway and its VMs as trusted.
-- RDP access is gated by an explicit, short-lived authorization rather than a
+- RDP access is gated by an explicit, single-use authorization rather than a
   standing login: the gateway admits a proxied RDP connection only when the VM's
   owner clicked **Connect** for that VM, from the same client IP, within the last
-  2 minutes (see `rdpConnectWindow` in `internal/session`). The VM's own RDP
-  login still applies on top. Note the window is keyed to the source IP, so on a
-  shared NAT egress another host behind that IP could reach the VM's RDP login
-  prompt during the window.
+  2 minutes (see `rdpConnectWindow` in `internal/session`), and each Connect
+  authorizes exactly one connection (the grant is consumed on use — see
+  `ConsumeRDPConnectGrant`). The VM's own RDP login still applies on top. Note the
+  grant is keyed to the source IP, so on a shared NAT egress another host behind
+  that IP could spend the grant during the window (still facing the VM's RDP
+  login). Because consumption happens at connection time, a connection that fails
+  after authorization spends the grant, and reconnecting requires clicking
+  Connect again.
 - All environment-backed parameters must be defined in
   `internal/config/config.go`. Reading `os.Getenv` directly from feature code
   is not allowed and is enforced by `make lint`.

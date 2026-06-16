@@ -25,10 +25,10 @@ type sessionData struct {
 	ClientIP  string
 	// RDPConnectGrants records, per VM name, the instant until which an RDP
 	// connection for that VM is authorized from this session's client IP. A
-	// grant is created when the user clicks "Connect" (downloads the .rdp) and
-	// expires after rdpConnectWindow, so a standing dashboard session no longer
-	// implicitly authorizes RDP — see HasRDPConnectGrant and the RDP front
-	// handler's authorizeRDPAccess.
+	// grant is created when the user clicks "Connect" (downloads the .rdp),
+	// expires after rdpConnectWindow, and is single-use, so a standing dashboard
+	// session no longer implicitly authorizes RDP — see ConsumeRDPConnectGrant
+	// and the RDP front handler's authorizeRDPAccess.
 	RDPConnectGrants map[string]time.Time
 }
 
@@ -41,12 +41,13 @@ const sessionKey = "session"
 // WebSocket connections are authorized at setup and are not force-closed here.
 const sessionTTL = 30 * time.Minute
 
-// rdpConnectWindow is how long an explicit "Connect" action authorizes RDP for a
-// VM from the session's client IP. It must cover a user downloading the .rdp
-// file and launching their RDP client (so the initial connection establishes),
-// while staying short enough that a logged-in dashboard session does not leave a
-// standing, always-open RDP authorization. New RDP connections after the window
-// closes (e.g. a reconnect) require clicking Connect again.
+// rdpConnectWindow bounds how long an explicit "Connect" action authorizes RDP
+// for a VM from the session's client IP. It must cover a user downloading the
+// .rdp file and launching their RDP client (so the initial connection
+// establishes), while staying short enough that a logged-in dashboard session
+// does not leave a standing, always-open RDP authorization. The grant is also
+// single-use (see ConsumeRDPConnectGrant), so a reconnect or any second
+// connection requires clicking Connect again even within this window.
 const rdpConnectWindow = 2 * time.Minute
 
 var registerSessionTypesOnce sync.Once //nolint:gochecknoglobals // package-level singleton needed for one-time registration
@@ -122,7 +123,7 @@ func (m *Manager) CreateSession(ctx context.Context, u *types.User, clientIP str
 
 // GrantRDPConnect opens a short-lived RDP authorization window for vmName on the
 // caller's own session, recording that the user explicitly clicked "Connect".
-// The grant is checked by HasRDPConnectGrant when an RDP connection arrives. It
+// The grant is checked by ConsumeRDPConnectGrant when an RDP connection arrives. It
 // must be called within an authenticated request so the session is loaded; the
 // grant is persisted when the session is committed (via the LoadAndSave
 // middleware) before the response — and therefore before the RDP client dials.
@@ -212,12 +213,22 @@ func (m *Manager) UserHasActiveSessionFromIP(username, clientIP string) bool {
 	return false
 }
 
-// HasRDPConnectGrant reports whether username has an unexpired RDP connect grant
-// for vmName from clientIP — i.e. the user clicked "Connect" for that VM from
-// that address within the last rdpConnectWindow. This is the gate the RDP front
-// handler uses: it narrows authorization from "any active dashboard session on
-// this IP" to "an explicit, recent Connect action for this specific VM".
-func (m *Manager) HasRDPConnectGrant(username, clientIP, vmName string) bool {
+// ConsumeRDPConnectGrant reports whether username has an unexpired RDP connect
+// grant for vmName from clientIP — i.e. the user clicked "Connect" for that VM
+// from that address within the last rdpConnectWindow — and, on a match, removes
+// the grant so it authorizes exactly one RDP connection. This is the gate the RDP
+// front handler uses: it narrows authorization from "any active dashboard session
+// on this IP" to "one explicit, recent Connect action for this specific VM".
+//
+// Single-use: a reconnect (or any second TCP connection) needs a fresh Connect
+// click. Consumption happens at authorization time, so even a connection that
+// later fails (e.g. the backend is unreachable) spends the grant.
+//
+// Consumption is best-effort under concurrency: the store commits each session
+// under its own lock, but the check-and-delete is not globally atomic, so two
+// simultaneous connections could in a rare race both be admitted. The VM's own
+// RDP login still applies in every case.
+func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool {
 	username = strings.TrimSpace(username)
 	vmName = strings.TrimSpace(vmName)
 	if username == "" || vmName == "" {
@@ -229,16 +240,51 @@ func (m *Manager) HasRDPConnectGrant(username, clientIP, vmName string) bool {
 		return false
 	}
 
+	store, ok := m.Store.(scs.IterableStore)
+	if !ok {
+		return false
+	}
+	sessions, err := store.All()
+	if err != nil {
+		return false
+	}
+
 	now := time.Now()
-	for _, sess := range m.allSessions() {
-		if sess.User == nil || sess.User.GetName() != username || sess.ClientIP != canonicalIP {
-			continue
-		}
-		if expiry, ok := sess.RDPConnectGrants[vmName]; ok && now.Before(expiry) {
+	for token, raw := range sessions {
+		if m.consumeStoredGrant(token, raw, username, canonicalIP, vmName, now) {
 			return true
 		}
 	}
 	return false
+}
+
+// consumeStoredGrant removes and persists an unexpired RDP connect grant for
+// (username, canonicalIP, vmName) held by the stored session at token, returning
+// true when it consumed one. It is the per-session step of ConsumeRDPConnectGrant.
+func (m *Manager) consumeStoredGrant(token string, raw []byte, username, canonicalIP, vmName string, now time.Time) bool {
+	deadline, values, err := m.Codec.Decode(raw)
+	if err != nil {
+		return false
+	}
+	sess, ok := values[sessionKey].(sessionData)
+	if !ok || sess.User == nil {
+		return false
+	}
+	if sess.User.GetName() != username || sess.ClientIP != canonicalIP {
+		return false
+	}
+	expiry, ok := sess.RDPConnectGrants[vmName]
+	if !ok || !now.Before(expiry) {
+		return false
+	}
+
+	// Consume the grant: drop it and persist, so it authorizes one connection.
+	delete(sess.RDPConnectGrants, vmName)
+	values[sessionKey] = sess
+	if encoded, encErr := m.Codec.Encode(deadline, values); encErr == nil {
+		_ = m.Store.Commit(token, encoded, deadline)
+	}
+	return true
 }
 
 // allSessions decodes every stored (non-expired) session. It is a read-only

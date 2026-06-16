@@ -446,7 +446,7 @@ func withLoadedSession(t *testing.T, m *Manager, remoteAddr string, cookie *http
 	handler.ServeHTTP(rec, req)
 }
 
-func TestGrantRDPConnectAuthorizesConnect(t *testing.T) {
+func TestConsumeRDPConnectGrantIsSingleUse(t *testing.T) {
 	m := NewManager()
 
 	user, err := types.NewUser("alice")
@@ -456,7 +456,7 @@ func TestGrantRDPConnectAuthorizesConnect(t *testing.T) {
 	cookie := issueSession(t, m, user, testSessionRemoteAddr)
 
 	// No grant yet: a standing session must not authorize RDP on its own.
-	if m.HasRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
+	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
 		t.Fatal("did not expect a grant before Connect was clicked")
 	}
 
@@ -466,14 +466,12 @@ func TestGrantRDPConnectAuthorizesConnect(t *testing.T) {
 		}
 	})
 
-	if !m.HasRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-		t.Fatal("expected the Connect grant to authorize RDP for the VM")
+	// The grant authorizes exactly one RDP connection.
+	if !m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("expected the Connect grant to authorize the first RDP connection")
 	}
-	if m.HasRDPConnectGrant("alice", "192.0.2.10", "other-vm") {
-		t.Fatal("did not expect a grant for a VM the user never connected to")
-	}
-	if m.HasRDPConnectGrant("alice", "198.51.100.9", "alice-desk") {
-		t.Fatal("did not expect a grant from a different client IP")
+	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("expected the grant to be single-use (second connection denied)")
 	}
 }
 
@@ -503,7 +501,7 @@ func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestHasRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
+func TestConsumeRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
 	m := NewManager()
 
 	user, err := types.NewUser("dora")
@@ -529,12 +527,12 @@ func TestHasRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
 		t.Fatalf("commit session: %v", err)
 	}
 
-	if m.HasRDPConnectGrant("dora", "192.0.2.20", "vm1") {
+	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
 		t.Fatal("expected an expired connect grant to be ignored")
 	}
 }
 
-func TestHasRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
+func TestConsumeRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
 	m := NewManager()
 
 	user, err := types.NewUser("dora")
@@ -559,22 +557,28 @@ func TestHasRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
 		t.Fatalf("commit session: %v", err)
 	}
 
-	if !m.HasRDPConnectGrant("dora", "192.0.2.20", "vm1") {
-		t.Fatal("expected the unexpired grant to authorize")
-	}
-	if m.HasRDPConnectGrant("dora", "192.0.2.20", "vm2") {
+	// Mismatches never match, so they must not consume the grant.
+	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm2") {
 		t.Fatal("did not expect authorization for a different VM")
 	}
-	if m.HasRDPConnectGrant("dora", "192.0.2.21", "vm1") {
+	if m.ConsumeRDPConnectGrant("dora", "192.0.2.21", "vm1") {
 		t.Fatal("did not expect authorization from a different IP")
 	}
-	if m.HasRDPConnectGrant("erin", "192.0.2.20", "vm1") {
+	if m.ConsumeRDPConnectGrant("erin", "192.0.2.20", "vm1") {
 		t.Fatal("did not expect authorization for a different user")
 	}
-	if m.HasRDPConnectGrant("", "192.0.2.20", "vm1") || m.HasRDPConnectGrant("dora", "192.0.2.20", "") {
+	if m.ConsumeRDPConnectGrant("", "192.0.2.20", "vm1") || m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "") {
 		t.Fatal("expected blank user or VM name to fail authorization")
 	}
-	if m.HasRDPConnectGrant("dora", "not-an-ip", "vm1") {
+	if m.ConsumeRDPConnectGrant("dora", "not-an-ip", "vm1") {
 		t.Fatal("expected an invalid client IP to fail authorization")
+	}
+
+	// The real grant survived every mismatch and authorizes exactly once.
+	if !m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
+		t.Fatal("expected the unexpired grant to authorize")
+	}
+	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
+		t.Fatal("expected the grant to be single-use")
 	}
 }
