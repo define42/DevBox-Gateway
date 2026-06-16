@@ -16,8 +16,8 @@ func TestBackendTLSConfigDefaultsServerNameEmpty(t *testing.T) {
 	if !cfg.InsecureSkipVerify {
 		t.Fatal("expected InsecureSkipVerify true for backend cert handling")
 	}
-	if cfg.MinVersion != tls.VersionTLS10 {
-		t.Fatalf("expected MinVersion TLS1.0, got 0x%04x", cfg.MinVersion)
+	if cfg.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("expected MinVersion TLS1.2, got 0x%04x", cfg.MinVersion)
 	}
 	if cfg.ServerName != "" {
 		t.Fatalf("expected empty ServerName, got %q", cfg.ServerName)

@@ -298,8 +298,9 @@ implicitly authorizes RDP, and because each grant admits exactly one connection,
 **any reconnect — or a first attempt that fails before the session is up —
 requires clicking Connect again** to re-authorize and download a fresh file.
 
-The gateway requires TLS-protected RDP (`PROTOCOL_SSL`); clients that only
-offer the legacy Standard RDP Security will be rejected.
+The gateway requires TLS-protected RDP (`PROTOCOL_SSL`); clients and backends
+that only offer the legacy Standard RDP Security will be rejected. Backend TLS
+connections require TLS 1.2 or newer.
 
 ## Configuration
 

@@ -542,7 +542,7 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 func backendTLSConfig(sni string) *tls.Config {
 	backendTLSCfg := &tls.Config{
 		InsecureSkipVerify: true, // ignore backend cert chain + hostname
-		MinVersion:         tls.VersionTLS10,
+		MinVersion:         tls.VersionTLS12,
 	}
 	if sni != "" && sni != "*" {
 		backendTLSCfg.ServerName = sni
