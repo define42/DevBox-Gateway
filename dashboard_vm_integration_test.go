@@ -92,8 +92,8 @@ func assertDashboardVMRow(t *testing.T, row dashboard.VM, wantDisplayName string
 	if row.VCPU != 2 {
 		t.Fatalf("expected vCPU 2, got %d", row.VCPU)
 	}
-	if row.VolumeGB != 40 {
-		t.Fatalf("expected disk 40 GB, got %d", row.VolumeGB)
+	if row.VolumeGB != config.DefaultVMDiskSizeGB {
+		t.Fatalf("expected disk %d GB, got %d", config.DefaultVMDiskSizeGB, row.VolumeGB)
 	}
 	if !row.TTYReady {
 		t.Fatal("expected TTYReady=true")
