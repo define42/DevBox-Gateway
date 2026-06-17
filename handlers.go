@@ -299,7 +299,11 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
+		// same-origin (not no-referrer): no-referrer makes browsers send
+		// "Origin: null" on same-origin form POSTs, which breaks the logout and
+		// dashboard same-origin checks. same-origin still withholds the referrer
+		// from third parties while preserving Origin/Referer for our own requests.
+		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		next.ServeHTTP(w, r)
 	})
