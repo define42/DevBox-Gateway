@@ -269,12 +269,49 @@ func debugConnectionLogger(next http.Handler) http.Handler {
 	})
 }
 
+// contentSecurityPolicy locks the gateway's pages down to same-origin resources
+// to blunt cross-site scripting. script-src stays strict ('self', no inline) —
+// every script the login, dashboard, and noVNC pages load is a same-origin file
+// and none use inline handlers, so this is the XSS-critical guarantee. The
+// concessions are: style-src 'unsafe-inline' because xterm.js injects <style>
+// elements at runtime; img-src data: for the noVNC framebuffer and cursor images
+// rendered from base64 data: URLs; and connect-src 'self' for the dashboard and
+// console WebSockets, which target this same origin.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data:; " +
+	"font-src 'self'; " +
+	"connect-src 'self'; " +
+	"object-src 'none'; " +
+	"base-uri 'self'; " +
+	"form-action 'self'; " +
+	"frame-ancestors 'none'"
+
+// securityHeaders sets HTTP response security headers on every response. The
+// gateway terminates TLS and is only ever reachable over HTTPS, so HSTS is safe
+// to assert unconditionally: it instructs browsers to refuse any future
+// cleartext connection to this host. The remaining headers harden the dashboard
+// and login pages against clickjacking, MIME-sniffing, and cross-site scripting.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
 	router := chi.NewRouter()
 	loginLimiter := newLoginRateLimiter(settings)
 	if settings.GetBool(config.DEBUG_CONNECTIONS) {
 		router.Use(debugConnectionLogger)
 	}
+	router.Use(securityHeaders)
 	router.Use(sessionManager.LoadAndSave)
 
 	router.Handle("/static/*", noCacheStaticFileServer())
