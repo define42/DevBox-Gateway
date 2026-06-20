@@ -139,6 +139,15 @@ func bootGateway() (*gatewayRuntime, error) {
 		return nil, fmt.Errorf("failed to load config file: %w", err)
 	}
 	settings := config.NewSettingType(true)
+
+	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
+	// routing label; with it empty every RDP connection is rejected while the
+	// dashboard still issues .rdp files. Refuse to boot in that broken state
+	// rather than fail silently at connect time.
+	if err := config.ValidateFrontDomain(settings); err != nil {
+		return nil, err
+	}
+
 	sessionManager := session.NewManager()
 
 	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
