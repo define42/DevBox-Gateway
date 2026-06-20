@@ -9,10 +9,10 @@ import (
 
 // newLimitTestSettings builds settings with MAX_CONCURRENT_CONNECTIONS set to
 // max so the limiter helper can be exercised in isolation.
-func newLimitTestSettings(t *testing.T, max int) *config.SettingsType {
+func newLimitTestSettings(t *testing.T, maxConns int) *config.SettingsType {
 	t.Helper()
 	settings := config.NewSettingType(false)
-	if err := settings.OverwriteForTestInt(config.MAX_CONCURRENT_CONNECTIONS, max); err != nil {
+	if err := settings.OverwriteForTestInt(config.MAX_CONCURRENT_CONNECTIONS, maxConns); err != nil {
 		t.Fatalf("set max concurrent connections: %v", err)
 	}
 	return settings

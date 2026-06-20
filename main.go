@@ -236,12 +236,12 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, *sshtunnel.
 // local and SSH reverse-tunnel modes, so it counts every front connection
 // regardless of how the listener is published.
 func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
-	max := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
-	if max <= 0 {
+	maxConns := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
+	if maxConns <= 0 {
 		return ln
 	}
-	log.Printf("limiting to %d concurrent front connections", max)
-	return netutil.LimitListener(ln, max)
+	log.Printf("limiting to %d concurrent front connections", maxConns)
+	return netutil.LimitListener(ln, maxConns)
 }
 
 func sshTunnelConfig(settings *config.SettingsType) sshtunnel.Config {
