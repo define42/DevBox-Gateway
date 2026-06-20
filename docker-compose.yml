@@ -13,6 +13,7 @@ services:
       # default is /var/lib/libvirt/devbox-gateway for native (RPM) installs.
       - DATA_ROOT_DIR=/data
       - BASE_IMAGE_DIR=/data/baseimages
+      - LDAP_SKIP_TLS_VERIFY=true
     ports:
       - "443:443"
     volumes:

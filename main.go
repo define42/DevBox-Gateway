@@ -43,6 +43,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/netutil"
 )
 
 func main() {
@@ -212,7 +214,7 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, *sshtunnel.
 		}
 		log.Printf("listening via SSH reverse tunnel: relay %s forwards %s",
 			settings.Get(config.SSH_TUNNEL_SERVER), settings.Get(config.SSH_TUNNEL_REMOTE_ADDR))
-		return tunnel.Listener(), tunnel, nil
+		return limitListenerConnections(tunnel.Listener(), settings), tunnel, nil
 	}
 
 	listen := settings.Get(config.LISTEN_ADDR)
@@ -221,7 +223,25 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, *sshtunnel.
 		return nil, nil, fmt.Errorf("listen on %s: %w", listen, err)
 	}
 	log.Printf("listening on %s", listen)
-	return ln, nil, nil
+	return limitListenerConnections(ln, settings), nil, nil
+}
+
+// limitListenerConnections caps the number of simultaneously accepted front
+// connections so a flood of connections — or slow clients that stall before the
+// TLS handshake — cannot spawn an unbounded number of per-connection goroutines
+// and exhaust the gateway's memory and file descriptors. Accept blocks once
+// MAX_CONCURRENT_CONNECTIONS connections are open and resumes as they close; a
+// blocked Accept is released by Close during shutdown. A value <=0 disables the
+// cap and restores the previous unbounded behavior. The cap is applied in both
+// local and SSH reverse-tunnel modes, so it counts every front connection
+// regardless of how the listener is published.
+func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
+	max := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
+	if max <= 0 {
+		return ln
+	}
+	log.Printf("limiting to %d concurrent front connections", max)
+	return netutil.LimitListener(ln, max)
 }
 
 func sshTunnelConfig(settings *config.SettingsType) sshtunnel.Config {

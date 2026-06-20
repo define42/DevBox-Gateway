@@ -81,6 +81,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetInt(VM_DISK_SIZE_GB, "Virtual disk capacity in GiB for newly created VM qcow2 volumes; the base image is grown to this size (qcow2 is thin-provisioned, so the host file only consumes written data). Values <=0 fall back to the default", DefaultVMDiskSizeGB)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
+	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously accepted front connections (RDP + HTTPS); Accept blocks once this many are open and resumes as connections close, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", 1024)
 	s.SetString(CERT_FILE, "TLS certificate PEM for clients (front side)", "")
 	s.SetString(KEY_FILE, "TLS private key PEM for clients (front side, unencrypted)", "")
 
@@ -131,7 +132,7 @@ func (s *SettingsType) setAuthDefaults() {
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
 	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
-	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", true)
+	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
 	s.SetString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
 	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username or client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
@@ -425,6 +426,7 @@ const (
 	LOGIN_RATE_LIMIT_WINDOW       = "LOGIN_RATE_LIMIT_WINDOW"
 	LOGIN_RATE_LIMIT_LOCKOUT      = "LOGIN_RATE_LIMIT_LOCKOUT"
 	LISTEN_ADDR                   = "LISTEN_ADDR"
+	MAX_CONCURRENT_CONNECTIONS    = "MAX_CONCURRENT_CONNECTIONS"
 	RDP_DISABLE_CLIPBOARD         = "RDP_DISABLE_CLIPBOARD"
 	RDP_DISABLE_DRIVES            = "RDP_DISABLE_DRIVES"
 	SNI_HASH_SECRET               = "SNI_HASH_SECRET"
