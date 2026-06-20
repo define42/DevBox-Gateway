@@ -154,6 +154,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	debugConns := settings.GetBool(config.DEBUG_CONNECTIONS)
 	consolepkg.SetDebugLogging(debugConns)
 	virt.SetVNCDebugLogging(debugConns)
+	rdp.SetDebugLogging(debugConns)
 
 	if err := virt.InitVirt(settings); err != nil {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)

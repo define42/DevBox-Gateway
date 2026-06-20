@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tomatome/grdp/core"
@@ -27,6 +28,24 @@ import (
 func InitLogging() {
 	glog.SetLogger(log.New(os.Stdout, "", 0))
 	glog.SetLevel(glog.ERROR)
+}
+
+// debugLogging gates the verbose per-connection "rdp debug:" diagnostics. It is
+// enabled from main when DEBUG_CONNECTIONS is set so the noisy step-by-step
+// negotiation/proxy logging — which includes resolved VM names and backend IPs —
+// stays off in normal operation, matching the console/VNC packages.
+var debugLogging atomic.Bool //nolint:gochecknoglobals // package-level debug toggle set once at startup
+
+// SetDebugLogging toggles verbose "rdp debug:" connection logging.
+func SetDebugLogging(enabled bool) {
+	debugLogging.Store(enabled)
+}
+
+// debugf emits a verbose "rdp debug:" line only when debug logging is enabled.
+func debugf(format string, args ...any) {
+	if debugLogging.Load() {
+		log.Printf("rdp debug: "+format, args...)
+	}
 }
 
 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
@@ -64,7 +83,7 @@ type frontRDPConnection struct {
 // HandleRDP handles a single RDP connection over TLS.
 func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {
 	started := time.Now()
-	log.Printf("rdp debug: new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
+	debugf("new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
 
 	clientConn, ok := negotiateFrontRDP(raw, frontTLS, settings, started)
 	if !ok {
@@ -104,7 +123,7 @@ func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.
 		}
 	}
 
-	log.Printf("rdp debug: starting bidirectional proxy")
+	debugf("starting bidirectional proxy")
 	proxyBidirectional(clientConn.tlsConn, backendTLS)
 }
 
@@ -151,8 +170,8 @@ func proxyBidirectional(a, b net.Conn) {
 		})
 	}
 
-	log.Printf(
-		"rdp debug: proxy start a_local=%s a_remote=%s b_local=%s b_remote=%s",
+	debugf(
+		"proxy start a_local=%s a_remote=%s b_local=%s b_remote=%s",
 		a.LocalAddr(),
 		a.RemoteAddr(),
 		b.LocalAddr(),
@@ -162,8 +181,8 @@ func proxyBidirectional(a, b net.Conn) {
 	started := time.Now()
 	go func() {
 		n, err := io.Copy(b, a)
-		log.Printf(
-			"rdp debug: proxy a->b done bytes=%d err=%v elapsed=%s",
+		debugf(
+			"proxy a->b done bytes=%d err=%v elapsed=%s",
 			n,
 			err,
 			time.Since(started),
@@ -171,8 +190,8 @@ func proxyBidirectional(a, b net.Conn) {
 		closeBoth()
 	}()
 	n, err := io.Copy(a, b)
-	log.Printf(
-		"rdp debug: proxy b->a done bytes=%d err=%v elapsed=%s",
+	debugf(
+		"proxy b->a done bytes=%d err=%v elapsed=%s",
 		n,
 		err,
 		time.Since(started),
@@ -345,15 +364,15 @@ func readClientConnectionRequest(raw net.Conn) ([]byte, bool) {
 		log.Printf("read client CRQ: %v", err)
 		return nil, false
 	}
-	log.Printf("rdp debug: client CRQ len=%d", len(crq))
+	debugf("client CRQ len=%d", len(crq))
 	return crq, true
 }
 
 func clientOfferedTLS(remoteAddr net.Addr, crq []byte) bool {
 	reqProto, ok := findClientRequestedProtocols(crq)
-	log.Printf("rdp debug: client requested protocols ok=%v value=0x%08x", ok, reqProto)
+	debugf("client requested protocols ok=%v value=0x%08x", ok, reqProto)
 	if reqProto&(x224.PROTOCOL_HYBRID|x224.PROTOCOL_HYBRID_EX) != 0 {
-		log.Printf("rdp debug: client offered NLA (HYBRID/HYBRID_EX); gateway only supports TLS (PROTOCOL_SSL)")
+		debugf("client offered NLA (HYBRID/HYBRID_EX); gateway only supports TLS (PROTOCOL_SSL)")
 	}
 	if ok && (reqProto&x224.PROTOCOL_SSL) != 0 {
 		return true
@@ -364,7 +383,7 @@ func clientOfferedTLS(remoteAddr net.Addr, crq []byte) bool {
 }
 
 func writeFrontConnectionConfirm(raw net.Conn) bool {
-	log.Printf("rdp debug: sending server CCF select TLS")
+	debugf("sending server CCF select TLS")
 	if err := writeTPKT(raw, buildServerCCFSelectTLS()); err != nil {
 		log.Printf("write CCF(TLS): %v", err)
 		return false
@@ -381,8 +400,8 @@ func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Tim
 
 	clientState := clientTLS.ConnectionState()
 	sni := strings.ToLower(strings.TrimSpace(clientState.ServerName))
-	log.Printf(
-		"rdp debug: client TLS established version=%s cipher=0x%04x sni=%q elapsed=%s",
+	debugf(
+		"client TLS established version=%s cipher=0x%04x sni=%q elapsed=%s",
 		tlsVersionLabel(clientState.Version),
 		clientState.CipherSuite,
 		sni,
@@ -394,7 +413,7 @@ func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Tim
 func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.SettingsType) (string, bool) {
 	frontDomain := strings.TrimSpace(settings.Get(config.FRONT_DOMAIN))
 	if frontDomain != "" {
-		log.Printf("rdp debug: enforcing front domain %q", frontDomain)
+		debugf("enforcing front domain %q", frontDomain)
 	}
 	if frontDomain != "" && !strings.HasSuffix(sni, frontDomain) {
 		log.Printf("client SNI=%q does not match required domain %q from %s", sni, frontDomain, remoteAddr)
@@ -416,7 +435,7 @@ func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.Settings
 		return "", false
 	}
 
-	log.Printf("rdp debug: resolved routing label %q to vm=%q", label, hostname)
+	debugf("resolved routing label %q to vm=%q", label, hostname)
 	return hostname, true
 }
 
@@ -446,7 +465,7 @@ func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sn
 		return "", false
 	}
 
-	log.Printf("rdp debug: authorized owner=%q client_ip=%q vm=%q", owner, clientIP, hostname)
+	debugf("authorized owner=%q client_ip=%q vm=%q", owner, clientIP, hostname)
 	return owner, true
 }
 
@@ -456,7 +475,7 @@ func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool
 		log.Printf("get IP of VM %s: %v", hostname, err)
 		return "", false
 	}
-	log.Printf("rdp debug: resolved VM %q to IP %q", hostname, backendIP)
+	debugf("resolved VM %q to IP %q", hostname, backendIP)
 	// The virt layer only returns an authoritative DHCP-lease address inside the
 	// VM NAT subnet here (see domainRoutingIP); an empty result means there is no
 	// trusted route, so fail closed rather than dial a guest-supplied address.
@@ -486,7 +505,7 @@ func dialBackendRDP(backendAddr, sni string, settings *config.SettingsType) (*tl
 
 func dialBackendTCP(backendAddr string, settings *config.SettingsType) (net.Conn, error) {
 	d := net.Dialer{Timeout: settings.GetDuration(config.TIMEOUT)}
-	log.Printf("rdp debug: dialing backend %s", backendAddr)
+	debugf("dialing backend %s", backendAddr)
 
 	backendRaw, err := d.Dial("tcp", backendAddr)
 	if err != nil {
@@ -494,13 +513,13 @@ func dialBackendTCP(backendAddr string, settings *config.SettingsType) (net.Conn
 		return nil, err
 	}
 
-	log.Printf("rdp debug: backend TCP connected to %s", backendAddr)
+	debugf("backend TCP connected to %s", backendAddr)
 	_ = backendRaw.SetDeadline(time.Now().Add(settings.GetDuration(config.TIMEOUT)))
 	return backendRaw, nil
 }
 
 func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Conn, error) {
-	log.Printf("rdp debug: sending backend CRQ select TLS")
+	debugf("sending backend CRQ select TLS")
 	if err := writeTPKT(backendRaw, buildClientCRQSelectTLS()); err != nil {
 		log.Printf("write backend CRQ: %v", err)
 		return nil, err
@@ -513,7 +532,7 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 	}
 
 	sel, ok := findServerSelectedProtocol(ccfBackend)
-	log.Printf("rdp debug: backend selected protocol ok=%v value=0x%08x", ok, sel)
+	debugf("backend selected protocol ok=%v value=0x%08x", ok, sel)
 	if !ok {
 		log.Printf("backend did not include RDP_NEG_RSP (cannot confirm TLS); backend=%s", backendAddr)
 		return nil, fmt.Errorf("backend did not confirm TLS")
@@ -530,8 +549,8 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 	}
 
 	backendState := backendTLS.ConnectionState()
-	log.Printf(
-		"rdp debug: backend TLS established version=%s cipher=0x%04x server_name=%q",
+	debugf(
+		"backend TLS established version=%s cipher=0x%04x server_name=%q",
 		tlsVersionLabel(backendState.Version),
 		backendState.CipherSuite,
 		backendState.ServerName,

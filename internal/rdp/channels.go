@@ -25,7 +25,6 @@ package rdp
 import (
 	"devboxgateway/internal/config"
 	"encoding/binary"
-	"log"
 	"strings"
 )
 
@@ -151,7 +150,7 @@ func (f channelFilter) renameChannels(buf []byte, offset int, count uint32) []st
 		copy(buf[nameStart:nameEnd], replacement)
 
 		rewritten = append(rewritten, original)
-		log.Printf("rdp debug: stripped virtual channel %q (renamed to %q)", original, strings.TrimRight(replacement, "\x00"))
+		debugf("stripped virtual channel %q (renamed to %q)", original, strings.TrimRight(replacement, "\x00"))
 	}
 	return rewritten
 }
