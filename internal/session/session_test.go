@@ -521,6 +521,61 @@ func TestSessionMiddlewareCallsNextWithSession(t *testing.T) {
 	}
 }
 
+func TestEnforceClientIPKeepsSessionFromSameIP(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("ivan")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	sessionCookie := issueSession(t, m, user, "192.0.2.50:5000")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.RemoteAddr = "192.0.2.50:6001" // same IP, different ephemeral port
+	req.AddCookie(sessionCookie)
+
+	var seenUser *types.User
+	handler := m.LoadAndSave(m.EnforceClientIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenUser, _ = m.UserFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})))
+	handler.ServeHTTP(rec, req)
+
+	if seenUser == nil || seenUser.GetName() != "ivan" {
+		t.Fatalf("expected session preserved for same IP, got %#v", seenUser)
+	}
+}
+
+func TestEnforceClientIPDestroysRoamedSession(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("judy")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	sessionCookie := issueSession(t, m, user, "192.0.2.50:5000")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.RemoteAddr = "198.51.100.77:6001" // roamed to a new network/IP
+	req.AddCookie(sessionCookie)
+
+	var seenUser *types.User
+	handler := m.LoadAndSave(m.EnforceClientIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenUser, _ = m.UserFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})))
+	handler.ServeHTTP(rec, req)
+
+	if seenUser != nil {
+		t.Fatalf("expected roamed session to be destroyed, got user %#v", seenUser)
+	}
+	if _, found := m.getSessionFromUserName("judy"); found {
+		t.Fatal("expected roamed session removed from store")
+	}
+}
+
 // withLoadedSession runs fn inside a request whose context has been through
 // LoadAndSave, so session reads/writes work like a real handler. cookie may be
 // nil to exercise an unauthenticated (loaded but empty) session.

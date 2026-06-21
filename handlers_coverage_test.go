@@ -692,7 +692,7 @@ func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", rec.Code)
 	}
-	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.10") {
+	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.1") {
 		t.Fatal("expected GET /logout to leave the session active")
 	}
 }
@@ -713,7 +713,7 @@ func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rec.Code)
 	}
-	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.10") {
+	if !sm.UserHasActiveSessionFromIP("alice", "192.0.2.1") {
 		t.Fatal("expected rejected logout to leave the session active")
 	}
 	if closed != 0 {
@@ -736,6 +736,7 @@ func TestLogoutRedirects(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.RemoteAddr = "192.0.2.10:12345" // same IP the cookie's session is bound to
 	setSameOriginHeader(req)
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)

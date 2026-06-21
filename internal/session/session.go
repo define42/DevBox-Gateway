@@ -6,6 +6,7 @@ import (
 	"devboxgateway/internal/types"
 	"encoding/gob"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -420,6 +421,35 @@ func (m *Manager) CloseUserConnections(username string) int {
 		closeFn()
 	}
 	return len(closeFns)
+}
+
+// EnforceClientIP is router middleware that destroys an authenticated session
+// whose bound client IP no longer matches the request's source address. The IP
+// is bound once at login (see CreateSession); when a user roams to a new network
+// and gets a new address, the next request from that address clears the session,
+// so downstream handlers see no authenticated user — SessionMiddleware redirects
+// the dashboard to /login and the WebSocket handlers reject the connection. The
+// forced re-login re-binds ClientIP to the new address, which is also what makes
+// a freshly downloaded .rdp file usable: ConsumeRDPConnectGrant requires the RDP
+// connection's IP to match the session's bound IP.
+//
+// This must run after LoadAndSave so the session is loaded into the request
+// context (and so Destroy's cookie expiry is committed on the response).
+func (m *Manager) EnforceClientIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess, ok := m.Get(r.Context(), sessionKey).(sessionData)
+		if ok && sess.User != nil {
+			canonicalIP, ipOK := CanonicalClientIP(r.RemoteAddr)
+			if !ipOK || canonicalIP != sess.ClientIP {
+				log.Printf("session client IP changed for user %q (bound=%q now=%q): forcing re-login",
+					sess.User.GetName(), sess.ClientIP, canonicalIP)
+				if err := m.Destroy(r.Context()); err != nil {
+					log.Printf("destroy roamed session for user %q failed: %v", sess.User.GetName(), err)
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type sessionContextKey struct{}

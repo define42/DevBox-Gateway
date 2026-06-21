@@ -320,6 +320,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	}
 	router.Use(securityHeaders)
 	router.Use(sessionManager.LoadAndSave)
+	router.Use(sessionManager.EnforceClientIP)
 
 	router.Handle("/static/*", noCacheStaticFileServer())
 	router.Post("/login", handleLoginPost(sessionManager, settings, loginLimiter))

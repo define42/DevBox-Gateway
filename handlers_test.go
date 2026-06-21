@@ -13,7 +13,10 @@ import (
 
 func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username string) *http.Cookie {
 	t.Helper()
-	return issueSessionCookieFromIP(t, sessionManager, username, "192.0.2.10:12345")
+	// Match the RemoteAddr that httptest.NewRequest assigns by default
+	// (192.0.2.1) so requests built in router tests share the session's bound
+	// client IP and are not treated as roaming by EnforceClientIP.
+	return issueSessionCookieFromIP(t, sessionManager, username, "192.0.2.1:12345")
 }
 
 func issueSessionCookieFromIP(t *testing.T, sessionManager *session.Manager, username string, remoteAddr string) *http.Cookie {
