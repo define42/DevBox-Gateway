@@ -21,7 +21,7 @@ require (
 	github.com/xor-gate/debpkg v1.0.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.57.0
-	libvirt.org/go/libvirt v1.12003.0
+	libvirt.org/go/libvirt v1.12005.0
 )
 
 require (
