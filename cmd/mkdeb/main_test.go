@@ -151,6 +151,18 @@ func TestWriteDebWithLicense(t *testing.T) {
 
 func assertDataDirectories(t *testing.T, deb []byte, want []string) {
 	t.Helper()
+
+	directories := dataDirectories(t, deb)
+	for _, name := range want {
+		if !directories[name] {
+			t.Errorf("data archive missing directory %q", name)
+		}
+	}
+}
+
+func dataDirectories(t *testing.T, deb []byte) map[string]bool {
+	t.Helper()
+
 	members, err := parseAr(deb)
 	if err != nil {
 		t.Fatalf("parseAr: %v", err)
@@ -166,6 +178,12 @@ func assertDataDirectories(t *testing.T, deb []byte, want []string) {
 	if dataArchive == nil {
 		t.Fatal("data.tar.gz not found")
 	}
+
+	return tarDirectories(t, dataArchive)
+}
+
+func tarDirectories(t *testing.T, dataArchive []byte) map[string]bool {
+	t.Helper()
 
 	gzipReader, err := gzip.NewReader(bytes.NewReader(dataArchive))
 	if err != nil {
@@ -185,11 +203,7 @@ func assertDataDirectories(t *testing.T, deb []byte, want []string) {
 			directories[header.Name] = true
 		}
 	}
-	for _, name := range want {
-		if !directories[name] {
-			t.Errorf("data archive missing directory %q", name)
-		}
-	}
+	return directories
 }
 
 func TestWriteDebMissingBinary(t *testing.T) {
