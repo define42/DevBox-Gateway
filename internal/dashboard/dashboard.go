@@ -6,6 +6,7 @@ import (
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/hash"
 	"devboxgateway/internal/virt"
+	"devboxgateway/internal/vmname"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -73,15 +74,11 @@ func RenderDashboardPage(w http.ResponseWriter, staticFiles fs.FS) {
 }
 
 // vmBareName returns the name the user typed at creation time, i.e. the VM
-// name with the leading "<owner>-" prefix removed. VMs without owner metadata
-// (older ones) fall back to the full name.
+// name with the leading "<owner><Separator>" prefix removed. VMs without owner
+// metadata (older ones) fall back to the full name. The owner/hostname boundary
+// rule lives in the vmname package so it stays consistent with Compose.
 func vmBareName(vm virt.VMInfo) string {
-	if owner := strings.TrimSpace(vm.Owner); owner != "" {
-		if bare := strings.TrimPrefix(vm.Name, owner+"-"); bare != "" {
-			return bare
-		}
-	}
-	return vm.Name
+	return vmname.BareHostname(vm.Name, vm.Owner)
 }
 
 // rdpDownloadFilename derives a friendly per-VM download filename (e.g.

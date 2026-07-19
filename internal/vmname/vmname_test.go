@@ -90,10 +90,10 @@ func TestCompose(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		{"simple", "alice", "web", "alice-web", false},
-		{"email owner", "alice@example.com", "web", "alice@example.com-web", false},
-		{"trims both parts", "  alice  ", "  web  ", "alice-web", false},
-		{"hyphenated owner keeps single hyphen join", "alice-test", "web", "alice-test-web", false},
+		{"simple", "alice", "web", "alice.web", false},
+		{"email owner", "alice@example.com", "web", "alice@example.com.web", false},
+		{"trims both parts", "  alice  ", "  web  ", "alice.web", false},
+		{"hyphenated owner and hostname join unambiguously", "alice-test", "web-1", "alice-test.web-1", false},
 		{"empty username", "", "web", "", true},
 		{"empty hostname", "alice", "", "", true},
 		{"whitespace hostname", "alice", "   ", "", true},
@@ -144,6 +144,80 @@ func TestComposeAlwaysHasOwnerPrefix(t *testing.T) {
 	}
 }
 
+// TestComposeRejectsReportedCollision is the regression test for the exact
+// VDI-name ambiguity called out in the security report. Under the old "-" join,
+// Compose("alice","bob-x") and Compose("alice-bob","x") both produced
+// "alice-bob-x", letting one user squat on another user's namespace and collide
+// on one libvirt domain. They must now produce distinct names.
+func TestComposeRejectsReportedCollision(t *testing.T) {
+	a, err := Compose("alice", "bob-x")
+	if err != nil {
+		t.Fatalf("Compose(alice, bob-x): %v", err)
+	}
+	b, err := Compose("alice-bob", "x")
+	if err != nil {
+		t.Fatalf("Compose(alice-bob, x): %v", err)
+	}
+	if a == b {
+		t.Fatalf("distinct owner/hostname pairs collided: both produced %q", a)
+	}
+}
+
+// TestComposeIsInjective asserts that no two distinct (username, hostname) pairs
+// from a hyphen-rich grid share a composed name, and that the hostname is always
+// recoverable — proving the join is the unambiguous boundary.
+func TestComposeIsInjective(t *testing.T) {
+	usernames := []string{"a", "a-b", "a-b-c", "alice", "alice-bob", "x-y", "a.b", "a_b"}
+	hostnames := []string{"x", "b-x", "web", "web-1", "a-b-c", "y"}
+	seen := make(map[string]string)
+	for _, u := range usernames {
+		for _, h := range hostnames {
+			assertComposeInjective(t, seen, u, h)
+		}
+	}
+}
+
+// assertComposeInjective composes (u, h), fails if its name was already produced
+// by a different pair, and confirms BareHostname recovers h from the name.
+func assertComposeInjective(t *testing.T, seen map[string]string, u, h string) {
+	t.Helper()
+	name, err := Compose(u, h)
+	if err != nil {
+		t.Fatalf("Compose(%q, %q): %v", u, h, err)
+	}
+	key := u + "\x00" + h
+	if prev, ok := seen[name]; ok && prev != key {
+		t.Fatalf("collision on %q: (%q,%q) and %q", name, u, h, prev)
+	}
+	seen[name] = key
+	if got := BareHostname(name, u); got != h {
+		t.Fatalf("BareHostname(%q, %q) = %q, want %q", name, u, got, h)
+	}
+}
+
+func TestBareHostname(t *testing.T) {
+	tests := []struct {
+		name   string
+		vmName string
+		owner  string
+		want   string
+	}{
+		{"strips owner prefix", "alice.web", "alice", "web"},
+		{"hyphenated owner and hostname", "alice-bob.web-1", "alice-bob", "web-1"},
+		{"trimmed owner", "alice.web", "  alice  ", "web"},
+		{"empty owner returns full name", "alice.web", "", "alice.web"},
+		{"mismatched owner returns full name", "alice.web", "bob", "alice.web"},
+		{"legacy hyphen name returns full name", "alice-web", "alice", "alice-web"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BareHostname(tc.vmName, tc.owner); got != tc.want {
+				t.Fatalf("BareHostname(%q, %q) = %q, want %q", tc.vmName, tc.owner, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHasOwnerPrefix(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -151,11 +225,11 @@ func TestHasOwnerPrefix(t *testing.T) {
 		username string
 		want     bool
 	}{
-		{"matching prefix", "alice-web", "alice", true},
-		{"trimmed username", "alice-web", "  alice  ", true},
-		{"different owner", "bob-web", "alice", false},
-		{"prefix without hyphen is not a match", "aliceweb", "alice", false},
-		{"empty username", "alice-web", "", false},
+		{"matching prefix", "alice.web", "alice", true},
+		{"trimmed username", "alice.web", "  alice  ", true},
+		{"different owner", "bob.web", "alice", false},
+		{"prefix without separator is not a match", "aliceweb", "alice", false},
+		{"empty username", "alice.web", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

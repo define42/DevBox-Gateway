@@ -6,6 +6,7 @@ import (
 	"devboxgateway/internal/hash"
 	"devboxgateway/internal/types"
 	"devboxgateway/internal/virt"
+	"devboxgateway/internal/vmname"
 	"strconv"
 	"strings"
 	"testing"
@@ -120,7 +121,7 @@ func TestListDashboardVMs(t *testing.T) {
 	settings := newDashboardVMSettings(t)
 	username, vmName := createDashboardVM(t, settings)
 	row := waitForDashboardVM(t, username, vmName, dashboardVMTestTimeout)
-	wantDisplayName := strings.TrimPrefix(vmName, username+"-")
+	wantDisplayName := vmname.BareHostname(vmName, username)
 	wantConnectHost := hash.RoutingLabel([]byte(settings.Get(config.SNI_HASH_SECRET)), vmName) + ".dashboard.test"
 
 	assertDashboardVMRow(t, row, wantDisplayName)

@@ -3,6 +3,7 @@ package virt
 import (
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/types"
+	"devboxgateway/internal/vmname"
 	"errors"
 	"io"
 	"os"
@@ -440,14 +441,14 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	if !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("expected base image resolution failure, got %v", err)
 	}
-	if !strings.HasPrefix(vmName, user.GetName()+"-") {
-		t.Fatalf("expected VM name prefix %q, got %q", user.GetName()+"-", vmName)
+	if !strings.HasPrefix(vmName, user.GetName()+vmname.Separator) {
+		t.Fatalf("expected VM name prefix %q, got %q", user.GetName()+vmname.Separator, vmName)
 	}
 }
 
 // TestBootNewVMNameUsesLoginUserNotGuestUser locks the VDI naming invariant: the
-// name is always "<login-username>-<chosen-hostname>", taken from the session
-// user and the vm_name field. The separately supplied guest account name
+// name is always "<login-username><Separator><chosen-hostname>", taken from the
+// session user and the vm_name field. The separately supplied guest account name
 // (vm_username) must never leak into the VM name. It uses the same fast-fail
 // (empty image library) path as the sibling test so no VM is actually booted.
 func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
@@ -472,9 +473,9 @@ func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 		t.Fatalf("expected base image resolution failure (proving the boot logic ran), got %v", err)
 	}
 
-	want := user.GetName() + "-" + chosenName
+	want := user.GetName() + vmname.Separator + chosenName
 	if vmName != want {
-		t.Fatalf("VM name must be <login-username>-<chosen-name>: want %q, got %q", want, vmName)
+		t.Fatalf("VM name must be <login-username><Separator><chosen-name>: want %q, got %q", want, vmName)
 	}
 	if strings.Contains(vmName, guestUsername) {
 		t.Fatalf("guest username %q must not appear in VM name %q", guestUsername, vmName)
