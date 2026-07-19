@@ -400,8 +400,11 @@ func TestCovxCopySocketToWebsocketWriteError(t *testing.T) {
 	defer func() { _ = backendConn.Close() }()
 	defer func() { _ = backendPeer.Close() }()
 
-	if err := serverWS.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
-		t.Fatalf("set expired write deadline: %v", err)
+	// Closing the server websocket makes the forwarding write fail
+	// deterministically; copySocketToWebsocket now sets a fresh write deadline
+	// before each write, so an expired deadline would be overwritten.
+	if err := serverWS.Close(); err != nil {
+		t.Fatalf("close server websocket: %v", err)
 	}
 
 	errCh := make(chan error, 1)

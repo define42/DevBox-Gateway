@@ -261,10 +261,11 @@ func TestCovxPumpConsoleToWebsocketWriteFailure(t *testing.T) {
 	defer cleanup()
 
 	console := covxOpenConsole(t, dom.name)
-	// The expired deadline makes the websocket write of the first received
-	// console bytes fail.
-	if err := serverWS.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
-		t.Fatalf("set expired write deadline: %v", err)
+	// Closing the server websocket makes the write of the first received console
+	// bytes fail deterministically — the pump now sets a fresh write deadline
+	// before each write, so an expired deadline would be overwritten.
+	if err := serverWS.Close(); err != nil {
+		t.Fatalf("close server websocket: %v", err)
 	}
 
 	done := make(chan struct{})

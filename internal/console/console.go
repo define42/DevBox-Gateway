@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -42,6 +43,72 @@ func debugf(format string, args ...any) {
 // reducing per-frame overhead over the tunnel without exceeding a single SSH
 // packet.
 const bridgeBufferSize = 32 * 1024
+
+const (
+	// wsWriteWait bounds a single websocket write — a data frame or a keepalive
+	// ping. A write that stalls longer than this (a dead or wedged peer, or a
+	// full send buffer) fails the pump and tears the bridge down instead of
+	// blocking a goroutine and its libvirt stream indefinitely. This is the only
+	// liveness bound over the SSH reverse tunnel, where socket-level deadlines are
+	// no-ops (see internal/sshtunnel).
+	wsWriteWait = 15 * time.Second
+
+	// wsPongWait bounds how long the gateway waits to hear anything from the peer
+	// (a data frame or a pong). The read deadline is refreshed on every pong and
+	// every received message; if it elapses the read fails and the bridge closes,
+	// reclaiming the goroutines and the backend console/VNC connection.
+	wsPongWait = 60 * time.Second
+
+	// wsPingPeriod is how often the gateway sends a keepalive ping. It is shorter
+	// than wsPongWait so a live peer always answers before the read deadline; the
+	// conventional gorilla ratio is ~9/10.
+	wsPingPeriod = (wsPongWait * 9) / 10
+)
+
+const (
+	// serialReadLimit caps a single inbound serial-console frame. Terminal input
+	// is keystrokes, so a modest ceiling is ample while preventing an
+	// authenticated client from forcing the gateway to buffer an arbitrarily large
+	// frame in memory (a single-user OOM DoS). gorilla defaults to no limit.
+	serialReadLimit = 1 << 20 // 1 MiB
+	// vncReadLimit caps a single inbound VNC client frame. noVNC input events
+	// (pointer/keyboard, clipboard cut-text) are small; the ceiling only bounds
+	// worst-case memory.
+	vncReadLimit = 1 << 20 // 1 MiB
+)
+
+// configureWebsocketKeepalive installs the inbound frame-size cap, an initial
+// read deadline, and a pong handler that refreshes it. Pair it with
+// pingWebsocketUntil (run in its own goroutine) so a peer that vanishes without
+// a TCP FIN — laptop sleep, dropped network, half-open NAT — is detected and the
+// bridge is torn down instead of leaking the goroutines and the libvirt stream.
+func configureWebsocketKeepalive(ws *websocket.Conn, readLimit int64) {
+	ws.SetReadLimit(readLimit)
+	_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(wsPongWait))
+	})
+}
+
+// pingWebsocketUntil sends a keepalive ping every wsPingPeriod until done is
+// closed. A ping that cannot be written within wsWriteWait closes the socket so
+// the read/write pumps unblock and the bridge tears down. WriteControl is safe
+// to call concurrently with the single data writer, per gorilla's contract.
+func pingWebsocketUntil(ws *websocket.Conn, done <-chan struct{}) {
+	ticker := time.NewTicker(wsPingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+				_ = ws.Close()
+				return
+			}
+		}
+	}
+}
 
 // HandleDashboardConsoleWS serves the serial console websocket endpoint.
 func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc {
@@ -216,15 +283,25 @@ func HandleDashboardPingWS(sessionManager *session.Manager) http.HandlerFunc {
 // bridgePingSocket echoes every client probe back until the connection closes.
 func bridgePingSocket(ws *websocket.Conn) {
 	defer func() { _ = ws.Close() }()
-	ws.SetReadLimit(pingReadLimit)
+
+	configureWebsocketKeepalive(ws, pingReadLimit)
+
+	done := make(chan struct{})
+	defer close(done)
+	go pingWebsocketUntil(ws, done)
+
 	for {
 		messageType, payload, err := ws.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
 		if messageType != websocket.TextMessage && messageType != websocket.BinaryMessage {
 			continue
 		}
+		// No per-write deadline here: the echo is a tiny control payload, and a
+		// stalled write is already bounded by pingWebsocketUntil, whose periodic
+		// WriteControl sets a write deadline on the shared connection.
 		if err := ws.WriteMessage(messageType, payload); err != nil {
 			return
 		}
@@ -285,16 +362,24 @@ func bridgeSerialConsole(name string, ws *websocket.Conn, console *virt.SerialCo
 	log.Printf("dashboard serial websocket for vm %q established; bridging to console", name)
 	defer log.Printf("dashboard serial websocket for vm %q closed", name)
 
+	configureWebsocketKeepalive(ws, serialReadLimit)
+
 	var wg sync.WaitGroup
 	var stopOnce sync.Once
+	done := make(chan struct{})
 	stop := func() {
 		stopOnce.Do(func() {
+			close(done)
 			_ = console.Interrupt()
 			_ = ws.Close()
 		})
 	}
 
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		pingWebsocketUntil(ws, done)
+	}()
 	go func() {
 		defer wg.Done()
 		defer stop()
@@ -321,6 +406,7 @@ func pumpConsoleToWebsocket(name string, ws *websocket.Conn, console *virt.Seria
 				debugf("serial: first %d bytes console->ws for vm %q: %q", n, name, previewBytes(buf[:n]))
 			}
 			total += int64(n)
+			_ = ws.SetWriteDeadline(time.Now().Add(wsWriteWait))
 			if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
 				debugf("serial: console->ws write failed for vm %q after %d bytes: %v", name, total, werr)
 				return
@@ -343,6 +429,7 @@ func pumpWebsocketToConsole(name string, ws *websocket.Conn, console *virt.Seria
 		if err != nil {
 			return
 		}
+		_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
 		if messageType != websocket.BinaryMessage && messageType != websocket.TextMessage {
 			continue
 		}
@@ -374,6 +461,15 @@ func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn
 		_ = ws.Close()
 		_ = backendConn.Close()
 	}()
+
+	configureWebsocketKeepalive(ws, vncReadLimit)
+
+	// done stops the ping loop. It is closed last (LIFO: this defer runs before
+	// the conn-closing defer above), so the ping goroutine exits promptly once
+	// the bridge is torn down.
+	done := make(chan struct{})
+	defer close(done)
+	go pingWebsocketUntil(ws, done)
 
 	errCh := make(chan error, 2)
 	var closeOnce sync.Once
@@ -408,6 +504,7 @@ func copySocketToWebsocket(channel, name string, ws *websocket.Conn, backendConn
 				debugf("%s: first %d bytes backend->ws for vm %q: %q", channel, name, n, previewBytes(buf[:n]))
 			}
 			total += int64(n)
+			_ = ws.SetWriteDeadline(time.Now().Add(wsWriteWait))
 			if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
 				debugf("%s: backend->ws write failed for vm %q after %d bytes: %v", channel, name, total, writeErr)
 				return writeErr
@@ -430,6 +527,7 @@ func copyWebsocketToSocket(channel, name string, ws *websocket.Conn, backendConn
 		if err != nil {
 			return err
 		}
+		_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
 		if messageType != websocket.BinaryMessage && messageType != websocket.TextMessage {
 			continue
 		}
