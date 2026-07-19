@@ -262,6 +262,63 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	assertMissingVolumes(t, pool, vmName, seedISO)
 }
 
+// TestStartVMWithOwnerRollsBackOnStartFailure locks the invariant that a boot
+// which fails after the domain is defined leaves no orphaned domain behind.
+// Owner metadata is attached after DomainDefineXML, so before the rollback was
+// added a post-define failure left the domain defined but unowned: invisible to
+// its creator on the dashboard, undeletable there (the ownership check 403s),
+// and its name reserved in libvirt until an admin ran `virsh undefine`.
+func TestStartVMWithOwnerRollsBackOnStartFailure(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	settings := newBootTestSettings(t)
+	poolName := uniquePoolName("rollback-pool")
+	t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+	usePermissiveLibvirtVolumeMode(t)
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
+	}
+	poolPath := config.VirtStoragePoolPath(settings)
+
+	pool, err := ensureStoragePool(conn, poolName, poolPath)
+	if err != nil {
+		t.Fatalf("ensureStoragePool: %v", err)
+	}
+	defer func() { _ = pool.Free() }()
+
+	const (
+		vcpu     = 1
+		memoryMB = 512
+	)
+	vmName := "rollback-start-fail-" + time.Now().Format("150405")
+	seedISO := vmName + "_seed.iso"
+	const owner = "rollbackowner"
+
+	// Safety net: force-remove the domain if the rollback under test regresses, so
+	// a leaked orphan cannot block reruns of this test.
+	t.Cleanup(func() {
+		if dom, lookupErr := conn.LookupDomainByName(vmName); lookupErr == nil {
+			_ = dom.Destroy()
+			_ = dom.Undefine()
+			_ = dom.Free()
+		}
+	})
+
+	// The pool exists but the backing disk and seed volumes were never created, so
+	// libvirt defines the domain (definition does not verify volume existence) and
+	// then fails to start it. The failure lands after DomainDefineXML but before
+	// the VM is fully created — exactly the window that used to orphan the domain.
+	if err := StartVMWithOwner(vmName, seedISO, poolName, owner, "rollbackguest", testBaseImageName, vcpu, memoryMB); err == nil {
+		t.Fatalf("expected StartVMWithOwner to fail when backing volumes are missing")
+	}
+
+	// The rollback must have undefined the domain. ensureVMNameAvailable returns
+	// nil only when the name resolves to no domain, so it doubles as the "no
+	// orphan, name free for a clean retry" assertion.
+	if err := ensureVMNameAvailable(conn, vmName); err != nil {
+		t.Fatalf("domain %s was left defined after a failed create; rollback did not undefine it: %v", vmName, err)
+	}
+}
+
 func TestBootNewVMRejectsExistingName(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)

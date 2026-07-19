@@ -27,7 +27,7 @@ func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser, baseImag
 	return startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage, vcpu, memoryMiB)
 }
 
-func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) error {
+func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) (err error) {
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
 		return err
@@ -46,20 +46,37 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		_ = dom.Free()
 	}()
 
+	// Owner metadata (and the guest-user, base-image, and created-at metadata
+	// below) is attached AFTER the domain is defined, and dom.Create() runs later
+	// still. A failure at any of those steps would otherwise leave the domain
+	// defined but half-created; without owner metadata it is orphaned — the
+	// dashboard filters its VM listing by owner, so the creator can neither see
+	// the VM nor delete it (the ownership check returns 403), and the name stays
+	// reserved in libvirt until an admin runs `virsh undefine`. Roll the
+	// definition back on any post-define failure so a failed boot is atomic
+	// (leaves nothing behind) and the name is free for a clean retry. Registered
+	// after the Free above so it runs first (defers are LIFO), while dom is still
+	// valid.
+	defer func() {
+		if err != nil {
+			undefinePartialDomain(dom, name)
+		}
+	}()
+
 	if strings.TrimSpace(owner) != "" {
-		if err := setDomainOwnerMetadata(dom, owner); err != nil {
+		if err = setDomainOwnerMetadata(dom, owner); err != nil {
 			return fmt.Errorf("set owner metadata for %s: %w", name, err)
 		}
 	}
 
 	if strings.TrimSpace(guestUser) != "" {
-		if err := setDomainGuestUserMetadata(dom, guestUser); err != nil {
+		if err = setDomainGuestUserMetadata(dom, guestUser); err != nil {
 			return fmt.Errorf("set guest user metadata for %s: %w", name, err)
 		}
 	}
 
 	if strings.TrimSpace(baseImage) != "" {
-		if err := setDomainBaseImageMetadata(dom, baseImage); err != nil {
+		if err = setDomainBaseImageMetadata(dom, baseImage); err != nil {
 			return fmt.Errorf("set base image metadata for %s: %w", name, err)
 		}
 	}
@@ -67,15 +84,38 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 	// Record creation time once, when the domain is first defined. Starting or
 	// restarting an existing VM goes through dom.Create() elsewhere and never
 	// redefines the domain, so this timestamp is stable for the VM's lifetime.
-	if err := setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
+	if err = setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
 		return fmt.Errorf("set created-at metadata for %s: %w", name, err)
 	}
 
-	if err := dom.Create(); err != nil {
+	if err = dom.Create(); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// undefinePartialDomain rolls back a domain that DomainDefineXML created but
+// whose remaining setup (owner/guest-user/base-image/created-at metadata, then
+// dom.Create) did not complete. Without this rollback a failed boot leaves the
+// domain defined but without owner metadata, which orphans it: the dashboard
+// filters its VM listing by owner, so the creating user can neither see the VM
+// nor delete it (the ownership check returns 403), and the name stays reserved
+// in libvirt until an admin runs `virsh undefine`. Cleanup errors are only
+// logged — the caller is already returning the original failure and can do
+// nothing more about a failed rollback.
+func undefinePartialDomain(dom *libvirt.Domain, name string) {
+	// On this path the domain is expected to be inactive (rollback only runs when
+	// startVM returns an error, i.e. before dom.Create succeeds), but destroy any
+	// running instance first so a persistent domain cannot survive Undefine.
+	if active, activeErr := dom.IsActive(); activeErr == nil && active {
+		if destroyErr := dom.Destroy(); destroyErr != nil {
+			log.Printf("rollback: destroy partially created domain %s: %v", name, destroyErr)
+		}
+	}
+	if undefineErr := dom.Undefine(); undefineErr != nil {
+		log.Printf("rollback: undefine partially created domain %s: %v", name, undefineErr)
+	}
 }
 
 // RemoveVolumes deletes the named volumes from the given storage pool.
