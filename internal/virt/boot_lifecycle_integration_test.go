@@ -331,9 +331,25 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 
 	// The limit is per user: a different user with no VDIs is not blocked by
 	// this user's VMs.
-	if err := ensureUserVMLimit(conn, settings, "limit-other-user"); err != nil {
-		t.Fatalf("expected no limit error for a user with no VMs, got %v", err)
+	release, err := reserveUserVMSlot(conn, settings, "limit-other-user")
+	if err != nil {
+		t.Fatalf("expected reservation for a user with no VMs, got %v", err)
 	}
+
+	// An in-flight creation counts toward the limit before its domain exists,
+	// so a concurrent second create for the same user is refused instead of
+	// racing past the check.
+	if _, err := reserveUserVMSlot(conn, settings, "limit-other-user"); !errors.Is(err, ErrVMLimitReached) {
+		t.Fatalf("expected ErrVMLimitReached for concurrent reservation, got %v", err)
+	}
+
+	// Releasing the slot (create finished or failed) frees it again.
+	release()
+	release, err = reserveUserVMSlot(conn, settings, "limit-other-user")
+	if err != nil {
+		t.Fatalf("expected reservation after release, got %v", err)
+	}
+	release()
 
 	// Raising the limit lifts the refusal, proving the owned-VM count (not a
 	// name conflict) is what blocked the create.

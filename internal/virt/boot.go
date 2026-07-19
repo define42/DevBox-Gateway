@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"libvirt.org/go/libvirt"
 )
@@ -215,24 +216,56 @@ var ErrVMAlreadyExists = errors.New("vm with this name already exists")
 // user deletes one.
 var ErrVMLimitReached = errors.New("vm limit reached")
 
-// ensureUserVMLimit refuses creation when the owner already has as many VDIs as
-// MAX_VDI_PER_USER allows. Ownership is read from the same domain owner
-// metadata the dashboard listing filters on, so the enforced count matches what
-// the user sees. A limit of 0 (configured <=0) disables the check.
-func ensureUserVMLimit(conn *libvirt.Connect, settings *config.SettingsType, owner string) error {
+// vmCreationMu serializes the MAX_VDI_PER_USER count-and-reserve step, and
+// inflightVMCreations tracks creations that have passed the check but not yet
+// persisted owner metadata (which only happens inside StartVMWithOwner, late in
+// BootNewVM). Counting existing domains alone would let two concurrent creates
+// for the same user both pass the check before either domain exists; reserving
+// a slot under the mutex and holding it until BootNewVM returns closes that
+// race.
+var (
+	vmCreationMu        sync.Mutex             //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
+	inflightVMCreations = make(map[string]int) //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
+)
+
+// reserveUserVMSlot refuses creation when the owner already has as many VDIs as
+// MAX_VDI_PER_USER allows, counting both existing domains and creations still
+// in flight. Ownership is read from the same domain owner metadata the
+// dashboard listing filters on, so the enforced count matches what the user
+// sees. On success it reserves a creation slot; the caller must invoke the
+// returned release exactly once, after the domain (with its owner metadata)
+// exists or the creation failed. A limit of 0 (configured <=0) disables the
+// check and returns a no-op release.
+func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, owner string) (release func(), err error) {
 	limit := config.MaxVDIPerUser(settings)
 	if limit <= 0 {
-		return nil
+		return func() {}, nil
 	}
+
+	vmCreationMu.Lock()
+	defer vmCreationMu.Unlock()
 
 	count, err := countDomainsOwnedBy(conn, owner)
 	if err != nil {
-		return fmt.Errorf("count VMs owned by %s: %w", owner, err)
+		return nil, fmt.Errorf("count VMs owned by %s: %w", owner, err)
 	}
-	if count >= limit {
-		return fmt.Errorf("%w: user %s already owns %d of %d allowed VMs", ErrVMLimitReached, owner, count, limit)
+	if have := count + inflightVMCreations[owner]; have >= limit {
+		return nil, fmt.Errorf("%w: user %s already has %d of %d allowed VMs (including creations in progress)", ErrVMLimitReached, owner, have, limit)
 	}
-	return nil
+
+	inflightVMCreations[owner]++
+	return func() { releaseUserVMSlot(owner) }, nil
+}
+
+func releaseUserVMSlot(owner string) {
+	vmCreationMu.Lock()
+	defer vmCreationMu.Unlock()
+
+	if inflightVMCreations[owner] <= 1 {
+		delete(inflightVMCreations, owner)
+		return
+	}
+	inflightVMCreations[owner]--
 }
 
 // countDomainsOwnedBy counts domains whose owner metadata matches username. A
@@ -423,9 +456,14 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 	if err := ensureVMNameAvailable(conn, vmName); err != nil {
 		return vmName, err
 	}
-	if err := ensureUserVMLimit(conn, settings, user.GetName()); err != nil {
+	// The slot stays reserved until this create finishes (or fails), so a
+	// concurrent create for the same user cannot pass the limit check before
+	// this VM's owner metadata exists.
+	releaseVMSlot, err := reserveUserVMSlot(conn, settings, user.GetName())
+	if err != nil {
 		return vmName, err
 	}
+	defer releaseVMSlot()
 	if err := resetExistingVMArtifacts(conn, poolName, vmName, seedIso); err != nil {
 		return vmName, err
 	}
