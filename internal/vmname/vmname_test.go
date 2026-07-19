@@ -144,13 +144,12 @@ func TestComposeAlwaysHasOwnerPrefix(t *testing.T) {
 	}
 }
 
-// TestComposeIsUnambiguous is the regression test for the VDI-name ambiguity
-// fix. Under the old "-" join, Compose("alice","bob-x") and
-// Compose("alice-bob","x") both produced "alice-bob-x", letting one user squat
-// on another user's namespace and collide on one libvirt domain. Distinct
-// (username, hostname) pairs must now always produce distinct names.
-func TestComposeIsUnambiguous(t *testing.T) {
-	// The exact collision called out in the security report.
+// TestComposeRejectsReportedCollision is the regression test for the exact
+// VDI-name ambiguity called out in the security report. Under the old "-" join,
+// Compose("alice","bob-x") and Compose("alice-bob","x") both produced
+// "alice-bob-x", letting one user squat on another user's namespace and collide
+// on one libvirt domain. They must now produce distinct names.
+func TestComposeRejectsReportedCollision(t *testing.T) {
 	a, err := Compose("alice", "bob-x")
 	if err != nil {
 		t.Fatalf("Compose(alice, bob-x): %v", err)
@@ -162,29 +161,37 @@ func TestComposeIsUnambiguous(t *testing.T) {
 	if a == b {
 		t.Fatalf("distinct owner/hostname pairs collided: both produced %q", a)
 	}
+}
 
-	// No two distinct (username, hostname) pairs from a hyphen-rich grid may
-	// share a composed name.
+// TestComposeIsInjective asserts that no two distinct (username, hostname) pairs
+// from a hyphen-rich grid share a composed name, and that the hostname is always
+// recoverable — proving the join is the unambiguous boundary.
+func TestComposeIsInjective(t *testing.T) {
 	usernames := []string{"a", "a-b", "a-b-c", "alice", "alice-bob", "x-y", "a.b", "a_b"}
 	hostnames := []string{"x", "b-x", "web", "web-1", "a-b-c", "y"}
 	seen := make(map[string]string)
 	for _, u := range usernames {
 		for _, h := range hostnames {
-			name, err := Compose(u, h)
-			if err != nil {
-				t.Fatalf("Compose(%q, %q): %v", u, h, err)
-			}
-			key := u + "\x00" + h
-			if prev, ok := seen[name]; ok && prev != key {
-				t.Fatalf("collision on %q: (%q,%q) and %q", name, u, h, prev)
-			}
-			seen[name] = key
-			// The hostname is always recoverable, proving the join is the
-			// unambiguous boundary.
-			if got := BareHostname(name, u); got != h {
-				t.Fatalf("BareHostname(%q, %q) = %q, want %q", name, u, got, h)
-			}
+			assertComposeInjective(t, seen, u, h)
 		}
+	}
+}
+
+// assertComposeInjective composes (u, h), fails if its name was already produced
+// by a different pair, and confirms BareHostname recovers h from the name.
+func assertComposeInjective(t *testing.T, seen map[string]string, u, h string) {
+	t.Helper()
+	name, err := Compose(u, h)
+	if err != nil {
+		t.Fatalf("Compose(%q, %q): %v", u, h, err)
+	}
+	key := u + "\x00" + h
+	if prev, ok := seen[name]; ok && prev != key {
+		t.Fatalf("collision on %q: (%q,%q) and %q", name, u, h, prev)
+	}
+	seen[name] = key
+	if got := BareHostname(name, u); got != h {
+		t.Fatalf("BareHostname(%q, %q) = %q, want %q", name, u, got, h)
 	}
 }
 
