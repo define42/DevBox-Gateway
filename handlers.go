@@ -81,6 +81,20 @@ func validateLoginUsername(username string) (string, error) {
 
 func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsType, loginLimiter *loginRateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Gate login behind the same-origin check that guards logout and every
+		// dashboard POST. Without it the endpoint is open to login CSRF: an
+		// attacker auto-submits a cross-site form POST carrying their own
+		// credentials, the gateway authenticates them and plants a fresh session
+		// cookie, and the victim silently ends up operating under the attacker's
+		// identity. SameSite=Lax does not stop this — it blocks riding an
+		// existing session, not establishing a new one — so the origin gate is
+		// what closes it. Reject before touching the rate limiter or credential
+		// parsing so forged requests do no work.
+		if !sameOriginRequest(r) {
+			http.Error(w, forbiddenOrigin, http.StatusForbidden)
+			return
+		}
+
 		username, password, ok, err := extractCredentials(w, r)
 		if err != nil {
 			serveLogin(w, "Invalid form submission.")

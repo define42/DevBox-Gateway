@@ -140,6 +140,10 @@ func postLogin(t *testing.T, router http.Handler, remoteAddr, username, password
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.RemoteAddr = remoteAddr
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// A real browser posting the login form is same-origin; mirror that so the
+	// request clears the login handler's same-origin (CSRF) gate and reaches
+	// the rate-limiting and authentication logic under test.
+	setSameOriginHeader(req)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
