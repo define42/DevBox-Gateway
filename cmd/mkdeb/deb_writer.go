@@ -92,16 +92,16 @@ func packageDirectories(entries []tarEntry, modTime time.Time) []tarEntry {
 	}
 	sort.Strings(names)
 
-	entries = make([]tarEntry, 0, len(names))
+	directoryEntries := make([]tarEntry, 0, len(names))
 	for _, name := range names {
-		entries = append(entries, tarEntry{
+		directoryEntries = append(directoryEntries, tarEntry{
 			name:     name,
 			mode:     0o755,
 			modTime:  modTime,
 			typeFlag: tar.TypeDir,
 		})
 	}
-	return entries
+	return directoryEntries
 }
 
 func packageFiles(o options) ([]debFile, error) {
