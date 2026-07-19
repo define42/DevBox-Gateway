@@ -304,6 +304,52 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	}
 }
 
+func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	settings := newBootTestSettings(t)
+	configureIsolatedBootStorage(t, settings)
+	user := newBootTestUser(t, "limituser")
+
+	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, 1); err != nil {
+		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
+	}
+
+	firstVM, err := BootNewVM("limit-vm-a", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	if err != nil {
+		t.Fatalf("BootNewVM initial: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = RemoveVM(firstVM, settings)
+	})
+	waitForDomainState(t, conn, firstVM, true, bootLifecycleTimeout)
+
+	// The user now owns as many VDIs as the limit allows, so creating another VM
+	// (under a fresh name) must be refused.
+	if _, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096); !errors.Is(err, ErrVMLimitReached) {
+		t.Fatalf("expected ErrVMLimitReached on create beyond limit, got %v", err)
+	}
+
+	// The limit is per user: a different user with no VDIs is not blocked by
+	// this user's VMs.
+	if err := ensureUserVMLimit(conn, settings, "limit-other-user"); err != nil {
+		t.Fatalf("expected no limit error for a user with no VMs, got %v", err)
+	}
+
+	// Raising the limit lifts the refusal, proving the owned-VM count (not a
+	// name conflict) is what blocked the create.
+	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, 2); err != nil {
+		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
+	}
+	secondVM, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	if err != nil {
+		t.Fatalf("BootNewVM within raised limit: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = RemoveVM(secondVM, settings)
+	})
+	waitForDomainState(t, conn, secondVM, true, bootLifecycleTimeout)
+}
+
 func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)

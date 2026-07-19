@@ -33,6 +33,48 @@ func TestNewSettingTypeDefaults(t *testing.T) {
 	if got := s.GetDuration(LOGIN_RATE_LIMIT_LOCKOUT); got != 15*time.Minute {
 		t.Fatalf("expected default LOGIN_RATE_LIMIT_LOCKOUT=15m, got %v", got)
 	}
+	if got := s.GetInt(MAX_VDI_PER_USER); got != DefaultMaxVDIPerUser {
+		t.Fatalf("expected default MAX_VDI_PER_USER=%d, got %d", DefaultMaxVDIPerUser, got)
+	}
+}
+
+func TestMaxVDIPerUserDefault(t *testing.T) {
+	s := NewSettingType(false)
+
+	if got := MaxVDIPerUser(s); got != DefaultMaxVDIPerUser {
+		t.Fatalf("expected default limit %d, got %d", DefaultMaxVDIPerUser, got)
+	}
+}
+
+func TestMaxVDIPerUserConfigured(t *testing.T) {
+	t.Setenv(MAX_VDI_PER_USER, "3")
+	s := NewSettingType(false)
+
+	if got := MaxVDIPerUser(s); got != 3 {
+		t.Fatalf("expected configured limit 3, got %d", got)
+	}
+}
+
+func TestMaxVDIPerUserDisabled(t *testing.T) {
+	t.Setenv(MAX_VDI_PER_USER, "0")
+	s := NewSettingType(false)
+
+	if got := MaxVDIPerUser(s); got != 0 {
+		t.Fatalf("expected disabled limit (0) for 0, got %d", got)
+	}
+
+	if err := s.OverwriteForTestInt(MAX_VDI_PER_USER, -5); err != nil {
+		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
+	}
+	if got := MaxVDIPerUser(s); got != 0 {
+		t.Fatalf("expected disabled limit (0) for negative value, got %d", got)
+	}
+}
+
+func TestMaxVDIPerUserNilSettings(t *testing.T) {
+	if got := MaxVDIPerUser(nil); got != DefaultMaxVDIPerUser {
+		t.Fatalf("expected default limit %d for nil settings, got %d", DefaultMaxVDIPerUser, got)
+	}
 }
 
 func TestDerivedDataPathsDefault(t *testing.T) {

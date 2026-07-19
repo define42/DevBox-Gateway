@@ -210,6 +210,55 @@ func DestroyExistingDomain(conn *libvirt.Connect, vmName string) error {
 // Creation never destroys an existing VM, so the user must delete it first.
 var ErrVMAlreadyExists = errors.New("vm with this name already exists")
 
+// ErrVMLimitReached indicates the requesting user already owns the maximum
+// number of VDIs allowed by MAX_VDI_PER_USER, so creation is refused until the
+// user deletes one.
+var ErrVMLimitReached = errors.New("vm limit reached")
+
+// ensureUserVMLimit refuses creation when the owner already has as many VDIs as
+// MAX_VDI_PER_USER allows. Ownership is read from the same domain owner
+// metadata the dashboard listing filters on, so the enforced count matches what
+// the user sees. A limit of 0 (configured <=0) disables the check.
+func ensureUserVMLimit(conn *libvirt.Connect, settings *config.SettingsType, owner string) error {
+	limit := config.MaxVDIPerUser(settings)
+	if limit <= 0 {
+		return nil
+	}
+
+	count, err := countDomainsOwnedBy(conn, owner)
+	if err != nil {
+		return fmt.Errorf("count VMs owned by %s: %w", owner, err)
+	}
+	if count >= limit {
+		return fmt.Errorf("%w: user %s already owns %d of %d allowed VMs", ErrVMLimitReached, owner, count, limit)
+	}
+	return nil
+}
+
+// countDomainsOwnedBy counts domains whose owner metadata matches username. A
+// domain whose metadata cannot be read is logged and skipped, mirroring how the
+// dashboard listing treats it (not attributed to any user).
+func countDomainsOwnedBy(conn *libvirt.Connect, username string) (int, error) {
+	doms, err := conn.ListAllDomains(0)
+	if err != nil {
+		return 0, fmt.Errorf("list domains: %w", err)
+	}
+	defer freeDomains(doms)
+
+	count := 0
+	for i := range doms {
+		owner, hasOwner, err := domainOwner(&doms[i])
+		if err != nil {
+			log.Printf("domain owner while counting VMs: %v", err)
+			continue
+		}
+		if ownedByUser(owner, hasOwner, username) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // ensureVMNameAvailable refuses creation when a domain with the same name already
 // exists, so a boot can never destroy or overwrite an existing VM (the user must
 // delete it first). A missing domain means the name is free to use.
@@ -372,6 +421,9 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 		return vmName, err
 	}
 	if err := ensureVMNameAvailable(conn, vmName); err != nil {
+		return vmName, err
+	}
+	if err := ensureUserVMLimit(conn, settings, user.GetName()); err != nil {
 		return vmName, err
 	}
 	if err := resetExistingVMArtifacts(conn, poolName, vmName, seedIso); err != nil {

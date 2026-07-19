@@ -533,6 +533,13 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			})
 			return
 		}
+		if errors.Is(err, virt.ErrVMLimitReached) {
+			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
+				OK:    false,
+				Error: fmt.Sprintf("VM limit reached: each user can have at most %d VMs. Delete one before creating a new one.", config.MaxVDIPerUser(settings)),
+			})
+			return
+		}
 		if err != nil {
 			log.Printf("boot new vm %q failed: %v", vmName, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
