@@ -4,7 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"crypto/md5" //nolint:gosec // Debian packages require MD5 entries for file integrity metadata.
+	"crypto/md5" // #nosec G501 -- Debian packages require MD5 file integrity metadata.
 	"errors"
 	"fmt"
 	"io"
@@ -42,7 +42,7 @@ func writeDebArchive(o options) error {
 		}
 		dataEntries = append(dataEntries, entry)
 		installedBytes += int64(len(entry.body))
-		sum := md5.Sum(entry.body) //nolint:gosec // Required by Debian's md5sums control file.
+		sum := md5.Sum(entry.body) // #nosec G401 -- Required by Debian's md5sums control file.
 		fmt.Fprintf(&md5sums, "%x  %s\n", sum, entry.name)
 	}
 
@@ -184,11 +184,11 @@ func writePackageFile(path string, body []byte) error {
 	tempName := temp.Name()
 	defer os.Remove(tempName)
 	if err := temp.Chmod(0o644); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("set output permissions: %w", err)
 	}
 	if _, err := temp.Write(body); err != nil {
-		temp.Close()
+		_ = temp.Close()
 		return fmt.Errorf("write output: %w", err)
 	}
 	if err := temp.Close(); err != nil {
