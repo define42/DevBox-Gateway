@@ -149,6 +149,54 @@ func TestWriteDebWithLicense(t *testing.T) {
 	})
 }
 
+// The config file can hold secrets — a LOCAL_USER_SHA256 list of password
+// digests and the SSH tunnel key passphrase — so the data archive must install
+// it 0640, never group- or world-readable, no matter how the source file is
+// checked out. stageInputs writes the sources 0600, so a pass here also proves
+// the mode is set by the manifest rather than copied from disk.
+func TestWriteDebFileModes(t *testing.T) {
+	dir := t.TempDir()
+	bin, unit, conf := stageInputs(t, dir)
+	out := filepath.Join(dir, "out.deb")
+
+	o := options{
+		version:    "1.2.3",
+		arch:       "amd64",
+		binarySrc:  bin,
+		binaryDest: "/usr/bin/devbox-gateway",
+		unitSrc:    unit,
+		confSrc:    conf,
+		licenseSrc: filepath.Join(dir, "LICENSE"), // absent: exercises the skip path
+		out:        out,
+	}
+	if err := writeDeb(o); err != nil {
+		t.Fatalf("writeDeb: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read deb: %v", err)
+	}
+
+	modes := dataFileModes(t, data)
+	want := map[string]int64{
+		"usr/bin/devbox-gateway":                    0o755,
+		"lib/systemd/system/devbox-gateway.service": 0o644,
+		"etc/devbox-gateway/devbox-gateway.conf":    0o640,
+	}
+	for name, mode := range want {
+		got, ok := modes[name]
+		if !ok {
+			t.Fatalf("data archive missing file %q", name)
+		}
+		if got != mode {
+			t.Errorf("%s mode = %#o, want %#o", name, got, mode)
+		}
+	}
+	if conf := modes["etc/devbox-gateway/devbox-gateway.conf"]; conf&0o007 != 0 {
+		t.Errorf("config file must not be world-accessible: mode %#o", conf)
+	}
+}
+
 func assertDataDirectories(t *testing.T, deb []byte, want []string) {
 	t.Helper()
 
@@ -180,6 +228,47 @@ func dataDirectories(t *testing.T, deb []byte) map[string]bool {
 	}
 
 	return tarDirectories(t, dataArchive)
+}
+
+// dataFileModes returns the permission bits (masked to 0o7777) of every regular
+// file in a .deb's data.tar.gz, keyed by its archive path.
+func dataFileModes(t *testing.T, deb []byte) map[string]int64 {
+	t.Helper()
+
+	members, err := parseAr(deb)
+	if err != nil {
+		t.Fatalf("parseAr: %v", err)
+	}
+	var dataArchive []byte
+	for i := range members {
+		if members[i].name() == "data.tar.gz" {
+			dataArchive = members[i].data
+			break
+		}
+	}
+	if dataArchive == nil {
+		t.Fatal("data.tar.gz not found")
+	}
+
+	gzipReader, err := gzip.NewReader(bytes.NewReader(dataArchive))
+	if err != nil {
+		t.Fatalf("gzip: %v", err)
+	}
+	tarReader := tar.NewReader(gzipReader)
+	modes := make(map[string]int64)
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar: %v", err)
+		}
+		if header.Typeflag == tar.TypeReg {
+			modes[header.Name] = header.Mode & 0o7777
+		}
+	}
+	return modes
 }
 
 func tarDirectories(t *testing.T, dataArchive []byte) map[string]bool {

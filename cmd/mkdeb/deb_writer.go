@@ -19,6 +19,7 @@ import (
 type debFile struct {
 	source      string
 	destination string
+	mode        int64
 }
 
 type tarEntry struct {
@@ -104,14 +105,22 @@ func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 	return directoryEntries
 }
 
+// packageFiles returns the install manifest. Modes are fixed here rather than
+// copied from the source files so the package is deterministic regardless of the
+// build checkout's umask. The config file is installed 0640 (root read/write, no
+// group or world read) because it can hold secrets: a LOCAL_USER_SHA256 list of
+// password digests and the SSH tunnel key passphrase
+// (SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE). The data archive owns every entry as
+// root:root (uid/gid 0), so 0640 keeps the file readable only by root. The other
+// files carry no secrets and use the conventional world-readable modes.
 func packageFiles(o options) ([]debFile, error) {
 	files := []debFile{
-		{o.binarySrc, o.binaryDest},
-		{o.unitSrc, unitDestination},
-		{o.confSrc, confDestination},
+		{o.binarySrc, o.binaryDest, 0o755},
+		{o.unitSrc, unitDestination, 0o644},
+		{o.confSrc, confDestination, 0o640},
 	}
 	if _, err := os.Stat(o.licenseSrc); err == nil {
-		files = append(files, debFile{o.licenseSrc, licenseDest})
+		files = append(files, debFile{o.licenseSrc, licenseDest, 0o644})
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat license: %w", err)
 	}
@@ -143,7 +152,7 @@ func readPackageFile(file debFile) (tarEntry, error) {
 	return tarEntry{
 		name:    strings.TrimPrefix(cleanDestination, "/"),
 		body:    body,
-		mode:    int64(info.Mode().Perm()),
+		mode:    file.mode,
 		modTime: info.ModTime(),
 	}, nil
 }

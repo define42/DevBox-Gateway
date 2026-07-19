@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/rpmpack"
 )
 
 func TestRPMArch(t *testing.T) {
@@ -41,6 +43,55 @@ func TestPackageRelations(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing requires: %v", want)
+	}
+}
+
+// The config file can hold secrets — a LOCAL_USER_SHA256 list of password
+// digests and the SSH tunnel key passphrase — so it must be installed 0640 and
+// never group- or world-readable. The binary and unit carry no secrets and keep
+// their conventional world-readable modes.
+func TestPackageFileModes(t *testing.T) {
+	o := options{
+		binarySrc:  "dist/devbox-gateway",
+		binaryDest: "/usr/bin/devbox-gateway",
+		unitSrc:    "devbox-gateway.service",
+		confSrc:    "devbox-gateway.conf",
+		licenseSrc: filepath.Join(t.TempDir(), "LICENSE"), // absent: exercises the skip path
+	}
+
+	files := packageFiles(o)
+	modes := map[string]uint{}
+	var conf *packageFile
+	for i := range files {
+		modes[files[i].dest] = files[i].mode
+		if files[i].dest == confDestination {
+			conf = &files[i]
+		}
+	}
+
+	want := map[string]uint{
+		o.binaryDest:    0o755,
+		unitDestination: 0o644,
+		confDestination: 0o640,
+	}
+	for dest, mode := range want {
+		got, ok := modes[dest]
+		if !ok {
+			t.Fatalf("packageFiles missing %q", dest)
+		}
+		if got != mode {
+			t.Errorf("%s mode = %#o, want %#o", dest, got, mode)
+		}
+	}
+
+	if modes[confDestination]&0o007 != 0 {
+		t.Errorf("config file %s must not be world-accessible: mode %#o", confDestination, modes[confDestination])
+	}
+	if conf == nil {
+		t.Fatalf("config file %s not in the install manifest", confDestination)
+	}
+	if conf.typ&rpmpack.ConfigFile == 0 || conf.typ&rpmpack.NoReplaceFile == 0 {
+		t.Errorf("config file must stay %%config(noreplace); got type %v", conf.typ)
 	}
 }
 

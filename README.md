@@ -143,7 +143,7 @@ The package installs:
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                        | The gateway binary.                                  |
 | `/usr/lib/systemd/system/devbox-gateway.service` | systemd unit (runs as root, binds `:443`).           |
-| `/etc/devbox-gateway/devbox-gateway.conf`        | Config file, marked `%config(noreplace)` so your edits survive upgrades. |
+| `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests and the tunnel key passphrase), marked `%config(noreplace)` so your edits survive upgrades. |
 
 It requires `libvirt-libs` and `ca-certificates`, plus `libvirt-daemon-kvm` and
 `qemu-kvm` — the local libvirt/KVM stack that hosts the virtual desktops.
@@ -227,7 +227,7 @@ The package installs:
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                     | The gateway binary.                                  |
 | `/lib/systemd/system/devbox-gateway.service`  | systemd unit (runs as root, binds `:443`).           |
-| `/etc/devbox-gateway/devbox-gateway.conf`     | Config file, registered as a `conffile` so your edits survive upgrades. |
+| `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests and the tunnel key passphrase), registered as a `conffile` so your edits survive upgrades. |
 
 It depends on `libvirt0` and `ca-certificates`, plus `libvirt-daemon-system` and
 `qemu-system-x86` — the local libvirt/KVM stack that hosts the virtual desktops
