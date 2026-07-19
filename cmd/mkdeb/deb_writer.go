@@ -50,7 +50,7 @@ func writeDebArchive(o options) error {
 	}
 
 	now := time.Now()
-	dataEntries = append(packageDirectories(dataEntries, now), dataEntries...)
+	dataEntries = append(buildDirectoryEntries(dataEntries, now), dataEntries...)
 	dataArchive, err := makeTarGzip(dataEntries)
 	if err != nil {
 		return fmt.Errorf("create data archive: %w", err)
@@ -78,7 +78,7 @@ func writeDebArchive(o options) error {
 	return writePackageFile(o.out, writeAr(members))
 }
 
-func packageDirectories(entries []tarEntry, modTime time.Time) []tarEntry {
+func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 	directories := make(map[string]struct{})
 	for _, entry := range entries {
 		for directory := path.Dir(entry.name); directory != "."; directory = path.Dir(directory) {

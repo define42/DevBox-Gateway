@@ -65,8 +65,8 @@ func stageInputs(t *testing.T, dir string) (bin, unit, conf string) {
 // debMagic is the leading magic of an ar archive, which every .deb begins with.
 const debMagic = "!<arch>\n"
 
-// TestWriteDeb packages real files staged in a temp dir and checks the output is
-// an ar archive whose control file ends with a newline.
+// TestWriteDeb packages real files staged in a temp dir and checks the archive,
+// control metadata, and data directory entries.
 func TestWriteDeb(t *testing.T) {
 	dir := t.TempDir()
 	bin, unit, conf := stageInputs(t, dir)
