@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -20,10 +22,11 @@ type debFile struct {
 }
 
 type tarEntry struct {
-	name    string
-	body    []byte
-	mode    int64
-	modTime time.Time
+	name     string
+	body     []byte
+	mode     int64
+	modTime  time.Time
+	typeFlag byte
 }
 
 func writeDebArchive(o options) error {
@@ -47,6 +50,7 @@ func writeDebArchive(o options) error {
 	}
 
 	now := time.Now()
+	dataEntries = append(packageDirectories(dataEntries, now), dataEntries...)
 	dataArchive, err := makeTarGzip(dataEntries)
 	if err != nil {
 		return fmt.Errorf("create data archive: %w", err)
@@ -72,6 +76,32 @@ func writeDebArchive(o options) error {
 		members = append(members, arEntry)
 	}
 	return writePackageFile(o.out, writeAr(members))
+}
+
+func packageDirectories(entries []tarEntry, modTime time.Time) []tarEntry {
+	directories := make(map[string]struct{})
+	for _, entry := range entries {
+		for directory := path.Dir(entry.name); directory != "."; directory = path.Dir(directory) {
+			directories[directory+"/"] = struct{}{}
+		}
+	}
+
+	names := make([]string, 0, len(directories))
+	for name := range directories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	entries = make([]tarEntry, 0, len(names))
+	for _, name := range names {
+		entries = append(entries, tarEntry{
+			name:     name,
+			mode:     0o755,
+			modTime:  modTime,
+			typeFlag: tar.TypeDir,
+		})
+	}
+	return entries
 }
 
 func packageFiles(o options) ([]debFile, error) {
@@ -128,12 +158,12 @@ func controlEntries(o options, md5sums string, installedBytes int64, now time.Ti
 		packageRelations(), summary, strings.ReplaceAll(description, "\n", "\n "),
 	)
 	return []tarEntry{
-		{"postinst", []byte(postinstScript), 0o755, now},
-		{"prerm", []byte(prermScript), 0o755, now},
-		{"postrm", []byte(postrmScript), 0o755, now},
-		{"conffiles", []byte(confDestination + "\n"), 0o644, now},
-		{"control", []byte(control), 0o644, now},
-		{"md5sums", []byte(md5sums), 0o644, now},
+		{name: "postinst", body: []byte(postinstScript), mode: 0o755, modTime: now},
+		{name: "prerm", body: []byte(prermScript), mode: 0o755, modTime: now},
+		{name: "postrm", body: []byte(postrmScript), mode: 0o755, modTime: now},
+		{name: "conffiles", body: []byte(confDestination + "\n"), mode: 0o644, modTime: now},
+		{name: "control", body: []byte(control), mode: 0o644, modTime: now},
+		{name: "md5sums", body: []byte(md5sums), mode: 0o644, modTime: now},
 	}
 }
 
@@ -143,10 +173,11 @@ func makeTarGzip(entries []tarEntry) ([]byte, error) {
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, entry := range entries {
 		header := &tar.Header{
-			Name:    entry.name,
-			Mode:    entry.mode,
-			Size:    int64(len(entry.body)),
-			ModTime: entry.modTime,
+			Name:     entry.name,
+			Mode:     entry.mode,
+			Size:     int64(len(entry.body)),
+			ModTime:  entry.modTime,
+			Typeflag: entry.typeFlag,
 		}
 		if err := writeTarEntry(tarWriter, header, entry.body); err != nil {
 			return nil, err

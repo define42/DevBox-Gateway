@@ -1,6 +1,10 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -97,6 +101,16 @@ func TestWriteDeb(t *testing.T) {
 	if !strings.Contains(control, "Package: "+packageName) {
 		t.Fatalf("control file missing package name:\n%s", control)
 	}
+
+	assertDataDirectories(t, data, []string{
+		"etc/",
+		"etc/devbox-gateway/",
+		"lib/",
+		"lib/systemd/",
+		"lib/systemd/system/",
+		"usr/",
+		"usr/bin/",
+	})
 }
 
 func TestWriteDebWithLicense(t *testing.T) {
@@ -123,6 +137,58 @@ func TestWriteDebWithLicense(t *testing.T) {
 	}
 	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
 		t.Fatalf("output stat = %v, %v", info, err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read deb: %v", err)
+	}
+	assertDataDirectories(t, data, []string{
+		"usr/share/",
+		"usr/share/doc/",
+		"usr/share/doc/devbox-gateway/",
+	})
+}
+
+func assertDataDirectories(t *testing.T, deb []byte, want []string) {
+	t.Helper()
+	members, err := parseAr(deb)
+	if err != nil {
+		t.Fatalf("parseAr: %v", err)
+	}
+
+	var dataArchive []byte
+	for i := range members {
+		if members[i].name() == "data.tar.gz" {
+			dataArchive = members[i].data
+			break
+		}
+	}
+	if dataArchive == nil {
+		t.Fatal("data.tar.gz not found")
+	}
+
+	gzipReader, err := gzip.NewReader(bytes.NewReader(dataArchive))
+	if err != nil {
+		t.Fatalf("gzip: %v", err)
+	}
+	tarReader := tar.NewReader(gzipReader)
+	directories := make(map[string]bool)
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar: %v", err)
+		}
+		if header.Typeflag == tar.TypeDir {
+			directories[header.Name] = true
+		}
+	}
+	for _, name := range want {
+		if !directories[name] {
+			t.Errorf("data archive missing directory %q", name)
+		}
 	}
 }
 
