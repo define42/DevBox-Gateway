@@ -160,10 +160,39 @@ func packageRelations() (requires rpmpack.Relations, err error) {
 	return requires, nil
 }
 
-// addPackageFiles adds the binary, systemd unit, sample environment file, and
-// (when present) the license to the RPM, all stamped with the binary's mtime so
-// the package is reproducible for a given build artifact. The environment file is
-// marked %config(noreplace) so operator edits survive upgrades.
+// packageFile describes one file in the RPM: its source path, install
+// destination, permission bits, and rpmpack file classification.
+type packageFile struct {
+	src  string
+	dest string
+	mode uint
+	typ  rpmpack.FileType
+}
+
+// packageFiles returns the install manifest. The config file is installed 0640
+// (root read/write, no group or world read) because it can hold secrets: a
+// LOCAL_USER_SHA256 list of password digests and the SSH tunnel key passphrase
+// (SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE). Combined with the root:root owner set in
+// addPackageFiles, that keeps the file readable only by root. The remaining
+// files carry no secrets and use the conventional world-readable modes. The
+// repository does not ship a LICENSE file, so it is bundled only when present
+// and packaging never fails on its absence.
+func packageFiles(o options) []packageFile {
+	files := []packageFile{
+		{o.binarySrc, o.binaryDest, 0o755, rpmpack.GenericFile},
+		{o.unitSrc, unitDestination, 0o644, rpmpack.GenericFile},
+		{o.confSrc, confDestination, 0o640, rpmpack.ConfigFile | rpmpack.NoReplaceFile},
+	}
+	if _, err := os.Stat(o.licenseSrc); err == nil {
+		files = append(files, packageFile{o.licenseSrc, licenseDest, 0o644, rpmpack.LicenceFile})
+	}
+	return files
+}
+
+// addPackageFiles adds the binary, systemd unit, sample config file, and (when
+// present) the license to the RPM, all stamped with the binary's mtime so the
+// package is reproducible for a given build artifact. The config file is marked
+// %config(noreplace) so operator edits survive upgrades.
 func addPackageFiles(rpm *rpmpack.RPM, o options) error {
 	st, err := os.Stat(o.binarySrc)
 	if err != nil {
@@ -171,28 +200,7 @@ func addPackageFiles(rpm *rpmpack.RPM, o options) error {
 	}
 	mtime := uint32(st.ModTime().Unix()) //nolint:gosec // RPM MTime is uint32 epoch seconds; build-artifact mtimes are positive and well within range.
 
-	files := []struct {
-		src  string
-		dest string
-		mode uint
-		typ  rpmpack.FileType
-	}{
-		{o.binarySrc, o.binaryDest, 0o755, rpmpack.GenericFile},
-		{o.unitSrc, unitDestination, 0o644, rpmpack.GenericFile},
-		{o.confSrc, confDestination, 0o644, rpmpack.ConfigFile | rpmpack.NoReplaceFile},
-	}
-	// The repository does not ship a LICENSE file; include it only when present
-	// so packaging never fails on its absence.
-	if _, err := os.Stat(o.licenseSrc); err == nil {
-		files = append(files, struct {
-			src  string
-			dest string
-			mode uint
-			typ  rpmpack.FileType
-		}{o.licenseSrc, licenseDest, 0o644, rpmpack.LicenceFile})
-	}
-
-	for _, f := range files {
+	for _, f := range packageFiles(o) {
 		body, err := os.ReadFile(f.src)
 		if err != nil {
 			return err
