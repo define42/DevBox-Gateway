@@ -60,6 +60,9 @@ const (
 	// DefaultVMDiskSizeGB is the default virtual disk capacity, in GiB, for newly
 	// created VM volumes. Used when VM_DISK_SIZE_GB is unset or non-positive.
 	DefaultVMDiskSizeGB = 200
+	// DefaultMaxVDIPerUser is the default maximum number of VDIs (VMs) each user
+	// may own at once. Override with MAX_VDI_PER_USER.
+	DefaultMaxVDIPerUser = 10
 )
 
 const (
@@ -79,6 +82,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable base VDI images (.img/.qcow2/.raw); must contain at least one image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
 	s.SetInt(VM_DISK_SIZE_GB, "Virtual disk capacity in GiB for newly created VM qcow2 volumes; the base image is grown to this size (qcow2 is thin-provisioned, so the host file only consumes written data). Values <=0 fall back to the default", DefaultVMDiskSizeGB)
+	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously accepted front connections (RDP + HTTPS); Accept blocks once this many are open and resumes as connections close, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", 1024)
@@ -201,6 +205,20 @@ func VNCSocketDir(settings *SettingsType) string {
 // VirtStoragePoolPath resolves the libvirt storage pool path below the data root.
 func VirtStoragePoolPath(settings *SettingsType) string {
 	return ImageDir(settings)
+}
+
+// MaxVDIPerUser resolves the maximum number of VDIs (VMs) a single user may
+// own at once. A missing setting falls back to DefaultMaxVDIPerUser; a
+// configured value <=0 disables the limit, reported as 0.
+func MaxVDIPerUser(settings *SettingsType) int {
+	limit := DefaultMaxVDIPerUser
+	if settings != nil && settings.Has(MAX_VDI_PER_USER) {
+		limit = settings.GetInt(MAX_VDI_PER_USER)
+	}
+	if limit <= 0 {
+		return 0
+	}
+	return limit
 }
 
 // VMDiskCapacityBytes resolves the virtual disk capacity, in bytes, for newly
@@ -427,6 +445,7 @@ const (
 	LOGIN_RATE_LIMIT_LOCKOUT      = "LOGIN_RATE_LIMIT_LOCKOUT"
 	LISTEN_ADDR                   = "LISTEN_ADDR"
 	MAX_CONCURRENT_CONNECTIONS    = "MAX_CONCURRENT_CONNECTIONS"
+	MAX_VDI_PER_USER              = "MAX_VDI_PER_USER"
 	RDP_DISABLE_CLIPBOARD         = "RDP_DISABLE_CLIPBOARD"
 	RDP_DISABLE_DRIVES            = "RDP_DISABLE_DRIVES"
 	SNI_HASH_SECRET               = "SNI_HASH_SECRET"
