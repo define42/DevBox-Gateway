@@ -54,7 +54,12 @@ func assertLoginSuccess(ctx context.Context, t *testing.T, baseURL string, clien
 	form := url.Values{}
 	form.Set("username", username)
 	form.Set("password", password)
-	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+	headers := map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
+		// Mirror the Origin a browser sends on a same-origin form POST so the
+		// login handler's same-origin (CSRF) gate admits the request.
+		"Origin": baseURL,
+	}
 	status, _, header := doRequest(ctx, t, baseURL, client, http.MethodPost, "/login", "", "", strings.NewReader(form.Encode()), headers)
 	if status != http.StatusSeeOther {
 		t.Fatalf("expected 303 for login, got %d", status)
@@ -93,7 +98,12 @@ func assertLoginFailure(ctx context.Context, t *testing.T, baseURL string, clien
 	form := url.Values{}
 	form.Set("username", username)
 	form.Set("password", password)
-	headers := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+	headers := map[string]string{
+		"Content-Type": "application/x-www-form-urlencoded",
+		// Mirror the Origin a browser sends on a same-origin form POST so the
+		// login handler's same-origin (CSRF) gate admits the request.
+		"Origin": baseURL,
+	}
 	status, body, _ := doRequest(ctx, t, baseURL, client, http.MethodPost, "/login", "", "", strings.NewReader(form.Encode()), headers)
 	if status != http.StatusOK {
 		t.Fatalf("expected 200 for login page, got %d: %s", status, body)

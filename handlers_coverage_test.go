@@ -678,6 +678,97 @@ func TestLoginGetServesPage(t *testing.T) {
 	}
 }
 
+func loginForm() *strings.Reader {
+	return strings.NewReader(url.Values{
+		"username": {"alice"},
+		"password": {"secret"},
+	}.Encode())
+}
+
+func responseSetsSessionCookie(res *http.Response) bool {
+	for _, cookie := range res.Cookies() {
+		if cookie.Name == "cv_session" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLoginPostRejectsMissingSameOriginHeader guards against login CSRF: a POST
+// /login that carries neither Origin nor Referer (as a cross-site auto-submit
+// would) must be refused before any credential is authenticated, so no session
+// cookie is planted.
+func TestLoginPostRejectsMissingSameOriginHeader(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), forbiddenOrigin) {
+		t.Fatalf("expected %q in body, got %q", forbiddenOrigin, rec.Body.String())
+	}
+	if responseSetsSessionCookie(rec.Result()) {
+		t.Fatal("expected rejected login not to set a session cookie")
+	}
+}
+
+// TestLoginPostRejectsCrossOriginHeader covers the same login-CSRF gate when the
+// forged request advertises an attacker-controlled Origin.
+func TestLoginPostRejectsCrossOriginHeader(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://evil.example.com")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), forbiddenOrigin) {
+		t.Fatalf("expected %q in body, got %q", forbiddenOrigin, rec.Body.String())
+	}
+	if responseSetsSessionCookie(rec.Result()) {
+		t.Fatal("expected rejected login not to set a session cookie")
+	}
+}
+
+// TestLoginPostAllowsSameOriginRequest confirms the CSRF gate admits a genuine
+// same-origin form POST: it clears the origin check and reaches authentication
+// (which fails here since no users are configured), returning the login page
+// rather than a 403.
+func TestLoginPostAllowsSameOriginRequest(t *testing.T) {
+	sm := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sm, settings)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setSameOriginHeader(req)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from authentication failure, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Invalid credentials.") {
+		t.Fatalf("expected invalid-credentials login page, got %q", rec.Body.String())
+	}
+	if responseSetsSessionCookie(rec.Result()) {
+		t.Fatal("expected failed authentication not to set a session cookie")
+	}
+}
+
 func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
