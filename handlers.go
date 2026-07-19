@@ -783,7 +783,7 @@ func parseDashboardVMName(w http.ResponseWriter, req *http.Request, username str
 	}
 	username = strings.TrimSpace(username)
 	if username != "" {
-		prefix := username + "-"
+		prefix := username + vmname.Separator
 		if suffix, ok := strings.CutPrefix(name, prefix); ok {
 			validatedSuffix, err := validateVMName(suffix)
 			if err != nil {

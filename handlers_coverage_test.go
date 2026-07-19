@@ -519,9 +519,9 @@ func TestParseDashboardVMName(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		{name: "valid owned vm name", username: "alice", vmName: "alice-desktop", want: "alice-desktop"},
-		{name: "valid owned vm name with email prefix", username: "alice@example.com", vmName: "alice@example.com-desktop", want: "alice@example.com-desktop"},
-		{name: "owned suffix too long", username: "alice", vmName: "alice-" + strings.Repeat("x", maxVMNameLength+1), wantErr: true},
+		{name: "valid owned vm name", username: "alice", vmName: "alice.desktop", want: "alice.desktop"},
+		{name: "valid owned vm name with email prefix", username: "alice@example.com", vmName: "alice@example.com.desktop", want: "alice@example.com.desktop"},
+		{name: "owned suffix too long", username: "alice", vmName: "alice." + strings.Repeat("x", maxVMNameLength+1), wantErr: true},
 		{name: "legacy unprefixed name", username: "alice", vmName: "legacy-imported-vm", want: "legacy-imported-vm"},
 		{name: "empty", username: "alice", vmName: "", wantErr: true},
 		{name: "too long", username: "alice", vmName: strings.Repeat("x", maxVMNameFieldLen+1), wantErr: true},

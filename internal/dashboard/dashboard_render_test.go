@@ -136,7 +136,7 @@ func TestGenerateRDPContent(t *testing.T) {
 func TestBuildDashboardRows(t *testing.T) {
 	rows := buildDashboardRows([]virt.VMInfo{
 		{
-			Name:      "alice-vm",
+			Name:      "alice.vm",
 			Owner:     "alice",
 			GuestUser: "guest",
 			IP:        "192.0.2.10",
@@ -159,11 +159,11 @@ func TestBuildDashboardRows(t *testing.T) {
 	if row.User != "guest" {
 		t.Fatalf("expected user %q, got %q", "guest", row.User)
 	}
-	if row.Name != "alice-vm" || row.IP != "192.0.2.10" || row.State != "running" {
+	if row.Name != "alice.vm" || row.IP != "192.0.2.10" || row.State != "running" {
 		t.Fatalf("unexpected row data: %+v", row)
 	}
-	if row.RDPFilename != "alice-vm.rdp" {
-		t.Fatalf("expected per-VM download filename %q, got %q", "alice-vm.rdp", row.RDPFilename)
+	if row.RDPFilename != "alice.vm.rdp" {
+		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)
 	}
 }
 

@@ -228,6 +228,22 @@ var (
 	inflightVMCreations = make(map[string]int) //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
 )
 
+// vmNameLocks serializes create and remove operations per VDI name. BootNewVM
+// checks the name is free (ensureVMNameAvailable) and only defines the domain
+// much later (StartVMWithOwner); between those two steps it destroys any
+// leftover artifacts and writes a fresh disk and cloud-init seed (guest user +
+// password hash). Without a per-name lock, two concurrent BootNewVM calls for
+// the same name could both pass the availability check and then race through
+// that region, each clobbering the other's disk and seed — so a domain could
+// end up booting one request's disk with another request's credentials. RemoveVM
+// takes the same lock so a delete cannot interleave with a create of the same
+// name. It is held as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
+// vmCreationMu strictly inside this region, so the lock order is always
+// vmNameLocks then vmCreationMu, and a goroutine never holds two VDI-name locks
+// at once — so neither lock can deadlock. This is process-wide because the
+// gateway is the single writer of libvirt state.
+var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM create/remove
+
 // reserveUserVMSlot refuses creation when the owner already has as many VDIs as
 // MAX_VDI_PER_USER allows, counting both existing domains and creations still
 // in flight. Ownership is read from the same domain owner metadata the
@@ -453,6 +469,12 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 	if err := ensureBootStoragePool(conn, poolName, poolPath); err != nil {
 		return vmName, err
 	}
+	// Serialize the whole check-and-act region for this name: the availability
+	// check, the destroy of any leftover artifacts, the disk/seed provisioning,
+	// and the domain definition must be atomic with respect to another create or
+	// remove of the same VDI name. Held until BootNewVM returns.
+	unlockName := vmNameLocks.Lock(vmName)
+	defer unlockName()
 	if err := ensureVMNameAvailable(conn, vmName); err != nil {
 		return vmName, err
 	}
@@ -479,6 +501,12 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 
 // RemoveVM deletes the named VM, its disks, and any leftover console sockets.
 func RemoveVM(name string, settings *config.SettingsType) error {
+	// Take the per-name lock so a remove and a create of the same VDI name
+	// cannot interleave (see vmNameLocks): the destroy and volume deletion below
+	// must not run against a name another goroutine is mid-provisioning.
+	unlockName := vmNameLocks.Lock(name)
+	defer unlockName()
+
 	conn, err := libvirt.NewConnect(LibvirtURI())
 	if err != nil {
 		return err
@@ -789,6 +817,10 @@ func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) err
 	return nil
 }
 
+// resetExistingVMArtifacts destroys any leftover domain and volumes for vmName
+// during a create. It runs while BootNewVM already holds vmNameLocks.Lock(vmName),
+// so it must NOT be reimplemented in terms of RemoveVM: RemoveVM re-acquires the
+// same (non-reentrant) per-name lock and would self-deadlock.
 func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso string) error {
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
 		return fmt.Errorf("failed to destroy existing domain: %w", err)
