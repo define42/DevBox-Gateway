@@ -62,8 +62,7 @@ func stageInputs(t *testing.T, dir string) (bin, unit, conf string) {
 const debMagic = "!<arch>\n"
 
 // TestWriteDeb packages real files staged in a temp dir and checks the output is
-// an ar archive whose control file ends with a newline (the fixup the command
-// applies on top of debpkg).
+// an ar archive whose control file ends with a newline.
 func TestWriteDeb(t *testing.T) {
 	dir := t.TempDir()
 	bin, unit, conf := stageInputs(t, dir)

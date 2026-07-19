@@ -1,19 +1,15 @@
 // Command mkdeb packages the prebuilt devbox-gateway binary together with its
-// systemd unit, sample config file, and license into a Debian .deb using the
-// pure-Go github.com/xor-gate/debpkg. No dpkg-deb, debian/ tree, or Go toolchain
-// is needed in a buildroot, so the package can be produced on any build host. It
-// is invoked by the makefile `deb` target after `make build` and mirrors the
-// sibling cmd/mkrpm command.
+// systemd unit, sample config file, and license into a Debian .deb. No dpkg-deb,
+// debian/ tree, or Go toolchain is needed in a buildroot, so the package can be
+// produced on any build host. It is invoked by the makefile `deb` target after
+// `make build` and mirrors the sibling cmd/mkrpm command.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
 	"runtime"
-
-	"github.com/xor-gate/debpkg"
 )
 
 const (
@@ -113,33 +109,7 @@ func debArch(goarch string) string {
 }
 
 func writeDeb(o options) error {
-	deb := debpkg.New()
-	defer deb.Close()
-
-	deb.SetName(packageName)
-	deb.SetVersion(o.version)
-	deb.SetArchitecture(o.arch)
-	deb.SetMaintainer(maintainer)
-	deb.SetHomepage(url)
-	deb.SetSection(section)
-	deb.SetShortDescription(summary)
-	deb.SetDescription(description)
-	deb.SetDepends(packageRelations())
-
-	if err := addControlScripts(deb); err != nil {
-		return err
-	}
-	if err := addPackageFiles(deb, o); err != nil {
-		return err
-	}
-
-	if err := deb.Write(o.out); err != nil {
-		return err
-	}
-	// Work around a debpkg/dpkg incompatibility: the control file is emitted
-	// without a trailing newline, which dpkg >= 1.22 rejects. See
-	// fixControlTrailingNewline for details.
-	return fixControlTrailingNewline(o.out)
+	return writeDebArchive(o)
 }
 
 // packageRelations builds the .deb's Depends field: the libvirt client library
@@ -150,48 +120,4 @@ func writeDeb(o options) error {
 // counterparts of the RPM requires in cmd/mkrpm.
 func packageRelations() string {
 	return "libvirt0, ca-certificates, libvirt-daemon-system, qemu-system-x86"
-}
-
-// addControlScripts attaches the postinst/prerm/postrm maintainer scripts.
-func addControlScripts(deb *debpkg.DebPkg) error {
-	scripts := []struct {
-		name, body string
-	}{
-		{"postinst", postinstScript},
-		{"prerm", prermScript},
-		{"postrm", postrmScript},
-	}
-	for _, s := range scripts {
-		if err := deb.AddControlExtraString(s.name, s.body); err != nil {
-			return fmt.Errorf("add %s: %w", s.name, err)
-		}
-	}
-	return nil
-}
-
-// addPackageFiles adds the binary, systemd unit, sample config file, and (when
-// present) the license to the .deb. The config file is marked as a conffile so
-// operator edits survive upgrades, mirroring the RPM's %config(noreplace).
-func addPackageFiles(deb *debpkg.DebPkg, o options) error {
-	if err := deb.AddFile(o.binarySrc, o.binaryDest); err != nil {
-		return fmt.Errorf("add binary: %w", err)
-	}
-	if err := deb.AddFile(o.unitSrc, unitDestination); err != nil {
-		return fmt.Errorf("add unit: %w", err)
-	}
-	if err := deb.AddFile(o.confSrc, confDestination); err != nil {
-		return fmt.Errorf("add conf: %w", err)
-	}
-	if err := deb.MarkConfigFile(confDestination); err != nil {
-		return fmt.Errorf("mark conffile: %w", err)
-	}
-
-	// The repository does not ship a LICENSE file; include it only when present
-	// so packaging never fails on its absence.
-	if _, err := os.Stat(o.licenseSrc); err == nil {
-		if err := deb.AddFile(o.licenseSrc, licenseDest); err != nil {
-			return fmt.Errorf("add license: %w", err)
-		}
-	}
-	return nil
 }
