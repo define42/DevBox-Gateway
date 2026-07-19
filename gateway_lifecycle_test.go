@@ -8,6 +8,7 @@ import (
 	"devboxgateway/internal/dashboard"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/virt"
+	"devboxgateway/internal/vmname"
 	"encoding/json"
 	"io"
 	"net"
@@ -204,7 +205,7 @@ func TestGatewayRejectsDuplicateVMCreate(t *testing.T) {
 	}, http.StatusSeeOther, "/api/dashboard")
 
 	shortName := uniqueGatewayVMShortName("dup")
-	fullName := "johndoe-" + shortName
+	fullName := "johndoe" + vmname.Separator + shortName
 	t.Cleanup(func() { _ = virt.RemoveVM(fullName, settings) })
 
 	// First create succeeds; creating again with the same name must be refused
@@ -234,7 +235,7 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 	assertGatewayStatus(t, server.client, http.MethodGet, server.baseURL+"/api/dashboard/data", nil, http.StatusOK)
 
 	shortName := uniqueGatewayVMShortName("api")
-	fullName := "johndoe-" + shortName
+	fullName := "johndoe" + vmname.Separator + shortName
 	t.Cleanup(func() {
 		_ = virt.RemoveVM(fullName, settings)
 	})

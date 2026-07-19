@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"devboxgateway/internal/virt"
+	"devboxgateway/internal/vmname"
 	"io"
 	"net/http"
 	"net/url"
@@ -146,7 +147,7 @@ func TestGatewayConsoleAndVNCFlows(t *testing.T) {
 
 	plainClient := newInsecureHTTPClient()
 	shortName := uniqueGatewayVMShortName("console")
-	fullName := "johndoe-" + shortName
+	fullName := "johndoe" + vmname.Separator + shortName
 	t.Cleanup(func() {
 		_ = virt.RemoveVM(fullName, settings)
 	})

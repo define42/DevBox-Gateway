@@ -3,6 +3,7 @@ package main
 import (
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/dashboard"
+	"devboxgateway/internal/vmname"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -65,7 +66,10 @@ func uniqueGatewayVMShortName(prefix string) string {
 func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) string {
 	t.Helper()
 
-	fullName := "johndoe-" + shortName
+	// The server composes the VDI name from the login user ("johndoe") and the
+	// submitted short name via vmname.Compose, so build the expected full name
+	// the same way instead of hard-coding the separator.
+	fullName := "johndoe" + vmname.Separator + shortName
 	createClient := *server.client
 	createClient.Timeout = 2 * time.Minute
 
