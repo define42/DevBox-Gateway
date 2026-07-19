@@ -96,7 +96,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetString(ACME_EMAIL, "ACME account email (recommended)", "")
 	s.SetString(ACME_CA, "ACME CA directory URL or 'staging'", "")
 	s.SetString(FRONT_DOMAIN, "Front domain to serve front page on HTTPS requests and also the prefix for vm names", "desktop.local.gd")
-	s.SetString(SNI_HASH_SECRET, "Secret keying the HMAC that turns VM names into opaque SNI routing labels; auto-generated and persisted under the data root when empty", "")
+	s.SetSecretString(SNI_HASH_SECRET, "Secret keying the HMAC that turns VM names into opaque SNI routing labels; auto-generated and persisted under the data root when empty", "")
 
 	s.SetBool(RDP_DISABLE_CLIPBOARD, "Strip clipboard (cliprdr) channel from RDP sessions so the gateway prevents clipboard redirection regardless of client/VM policy", false)
 	s.SetBool(RDP_DISABLE_DRIVES, "Strip drive redirection (rdpdr) channel from RDP sessions so the gateway prevents local drive mapping regardless of client/VM policy", false)
@@ -137,7 +137,7 @@ func (s *SettingsType) setAuthDefaults() {
 	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
-	s.SetString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
+	s.SetSecretString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
 	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username or client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
 	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after LOGIN_RATE_LIMIT_MAX_ATTEMPTS failures", 15*time.Minute)

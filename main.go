@@ -319,6 +319,13 @@ func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler,
 
 const tlsHandshakeRecordType = 0x16
 
+// httpIdleTimeout bounds how long an otherwise-idle keep-alive HTTPS connection
+// is held open between dashboard requests before the server closes it, so idle
+// browsers do not pin front-connection slots (which are capped by
+// MAX_CONCURRENT_CONNECTIONS). It does not apply to the WebSocket consoles: once
+// upgraded they hijack the connection and manage their own deadlines.
+const httpIdleTimeout = 120 * time.Second
+
 func setSetupDeadline(conn net.Conn, settings *config.SettingsType) bool {
 	if conn == nil || settings == nil {
 		return true
@@ -388,8 +395,17 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 	_ = clientTLS.SetDeadline(time.Time{})
 
 	srv := &http.Server{
-		Handler:     withRequestScheme(mux, "https"),
-		ReadTimeout: settings.GetDuration(config.TIMEOUT),
+		Handler:           withRequestScheme(mux, "https"),
+		ReadTimeout:       settings.GetDuration(config.TIMEOUT),
+		ReadHeaderTimeout: settings.GetDuration(config.TIMEOUT),
+		IdleTimeout:       httpIdleTimeout,
+		// WriteTimeout is deliberately unset. This server multiplexes the
+		// dashboard's long-lived WebSocket consoles (serial/VNC/ping), which hijack
+		// the connection and enforce their own write deadlines (see the console
+		// package). A blanket WriteTimeout would risk cutting a streaming console
+		// mid-write while adding negligible protection for the small HTTP responses
+		// the dashboard otherwise returns; slow-header attacks are bounded by
+		// ReadHeaderTimeout and the pre-TLS setup deadline instead.
 	}
 	ln := newSingleConnListener(clientTLS)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {

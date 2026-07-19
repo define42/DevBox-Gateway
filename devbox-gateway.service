@@ -5,6 +5,10 @@ After=network-online.target libvirtd.service
 # libvirtd is a soft dependency: the gateway talks to a local libvirt daemon by
 # default, but it may also be pointed at a remote one, so do not hard-require it.
 Wants=network-online.target libvirtd.service
+# Bound the restart loop: if the binary fails 5 times within 60s, stop retrying
+# instead of spinning forever (e.g. on a persistent misconfiguration).
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -13,10 +17,43 @@ Type=simple
 ExecStart=/usr/bin/devbox-gateway
 Restart=on-failure
 RestartSec=5s
+
 # The gateway listens on :443 by default; allow binding the privileged port
 # without granting full root networking privileges.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# --- Sandboxing -------------------------------------------------------------
+# Hardening directives that reduce the blast radius of a compromise. The gateway
+# still runs as root because it talks to the local libvirt system socket and its
+# data root under /var/lib/libvirt; the directives below strip everything it does
+# not need. ProtectSystem=full keeps /usr, /boot, and /etc read-only while
+# leaving /var (the default DATA_ROOT_DIR) and /run (the libvirt socket)
+# writable. For a tighter setup, switch to ProtectSystem=strict and add
+# ReadWritePaths= for the configured DATA_ROOT_DIR.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+# AF_UNIX: libvirt socket + serial/VNC sockets; AF_INET/AF_INET6: :443, LDAP,
+# backend RDP, ACME; AF_NETLINK: Go's interface/route lookups.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Raise the file-descriptor ceiling: each proxied RDP/HTTPS/console connection
+# consumes sockets, and the app caps concurrency via MAX_CONCURRENT_CONNECTIONS.
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
