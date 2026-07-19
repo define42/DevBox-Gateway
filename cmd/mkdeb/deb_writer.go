@@ -121,10 +121,10 @@ func readPackageFile(file debFile) (tarEntry, error) {
 func controlEntries(o options, md5sums string, installedBytes int64, now time.Time) []tarEntry {
 	installedSize := (installedBytes + 1023) / 1024
 	control := fmt.Sprintf(
-		"Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s <>\n"+
+		"Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s <%s>\n"+
 			"Installed-Size: %d\nSection: %s\nHomepage: %s\nDepends: %s\n"+
 			"Description: %s\n %s\n",
-		packageName, o.version, o.arch, maintainer, installedSize, section, url,
+		packageName, o.version, o.arch, maintainer, maintainerEmail, installedSize, section, url,
 		packageRelations(), summary, strings.ReplaceAll(description, "\n", "\n "),
 	)
 	return []tarEntry{
