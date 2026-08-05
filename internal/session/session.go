@@ -24,6 +24,13 @@ type sessionData struct {
 	User      *types.User
 	CreatedAt time.Time
 	ClientIP  string
+	// LoginPasswordHash is the salted sha512_crypt ($6$, /etc/shadow compatible)
+	// hash of the password the user logged in with (LDAP or local). It is
+	// computed at login and kept only in the in-memory session store so VDI
+	// creation can provision the guest account with the user's login password;
+	// the cleartext password itself is never retained. The hash format is
+	// exactly what cloud-init expects, so the cleartext is never needed again.
+	LoginPasswordHash string
 	// RDPConnectGrants records, per VM name, the instant until which an RDP
 	// connection for that VM is authorized from this session's client IP. A
 	// grant is created when the user clicks "Connect" (downloads the .rdp),
@@ -116,16 +123,20 @@ func CanonicalClientIP(remoteAddr string) (string, bool) {
 
 // CreateSession stores the authenticated user and canonical client IP in the
 // session. The caller verifies credentials at login time; the session is then
-// trusted until it expires (see sessionTTL), so no password is retained.
-func (m *Manager) CreateSession(ctx context.Context, u *types.User, clientIP string) error {
+// trusted until it expires (see sessionTTL). The cleartext password is not
+// retained — loginPasswordHash is its salted sha512_crypt digest, kept in the
+// in-memory store so VDI creation can seed the guest account with the user's
+// login password (see PasswordHashFromContext).
+func (m *Manager) CreateSession(ctx context.Context, u *types.User, clientIP, loginPasswordHash string) error {
 	if err := m.RenewToken(ctx); err != nil {
 		return err
 	}
 	canonicalIP, _ := CanonicalClientIP(clientIP)
 	m.Put(ctx, sessionKey, sessionData{
-		User:      u,
-		CreatedAt: time.Now(),
-		ClientIP:  canonicalIP,
+		User:              u,
+		CreatedAt:         time.Now(),
+		ClientIP:          canonicalIP,
+		LoginPasswordHash: loginPasswordHash,
 	})
 	return nil
 }
@@ -183,6 +194,24 @@ func (m *Manager) UserFromContext(ctx context.Context) (*types.User, bool) {
 		return sess.User, true
 	}
 	return nil, false
+}
+
+// PasswordHashFromContext returns the salted sha512_crypt hash of the
+// authenticated user's login password stored at login time. It never exposes a
+// cleartext password — only the /etc/shadow compatible digest that VDI creation
+// embeds in the cloud-init seed. ok is false when there is no authenticated
+// session or the session predates hash storage (forcing a fresh login).
+func (m *Manager) PasswordHashFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	if sess, ok := m.Get(ctx, sessionKey).(sessionData); ok && sess.User != nil && sess.LoginPasswordHash != "" {
+		return sess.LoginPasswordHash, true
+	}
+	if sess, ok := ctx.Value(sessionContextKey{}).(sessionData); ok && sess.User != nil && sess.LoginPasswordHash != "" {
+		return sess.LoginPasswordHash, true
+	}
+	return "", false
 }
 
 func (m *Manager) getSessionFromUserName(username string) (sessionData, bool) {

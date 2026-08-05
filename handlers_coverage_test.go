@@ -399,46 +399,6 @@ func TestValidateLoginUsername(t *testing.T) {
 	}
 }
 
-func TestValidateGuestPassword(t *testing.T) {
-	tests := []struct {
-		name    string
-		raw     string
-		confirm string
-		want    string
-		wantErr bool
-	}{
-		{"empty is required", "", "", "", true},
-		{"confirm empty", "hunter2", "", "", true},
-		{"simple match", "hunter2", "hunter2", "hunter2", false},
-		{"mismatch", "hunter2", "hunter3", "", true},
-		{"spaces preserved", "  pass word  ", "  pass word  ", "  pass word  ", false},
-		{"whitespace mismatch", " pass ", "pass", "", true},
-		{"symbols allowed", "P@ss-w0rd!#$", "P@ss-w0rd!#$", "P@ss-w0rd!#$", false},
-		{"max length", strings.Repeat("a", 128), strings.Repeat("a", 128), strings.Repeat("a", 128), false},
-		{"too long", strings.Repeat("a", 129), strings.Repeat("a", 129), "", true},
-		{"newline rejected", "pass\nword", "pass\nword", "", true},
-		{"tab rejected", "pass\tword", "pass\tword", "", true},
-		{"del rejected", "pass\x7fword", "pass\x7fword", "", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := validateGuestPassword(tc.raw, tc.confirm)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q/%q", tc.raw, tc.confirm)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error for %q/%q: %v", tc.raw, tc.confirm, err)
-			}
-			if got != tc.want {
-				t.Fatalf("expected %q, got %q", tc.want, got)
-			}
-		})
-	}
-}
-
 func TestParseDashboardVMName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -942,11 +902,14 @@ func TestDashboardPostInvalidVMName(t *testing.T) {
 	}
 }
 
-func TestDashboardPostMissingPassword(t *testing.T) {
+// TestDashboardPostMissingSessionPasswordHash covers sessions without a stored
+// login password hash (e.g. sessions created before hash storage was added):
+// VDI creation cannot seed the guest account, so the user must log in again.
+func TestDashboardPostMissingSessionPasswordHash(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
 	router := getRemoteGatewayRotuer(sm, settings)
-	cookie := issueSessionCookie(t, sm, "alice")
+	cookie := issueSessionCookieWithHash(t, sm, "alice", "192.0.2.1:12345", "")
 
 	form := url.Values{
 		"vm_name": {"my-vm"},
@@ -958,31 +921,15 @@ func TestDashboardPostMissingPassword(t *testing.T) {
 	req.AddCookie(cookie)
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
 	}
-}
-
-func TestDashboardPostPasswordMismatch(t *testing.T) {
-	sm := session.NewManager()
-	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
-	cookie := issueSessionCookie(t, sm, "alice")
-
-	form := url.Values{
-		"vm_name":             {"my-vm"},
-		"vm_password":         {"secret-one"},
-		"vm_password_confirm": {"secret-two"},
+	var resp dashboard.ActionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	setSameOriginHeader(req)
-	req.AddCookie(cookie)
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	if !strings.Contains(resp.Error, "Log out and log in again") {
+		t.Fatalf("expected re-login guidance, got %q", resp.Error)
 	}
 }
 

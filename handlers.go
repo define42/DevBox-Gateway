@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"devboxgateway/internal/config"
+	"devboxgateway/internal/hash"
 	"devboxgateway/internal/ldap"
 	"devboxgateway/internal/localauth"
 	"devboxgateway/internal/session"
@@ -40,9 +41,6 @@ const (
 	maxVMNameFieldLen = 128
 	// maxGuestUsernameLength matches the conventional Linux useradd limit.
 	maxGuestUsernameLength = 32
-	// maxGuestPasswordLength bounds the optional guest account password set at
-	// VM creation time.
-	maxGuestPasswordLength = 128
 	maxLoginUsernameLength = vmname.MaxUsernameLength
 )
 
@@ -127,7 +125,7 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 		}
 
 		loginLimiter.RecordSuccess(username, r.RemoteAddr)
-		completeLogin(sessionManager, w, r, user)
+		completeLogin(sessionManager, w, r, user, password)
 	}
 }
 
@@ -163,9 +161,19 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 	return ldap.AuthenticateAccess(username, password, settings)
 }
 
-func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User) {
-	if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
-		log.Printf("session create failed for %s: %v", user.GetName(), err)
+// completeLogin establishes the authenticated session for a user whose
+// credentials have just been verified. The password is digested right away so
+// only its salted sha512_crypt hash outlives this request: the hash is stored
+// in the in-memory session and later seeds the guest account when the user
+// creates a VDI; the cleartext is never retained. Hashing and session creation
+// share one failure path — both are server-side errors that abort the login.
+func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
+	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
+	if err == nil {
+		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
+	}
+	if err != nil {
+		log.Printf("login completion failed for %s: %v", user.GetName(), err)
 		serveLogin(w, "Login failed.")
 		return
 	}
@@ -463,13 +471,16 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 
 // createVMInput holds the validated dashboard create-VM form fields. CPU and
 // memory are deliberately absent: VM resources are operator-defined only
-// (VM_VCPU_COUNT / VM_MEMORY_MIB) and never accepted from the form.
+// (VM_VCPU_COUNT / VM_MEMORY_MIB) and never accepted from the form. The guest
+// password is not a form field either: the guest account is provisioned with
+// the salted sha512_crypt hash of the user's own gateway login password,
+// captured at login and held in the in-memory session (never in cleartext).
 type createVMInput struct {
-	name          string
-	user          *types.User
-	guestUsername string
-	guestPassword string
-	baseImage     string
+	name              string
+	user              *types.User
+	guestUsername     string
+	guestPasswordHash string
+	baseImage         string
 }
 
 // parseCreateVMInput validates and collects the create-VM form fields. It writes
@@ -501,8 +512,17 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	if handleDashboardFormError(w, "dashboard create", err) {
 		return createVMInput{}, false
 	}
-	guestPassword, err := validateGuestPassword(req.FormValue("vm_password"), req.FormValue("vm_password_confirm"))
-	if handleDashboardFormError(w, "dashboard create", err) {
+	// The guest account password is the user's own gateway login password. Only
+	// its salted sha512_crypt hash was kept (in the session, at login), so that
+	// digest — never a cleartext password — is what flows into the VM seed. A
+	// session without a stored hash (e.g. created before a gateway upgrade)
+	// cannot provision a guest account, so ask for a fresh login.
+	guestPasswordHash, ok := sessionManager.PasswordHashFromContext(req.Context())
+	if !ok {
+		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
+			OK:    false,
+			Error: "Your session is missing the credentials needed to create a DevBox. Log out and log in again.",
+		})
 		return createVMInput{}, false
 	}
 	baseImage, err := validateBaseImage(req.FormValue("vm_base_image"), settings)
@@ -511,11 +531,11 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	}
 
 	return createVMInput{
-		name:          name,
-		user:          user,
-		guestUsername: guestUsername,
-		guestPassword: guestPassword,
-		baseImage:     baseImage,
+		name:              name,
+		user:              user,
+		guestUsername:     guestUsername,
+		guestPasswordHash: guestPasswordHash,
+		baseImage:         baseImage,
 	}, true
 }
 
@@ -527,7 +547,7 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			return
 		}
 
-		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, input.baseImage, settings)
+		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPasswordHash, input.baseImage, settings)
 		if errors.Is(err, virt.ErrVMAlreadyExists) {
 			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
 				OK:    false,
@@ -695,28 +715,6 @@ func validateGuestUsername(raw, fallback string) (string, error) {
 		default:
 			return "", fmt.Errorf("username must start with a lowercase letter or underscore and use only lowercase letters, numbers, hyphens, or underscores")
 		}
-	}
-	return raw, nil
-}
-
-// validateGuestPassword validates the mandatory guest account password set at VM
-// creation. The password must be supplied twice (raw and confirm) and the two
-// values must match. The raw value is intentionally not trimmed because
-// surrounding whitespace can be a meaningful part of a password.
-func validateGuestPassword(raw, confirm string) (string, error) {
-	if raw == "" {
-		return "", fmt.Errorf("password is required")
-	}
-	if len(raw) > maxGuestPasswordLength {
-		return "", fmt.Errorf("password must be %d characters or fewer", maxGuestPasswordLength)
-	}
-	for _, r := range raw {
-		if r < 0x20 || r == 0x7f {
-			return "", fmt.Errorf("password must not contain control characters")
-		}
-	}
-	if raw != confirm {
-		return "", fmt.Errorf("passwords do not match")
 	}
 	return raw, nil
 }

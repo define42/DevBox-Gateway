@@ -64,18 +64,23 @@ func TestVbtcovBootNewVMEarlyValidation(t *testing.T) {
 	user := vbtcovNewUser(t, "cvbtvaliduser")
 
 	t.Run("nil owner", func(t *testing.T) {
-		_, err := BootNewVM("vm", nil, "", testGuestPassword, "img.img", nil)
+		_, err := BootNewVM("vm", nil, "", testGuestPasswordHash, "img.img", nil)
 		vbtcovRequireErrContains(t, err, "vm owner is required", "BootNewVM without owner")
 	})
 
 	t.Run("invalid hostname", func(t *testing.T) {
-		_, err := BootNewVM("Bad_Name!", user, "", testGuestPassword, "img.img", nil)
+		_, err := BootNewVM("Bad_Name!", user, "", testGuestPasswordHash, "img.img", nil)
 		vbtcovRequireErrContains(t, err, "vm name", "BootNewVM with invalid hostname")
 	})
 
-	t.Run("missing guest password", func(t *testing.T) {
+	t.Run("missing guest password hash", func(t *testing.T) {
 		_, err := BootNewVM("goodname", user, "", "", "img.img", nil)
-		vbtcovRequireErrContains(t, err, "guest password is required", "BootNewVM without guest password")
+		vbtcovRequireErrContains(t, err, "guest password hash is required", "BootNewVM without guest password hash")
+	})
+
+	t.Run("cleartext guest password rejected", func(t *testing.T) {
+		_, err := BootNewVM("goodname", user, "", "not-a-hash", "img.img", nil)
+		vbtcovRequireErrContains(t, err, "sha512_crypt", "BootNewVM with cleartext guest password")
 	})
 }
 
@@ -86,7 +91,7 @@ func TestVbtcovBootNewVMStoragePoolFailure(t *testing.T) {
 
 	// All request validation and base-image resolution succeed; the boot then
 	// fails while ensuring the storage pool, before any domain is defined.
-	_, err := BootNewVM("poolfail", user, "", testGuestPassword, imageName, settings)
+	_, err := BootNewVM("poolfail", user, "", testGuestPasswordHash, imageName, settings)
 	vbtcovRequireErrContains(t, err, "failed to ensure storage pool", "BootNewVM with file-blocked pool path")
 }
 
@@ -202,26 +207,31 @@ func TestVbtcovEnsureVMNameAvailableLookupFailure(t *testing.T) {
 func TestVbtcovResolveGuestCredentials(t *testing.T) {
 	user := vbtcovNewUser(t, "cvbtcreduser")
 
-	t.Run("missing password", func(t *testing.T) {
+	t.Run("missing password hash", func(t *testing.T) {
 		_, _, err := resolveGuestCredentials(user, "guest", "")
-		vbtcovRequireErrContains(t, err, "guest password is required", "resolveGuestCredentials without password")
+		vbtcovRequireErrContains(t, err, "guest password hash is required", "resolveGuestCredentials without password hash")
+	})
+
+	t.Run("cleartext password rejected", func(t *testing.T) {
+		_, _, err := resolveGuestCredentials(user, "guest", "GuestPass1!")
+		vbtcovRequireErrContains(t, err, "sha512_crypt", "resolveGuestCredentials with cleartext password")
 	})
 
 	t.Run("blank guest username falls back to owner", func(t *testing.T) {
-		name, hash, err := resolveGuestCredentials(user, "   ", testGuestPassword)
+		name, hash, err := resolveGuestCredentials(user, "   ", testGuestPasswordHash)
 		if err != nil {
 			t.Fatalf("resolveGuestCredentials: %v", err)
 		}
 		if name != user.GetName() {
 			t.Fatalf("guest username = %q, want owner %q", name, user.GetName())
 		}
-		if hash == "" {
-			t.Fatal("expected non-empty password hash")
+		if hash != testGuestPasswordHash {
+			t.Fatalf("expected the pre-computed hash to pass through unchanged, got %q", hash)
 		}
 	})
 
 	t.Run("explicit guest username preserved", func(t *testing.T) {
-		name, _, err := resolveGuestCredentials(user, "cvbtguest", testGuestPassword)
+		name, _, err := resolveGuestCredentials(user, "cvbtguest", testGuestPasswordHash)
 		if err != nil {
 			t.Fatalf("resolveGuestCredentials: %v", err)
 		}

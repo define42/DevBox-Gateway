@@ -63,7 +63,7 @@ func issueUserSession(t *testing.T, sessionManager *session.Manager, username, r
 	req.RemoteAddr = remoteAddr
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
+		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, ""); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 		for _, vm := range grantVMs {

@@ -13,6 +13,10 @@ import (
 
 const testSessionRemoteAddr = "192.0.2.10:12345"
 
+// testLoginPasswordHash is a salted sha512_crypt digest like the one computed
+// from the login password at login time (this one hashes "GuestPass1!").
+const testLoginPasswordHash = "$6$WJFY1R5pSUjLUS/I$UhK5RfTTXlJCeMqs0kxS6YUm1Bw3DY2IiEMdP7gitriP0NPsTGVvcYyGiSEqML/CVCQ1yqChTcUb5UGM77arQ/"
+
 func issueSession(t *testing.T, m *Manager, user *types.User, remoteAddr string) *http.Cookie {
 	t.Helper()
 
@@ -21,7 +25,7 @@ func issueSession(t *testing.T, m *Manager, user *types.User, remoteAddr string)
 	req.RemoteAddr = remoteAddr
 
 	handler := m.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := m.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
+		if err := m.CreateSession(r.Context(), user, r.RemoteAddr, testLoginPasswordHash); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)
@@ -119,6 +123,86 @@ func TestUserFromContextNoSession(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	handler.ServeHTTP(rec, req)
+}
+
+func TestPasswordHashFromContext(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("alice")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	sessionCookie := issueSession(t, m, user, testSessionRemoteAddr)
+
+	withLoadedSession(t, m, testSessionRemoteAddr, sessionCookie, func(r *http.Request) {
+		got, ok := m.PasswordHashFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected the login password hash to be available")
+		}
+		if got != testLoginPasswordHash {
+			t.Fatalf("expected hash %q, got %q", testLoginPasswordHash, got)
+		}
+	})
+}
+
+func TestPasswordHashFromContextNilAndMissing(t *testing.T) {
+	m := NewManager()
+
+	//nolint:staticcheck // testing nil context behavior
+	if _, ok := m.PasswordHashFromContext(nil); ok {
+		t.Fatal("expected ok=false for nil context")
+	}
+
+	// A loaded but unauthenticated session has no hash.
+	withLoadedSession(t, m, testSessionRemoteAddr, nil, func(r *http.Request) {
+		if _, ok := m.PasswordHashFromContext(r.Context()); ok {
+			t.Fatal("expected ok=false without an authenticated session")
+		}
+	})
+}
+
+// TestPasswordHashFromContextEmptyHash covers sessions created without a stored
+// login password hash (e.g. sessions that predate hash storage): they must
+// report no hash so VDI creation forces a fresh login.
+func TestPasswordHashFromContextEmptyHash(t *testing.T) {
+	m := NewManager()
+
+	user, err := types.NewUser("legacy")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+
+	var cookie *http.Cookie
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = testSessionRemoteAddr
+	handler := m.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := m.CreateSession(r.Context(), user, r.RemoteAddr, ""); err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	handler.ServeHTTP(rec, req)
+	res := rec.Result()
+	defer func() { _ = res.Body.Close() }()
+	for _, c := range res.Cookies() {
+		if c.Name == "cv_session" {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("session cookie not set")
+	}
+
+	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+		if _, ok := m.UserFromContext(r.Context()); !ok {
+			t.Fatal("expected the session itself to remain valid")
+		}
+		if _, ok := m.PasswordHashFromContext(r.Context()); ok {
+			t.Fatal("expected ok=false for a session without a stored hash")
+		}
+	})
 }
 
 func TestGetSessionFromUserName(t *testing.T) {

@@ -37,7 +37,7 @@ func covxSessionCookie(t *testing.T, manager *session.Manager, username string) 
 	req.RemoteAddr = "192.0.2.55:12345"
 
 	handler := manager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := manager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
+		if err := manager.CreateSession(r.Context(), user, r.RemoteAddr, ""); err != nil {
 			t.Errorf("create session: %v", err)
 		}
 		w.WriteHeader(http.StatusOK)

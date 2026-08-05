@@ -164,10 +164,8 @@ func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.SettingsType
 
 func hcovCreateForm(shortName, baseImage string) url.Values {
 	return url.Values{
-		"vm_name":             {shortName},
-		"vm_password":         {"Secret1!"},
-		"vm_password_confirm": {"Secret1!"},
-		"vm_base_image":       {baseImage},
+		"vm_name":       {shortName},
+		"vm_base_image": {baseImage},
 	}
 }
 
@@ -436,7 +434,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.AddCookie(cookie)
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user)
+		completeLogin(sessionManager, w, r, user, "hcovpass")
 	}))
 	handler.ServeHTTP(rec, req)
 
@@ -754,7 +752,6 @@ func TestHcovDashboardCreateFormValidationErrors(t *testing.T) {
 	}{
 		{"invalid vm name", "vm_name", "BAD NAME", "vm name"},
 		{"invalid guest username", "vm_username", "Bad User", "username must"},
-		{"password mismatch", "vm_password_confirm", "Other1!", "passwords do not match"},
 		{"missing base image", "vm_base_image", "", "base image is required"},
 		{"unknown base image", "vm_base_image", "../hcov-base.img", "not available"},
 	}

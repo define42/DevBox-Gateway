@@ -223,6 +223,24 @@ func TestCovxUserFromContextContextKeyFallback(t *testing.T) {
 	})
 }
 
+func TestCovxPasswordHashFromContextContextKeyFallback(t *testing.T) {
+	m := NewManager()
+	user := covxUser(t, "nora")
+
+	withLoadedSession(t, m, covxRemoteAddr, nil, func(r *http.Request) {
+		ctx := context.WithValue(r.Context(), sessionContextKey{}, sessionData{User: user, LoginPasswordHash: testLoginPasswordHash})
+		got, ok := m.PasswordHashFromContext(ctx)
+		if !ok || got != testLoginPasswordHash {
+			t.Fatalf("expected the context-key fallback hash, got ok=%v hash=%q", ok, got)
+		}
+
+		emptyCtx := context.WithValue(r.Context(), sessionContextKey{}, sessionData{User: user})
+		if _, ok := m.PasswordHashFromContext(emptyCtx); ok {
+			t.Fatal("expected ok=false when the fallback session has no stored hash")
+		}
+	})
+}
+
 func TestCovxCreateSessionRenewTokenError(t *testing.T) {
 	m := NewManager()
 	user := covxUser(t, "lena")
@@ -231,7 +249,7 @@ func TestCovxCreateSessionRenewTokenError(t *testing.T) {
 
 	var createErr error
 	withLoadedSession(t, m, covxRemoteAddr, cookie, func(r *http.Request) {
-		createErr = m.CreateSession(r.Context(), user, r.RemoteAddr)
+		createErr = m.CreateSession(r.Context(), user, r.RemoteAddr, testLoginPasswordHash)
 	})
 	if createErr == nil {
 		t.Fatal("expected CreateSession to fail when the old token cannot be deleted")
