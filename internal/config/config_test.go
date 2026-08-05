@@ -77,6 +77,56 @@ func TestMaxVDIPerUserNilSettings(t *testing.T) {
 	}
 }
 
+func TestVMVCPUCount(t *testing.T) {
+	if got := VMVCPUCount(nil); got != DefaultVMVCPUCount {
+		t.Fatalf("expected default vcpu count %d for nil settings, got %d", DefaultVMVCPUCount, got)
+	}
+
+	s := NewSettingType(false)
+	if got := VMVCPUCount(s); got != DefaultVMVCPUCount {
+		t.Fatalf("expected default vcpu count %d, got %d", DefaultVMVCPUCount, got)
+	}
+
+	if err := s.OverwriteForTestInt(VM_VCPU_COUNT, 2); err != nil {
+		t.Fatalf("overwrite VM_VCPU_COUNT: %v", err)
+	}
+	if got := VMVCPUCount(s); got != 2 {
+		t.Fatalf("expected configured vcpu count 2, got %d", got)
+	}
+
+	if err := s.OverwriteForTestInt(VM_VCPU_COUNT, 0); err != nil {
+		t.Fatalf("overwrite VM_VCPU_COUNT: %v", err)
+	}
+	if got := VMVCPUCount(s); got != DefaultVMVCPUCount {
+		t.Fatalf("expected non-positive vcpu count to fall back to %d, got %d", DefaultVMVCPUCount, got)
+	}
+}
+
+func TestVMMemoryMiB(t *testing.T) {
+	if got := VMMemoryMiB(nil); got != DefaultVMMemoryMiB {
+		t.Fatalf("expected default memory %d for nil settings, got %d", DefaultVMMemoryMiB, got)
+	}
+
+	s := NewSettingType(false)
+	if got := VMMemoryMiB(s); got != DefaultVMMemoryMiB {
+		t.Fatalf("expected default memory %d, got %d", DefaultVMMemoryMiB, got)
+	}
+
+	if err := s.OverwriteForTestInt(VM_MEMORY_MIB, 8192); err != nil {
+		t.Fatalf("overwrite VM_MEMORY_MIB: %v", err)
+	}
+	if got := VMMemoryMiB(s); got != 8192 {
+		t.Fatalf("expected configured memory 8192, got %d", got)
+	}
+
+	if err := s.OverwriteForTestInt(VM_MEMORY_MIB, -1); err != nil {
+		t.Fatalf("overwrite VM_MEMORY_MIB: %v", err)
+	}
+	if got := VMMemoryMiB(s); got != DefaultVMMemoryMiB {
+		t.Fatalf("expected non-positive memory to fall back to %d, got %d", DefaultVMMemoryMiB, got)
+	}
+}
+
 func TestDerivedDataPathsDefault(t *testing.T) {
 	s := NewSettingType(false)
 

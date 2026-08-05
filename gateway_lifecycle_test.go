@@ -251,12 +251,9 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 	}, http.StatusOK)
 	waitForGatewayVMState(t, server, fullName, "shut off")
 
-	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/resources", url.Values{
-		"vm_name":       {fullName},
-		"vm_vcpu":       {"1"},
-		"vm_memory_mib": {"8192"},
-	}, http.StatusOK)
-	waitForGatewayVMResources(t, server, fullName, 1, 8192)
+	// VM resources are operator-defined only, so the created VM must carry the
+	// config-resolved vCPU count and memory.
+	waitForGatewayVMResources(t, server, fullName, config.VMVCPUCount(settings), config.VMMemoryMiB(settings))
 
 	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/start", url.Values{
 		"vm_name": {fullName},

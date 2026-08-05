@@ -52,7 +52,8 @@ else is treated as an RDP X.224 Connection Request.
 
 - **RDP-over-TLS reverse proxy** with SNI-based backend routing.
 - **HTTPS dashboard** for self-service VM lifecycle management (create, start,
-  restart, shutdown, remove, resize CPU/RAM).
+  restart, shutdown, remove). VM CPU and RAM are fixed by the gateway
+  configuration (`VM_VCPU_COUNT` / `VM_MEMORY_MIB`), not chosen by users.
 - **In-browser consoles**: serial console and noVNC streamed over WebSocket.
 - **LDAP authentication** with optional StartTLS and optional certificate
   verification.
@@ -264,9 +265,10 @@ Sign in with the seeded test account:
 
 A successful login redirects to `/api/dashboard`, where you can:
 
-- Create a new VM (name, base image, vCPU count, memory).
+- Create a new VM (name, base image, guest username and password). Every VM
+  gets the operator-configured CPU and memory (`VM_VCPU_COUNT` /
+  `VM_MEMORY_MIB`); users cannot pick or change them.
 - Start / restart / shutdown / remove existing VMs that you own.
-- Update CPU and memory allocation.
 - Open a serial console or noVNC session in the browser.
 - Download an `.rdp` file (named after the VM, e.g. `alice-desktop.rdp`)
   preconfigured for the gateway.
@@ -337,6 +339,8 @@ file**, which keeps container and development overrides working.
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable base VDI images (`.img`, `.qcow2`, `.raw`). Users pick one per VM in the dashboard. The gateway refuses to start if it is empty. |
 | `MAX_VDI_PER_USER`        | `10`                                                                                                             | Maximum number of VDIs (VMs) each user may own at once. Creating another VM is refused once the user owns this many. Set `<=0` to disable the per-user limit. |
+| `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
+| `VM_MEMORY_MIB`           | `4096`                                                                                                           | Memory in MiB assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | LDAP server URL.                                                                                  |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |

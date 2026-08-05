@@ -25,9 +25,6 @@ func TestViocovConnectErrorsSurfaceFromHelpers(t *testing.T) {
 	if err := RestartVM("cvio-any"); err == nil {
 		t.Fatal("RestartVM: expected connect error")
 	}
-	if err := UpdateVMResources("cvio-any", 1, 128); err == nil {
-		t.Fatal("UpdateVMResources: expected connect error")
-	}
 	if _, _, err := VMOwner("cvio-any"); err == nil {
 		t.Fatal("VMOwner: expected connect error")
 	}
@@ -42,64 +39,17 @@ func TestViocovConnectErrorsSurfaceFromHelpers(t *testing.T) {
 	}
 }
 
-func TestViocovPowerAndResourcesMissingDomain(t *testing.T) {
+func TestViocovPowerMissingDomain(t *testing.T) {
 	name := viocovUniqueName("absent")
 	ops := map[string]func(string) error{
-		"start":     StartExistingVM,
-		"shutdown":  ShutdownVM,
-		"restart":   RestartVM,
-		"resources": func(n string) error { return UpdateVMResources(n, 1, 128) },
+		"start":    StartExistingVM,
+		"shutdown": ShutdownVM,
+		"restart":  RestartVM,
 	}
 	for op, fn := range ops {
 		if err := fn(name); err == nil || !strings.Contains(err.Error(), "lookup domain") {
 			t.Fatalf("%s: expected lookup failure for missing domain, got %v", op, err)
 		}
-	}
-}
-
-func TestViocovUpdateVMResourcesRejectsInvalidValues(t *testing.T) {
-	if err := UpdateVMResources("cvio-any", 0, 128); err == nil {
-		t.Fatal("expected error for non-positive vcpu count")
-	}
-	if err := UpdateVMResources("cvio-any", 1, 0); err == nil {
-		t.Fatal("expected error for non-positive memory size")
-	}
-}
-
-func TestViocovUpdateVMResourcesOnInactiveDomain(t *testing.T) {
-	conn := newTestLibvirtConn(t)
-	name := viocovUniqueName("resources")
-	dom := viocovDefineDomain(t, conn, name, "")
-
-	// Raising vcpus above the configured maximum takes the raise-maximum branch.
-	if err := UpdateVMResources(name, 2, 256); err != nil {
-		t.Fatalf("raise resources: %v", err)
-	}
-	maxVcpus, err := dom.GetVcpusFlags(libvirt.DOMAIN_VCPU_MAXIMUM | libvirt.DOMAIN_VCPU_CONFIG)
-	if err != nil {
-		t.Fatalf("get max vcpus: %v", err)
-	}
-	if maxVcpus != 2 {
-		t.Fatalf("expected max vcpus 2, got %d", maxVcpus)
-	}
-
-	// Lowering the count below the maximum skips the raise-maximum branch.
-	if err := UpdateVMResources(name, 1, 256); err != nil {
-		t.Fatalf("lower resources: %v", err)
-	}
-	current, err := dom.GetVcpusFlags(libvirt.DOMAIN_VCPU_CONFIG)
-	if err != nil {
-		t.Fatalf("get current vcpus: %v", err)
-	}
-	if current != 1 {
-		t.Fatalf("expected current vcpus 1, got %d", current)
-	}
-	maxMemory, err := dom.GetMaxMemory()
-	if err != nil {
-		t.Fatalf("get max memory: %v", err)
-	}
-	if maxMemory != 256*1024 {
-		t.Fatalf("expected max memory 262144 KiB, got %d", maxMemory)
 	}
 }
 
@@ -128,9 +78,6 @@ func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 
 	if err := StartExistingVM(name); err != nil {
 		t.Fatalf("StartExistingVM on active domain: %v", err)
-	}
-	if err := UpdateVMResources(name, 1, 128); err == nil || !strings.Contains(err.Error(), "must be stopped") {
-		t.Fatalf("expected running domain to reject resource update, got %v", err)
 	}
 	if err := RestartVM(name); err != nil {
 		t.Fatalf("RestartVM on active domain: %v", err)

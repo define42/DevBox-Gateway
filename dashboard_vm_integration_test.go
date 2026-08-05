@@ -65,7 +65,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 		t.Fatalf("create user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(vmShortName, user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := virt.BootNewVM(vmShortName, user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("boot VM %s: %v", vmShortName, err)
 	}
@@ -78,7 +78,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 	return username, vmName
 }
 
-func assertDashboardVMRow(t *testing.T, row dashboard.VM, wantDisplayName string) {
+func assertDashboardVMRow(t *testing.T, settings *config.SettingsType, row dashboard.VM, wantDisplayName string) {
 	t.Helper()
 
 	if row.DisplayName != wantDisplayName {
@@ -87,11 +87,13 @@ func assertDashboardVMRow(t *testing.T, row dashboard.VM, wantDisplayName string
 	if row.State != "running" {
 		t.Fatalf("expected state running, got %q", row.State)
 	}
-	if row.MemoryMiB != 4096 {
-		t.Fatalf("expected memory 4096 MiB, got %d", row.MemoryMiB)
+	// Resources are operator-defined only, so the row must carry the
+	// config-resolved memory and vCPU count.
+	if want := config.VMMemoryMiB(settings); row.MemoryMiB != want {
+		t.Fatalf("expected memory %d MiB, got %d", want, row.MemoryMiB)
 	}
-	if row.VCPU != 2 {
-		t.Fatalf("expected vCPU 2, got %d", row.VCPU)
+	if want := config.VMVCPUCount(settings); row.VCPU != want {
+		t.Fatalf("expected vCPU %d, got %d", want, row.VCPU)
 	}
 	if row.VolumeGB != config.DefaultVMDiskSizeGB {
 		t.Fatalf("expected disk %d GB, got %d", config.DefaultVMDiskSizeGB, row.VolumeGB)
@@ -124,7 +126,7 @@ func TestListDashboardVMs(t *testing.T) {
 	wantDisplayName := vmname.BareHostname(vmName, username)
 	wantConnectHost := hash.RoutingLabel([]byte(settings.Get(config.SNI_HASH_SECRET)), vmName) + ".dashboard.test"
 
-	assertDashboardVMRow(t, row, wantDisplayName)
+	assertDashboardVMRow(t, settings, row, wantDisplayName)
 
 	// The .rdp now comes from the explicit Connect download, not an inline field,
 	// so assert the file the user would actually receive for their owned VM.

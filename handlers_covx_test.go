@@ -165,8 +165,6 @@ func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.SettingsType
 func hcovCreateForm(shortName, baseImage string) url.Values {
 	return url.Values{
 		"vm_name":             {shortName},
-		"vm_vcpu":             {"2"},
-		"vm_memory_mib":       {"4096"},
 		"vm_password":         {"Secret1!"},
 		"vm_password_confirm": {"Secret1!"},
 		"vm_base_image":       {baseImage},
@@ -580,7 +578,7 @@ func TestHcovDashboardRoutesRequireLoginWithoutSessionMiddleware(t *testing.T) {
 		t.Fatalf("expected unauthorized body, got %q", rec.Body.String())
 	}
 
-	createForm := url.Values{"vm_name": {"hcovvm"}, "vm_vcpu": {"2"}, "vm_memory_mib": {"4096"}}
+	createForm := url.Values{"vm_name": {"hcovvm"}}
 	rec = hcovPostForm(t, router, nil, "/api/dashboard", createForm)
 	hcovAssertAction(t, rec, http.StatusUnauthorized, "Login required.")
 
@@ -652,36 +650,10 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	}
 }
 
-func TestHcovDashboardResourcesValidationAndUpdate(t *testing.T) {
-	user := hcovUniqueName("hcovres")
-	domainName := user + vmname.Separator + "box"
-	hcovDefineOwnedDomain(t, domainName, user)
-
-	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
-	cookie := issueSessionCookie(t, sessionManager, user)
-
-	rec := hcovPostForm(t, router, cookie, "/api/dashboard/resources", url.Values{"vm_name": {""}})
-	hcovAssertAction(t, rec, http.StatusBadRequest, "vm name is required")
-
-	rec = hcovPostForm(t, router, cookie, "/api/dashboard/resources",
-		url.Values{"vm_name": {domainName}, "vm_vcpu": {"abc"}, "vm_memory_mib": {"4096"}})
-	hcovAssertAction(t, rec, http.StatusBadRequest, "cpu selection is invalid")
-
-	rec = hcovPostForm(t, router, cookie, "/api/dashboard/resources",
-		url.Values{"vm_name": {domainName}, "vm_vcpu": {"2"}, "vm_memory_mib": {"abc"}})
-	hcovAssertAction(t, rec, http.StatusBadRequest, "memory selection is invalid")
-
-	rec = hcovPostForm(t, router, cookie, "/api/dashboard/resources",
-		url.Values{"vm_name": {domainName}, "vm_vcpu": {"2"}, "vm_memory_mib": {"4096"}})
-	hcovAssertAction(t, rec, http.StatusOK, "VM resources updated.")
-}
-
-// TestHcovDashboardStartThenResourcesRejectedWhileRunning starts the owned TCG
-// domain through the dashboard action route (it idles in firmware with no
-// disk), verifies resource updates are refused while it runs, and force-stops
+// TestHcovDashboardStartThenShutdown starts the owned TCG domain through the
+// dashboard action route (it idles in firmware with no disk) and force-stops
 // it through the shutdown route.
-func TestHcovDashboardStartThenResourcesRejectedWhileRunning(t *testing.T) {
+func TestHcovDashboardStartThenShutdown(t *testing.T) {
 	user := hcovUniqueName("hcovrun")
 	domainName := user + vmname.Separator + "run"
 	hcovDefineOwnedDomain(t, domainName, user)
@@ -696,10 +668,6 @@ func TestHcovDashboardStartThenResourcesRejectedWhileRunning(t *testing.T) {
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/start", nameForm)
 	hcovAssertAction(t, rec, http.StatusOK, "VM start requested.")
-
-	rec = hcovPostForm(t, router, cookie, "/api/dashboard/resources",
-		url.Values{"vm_name": {domainName}, "vm_vcpu": {"2"}, "vm_memory_mib": {"4096"}})
-	hcovAssertAction(t, rec, http.StatusBadRequest, "stopped")
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/shutdown", nameForm)
 	hcovAssertAction(t, rec, http.StatusOK, "VM shutdown requested.")
@@ -785,8 +753,6 @@ func TestHcovDashboardCreateFormValidationErrors(t *testing.T) {
 		want  string
 	}{
 		{"invalid vm name", "vm_name", "BAD NAME", "vm name"},
-		{"unsupported vcpu", "vm_vcpu", "3", "cpu selection"},
-		{"unsupported memory", "vm_memory_mib", "123", "memory selection"},
 		{"invalid guest username", "vm_username", "Bad User", "username must"},
 		{"password mismatch", "vm_password_confirm", "Other1!", "passwords do not match"},
 		{"missing base image", "vm_base_image", "", "base image is required"},

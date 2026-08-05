@@ -326,7 +326,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	user := newBootTestUser(t, "recreateuser")
 	shortName := "recreate-vm"
 
-	vmName, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -336,10 +336,20 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 
 	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
 	firstUUID := lookupDomainUUID(t, conn, vmName)
+	wantVCPU := config.VMVCPUCount(settings)
+	wantMemoryMiB := config.VMMemoryMiB(settings)
 
 	// Creating again with the same name must be refused (no silent recreate) so
 	// the existing VM is preserved; the user is expected to delete it first.
-	if _, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings, 4, 8192); !errors.Is(err, ErrVMAlreadyExists) {
+	// Change the configured resources first so the resource check below proves
+	// the refused create did not touch the existing VM.
+	if err := settings.OverwriteForTestInt(config.VM_VCPU_COUNT, wantVCPU+1); err != nil {
+		t.Fatalf("overwrite VM_VCPU_COUNT: %v", err)
+	}
+	if err := settings.OverwriteForTestInt(config.VM_MEMORY_MIB, wantMemoryMiB*2); err != nil {
+		t.Fatalf("overwrite VM_MEMORY_MIB: %v", err)
+	}
+	if _, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings); !errors.Is(err, ErrVMAlreadyExists) {
 		t.Fatalf("expected ErrVMAlreadyExists on duplicate create, got %v", err)
 	}
 
@@ -357,8 +367,8 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	if vm.State != "running" {
 		t.Fatalf("expected existing VM to still be running, got %q", vm.State)
 	}
-	if vm.VCPU != 2 || vm.MemoryMiB != 4096 {
-		t.Fatalf("expected existing VM resources unchanged (2 vcpu / 4096 MiB), got %d vcpu / %d MiB", vm.VCPU, vm.MemoryMiB)
+	if vm.VCPU != wantVCPU || vm.MemoryMiB != wantMemoryMiB {
+		t.Fatalf("expected existing VM resources unchanged (%d vcpu / %d MiB), got %d vcpu / %d MiB", wantVCPU, wantMemoryMiB, vm.VCPU, vm.MemoryMiB)
 	}
 }
 
@@ -372,7 +382,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}
 
-	firstVM, err := BootNewVM("limit-vm-a", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	firstVM, err := BootNewVM("limit-vm-a", user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -383,7 +393,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 
 	// The user now owns as many VDIs as the limit allows, so creating another VM
 	// (under a fresh name) must be refused.
-	if _, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096); !errors.Is(err, ErrVMLimitReached) {
+	if _, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings); !errors.Is(err, ErrVMLimitReached) {
 		t.Fatalf("expected ErrVMLimitReached on create beyond limit, got %v", err)
 	}
 
@@ -414,7 +424,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, 2); err != nil {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}
-	secondVM, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	secondVM, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM within raised limit: %v", err)
 	}
@@ -434,7 +444,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("metadata-vm", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := BootNewVM("metadata-vm", user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -491,7 +501,7 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	}
 	// The image library under this test's data root is empty, so resolving the
 	// selected base image fails fast before any VM is created.
-	vmName, err := BootNewVM("vm", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := BootNewVM("vm", user, "", testGuestPassword, testBaseImageName, settings)
 	if err == nil {
 		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}
@@ -522,7 +532,7 @@ func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 
 	// Empty image library => BootNewVM fails fast at base image resolution, but
 	// only after composing the VM name, which is what this test inspects.
-	vmName, err := BootNewVM(chosenName, user, guestUsername, testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := BootNewVM(chosenName, user, guestUsername, testGuestPassword, testBaseImageName, settings)
 	if err == nil {
 		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}

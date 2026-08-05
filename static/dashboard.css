@@ -2,10 +2,6 @@
   color-scheme: dark;
 }
 
-.vm-resource-select {
-  min-width: 140px;
-}
-
 .rtt-indicator,
 .jitter-indicator {
   min-width: 7.5rem;

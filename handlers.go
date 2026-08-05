@@ -15,7 +15,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -379,7 +378,6 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 	registerDashboardPageRoute(group)
 	registerDashboardDataRoute(group, sessionManager, settings)
 	registerDashboardCreateRoute(group, sessionManager, settings)
-	registerDashboardResourcesRoute(group, sessionManager)
 	registerDashboardRDPRoute(group, sessionManager, settings)
 	registerDashboardVMActionRoute(group, sessionManager, "/dashboard/remove", "dashboard remove", "remove", "Failed to remove VM.", "VM removed.", func(name string) error {
 		return virt.RemoveVM(name, settings)
@@ -463,11 +461,11 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 	})
 }
 
-// createVMInput holds the validated dashboard create-VM form fields.
+// createVMInput holds the validated dashboard create-VM form fields. CPU and
+// memory are deliberately absent: VM resources are operator-defined only
+// (VM_VCPU_COUNT / VM_MEMORY_MIB) and never accepted from the form.
 type createVMInput struct {
 	name          string
-	vcpu          int
-	memoryMiB     int
 	user          *types.User
 	guestUsername string
 	guestPassword string
@@ -488,14 +486,6 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	}
 
 	name, err := validateVMName(req.FormValue("vm_name"))
-	if handleDashboardFormError(w, "dashboard create", err) {
-		return createVMInput{}, false
-	}
-	vcpu, err := parseDashboardVCPU(req.FormValue("vm_vcpu"))
-	if handleDashboardFormError(w, "dashboard create", err) {
-		return createVMInput{}, false
-	}
-	memoryMiB, err := parseDashboardMemoryMiB(req.FormValue("vm_memory_mib"))
 	if handleDashboardFormError(w, "dashboard create", err) {
 		return createVMInput{}, false
 	}
@@ -522,8 +512,6 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 
 	return createVMInput{
 		name:          name,
-		vcpu:          vcpu,
-		memoryMiB:     memoryMiB,
 		user:          user,
 		guestUsername: guestUsername,
 		guestPassword: guestPassword,
@@ -539,7 +527,7 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			return
 		}
 
-		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, input.baseImage, settings, input.vcpu, input.memoryMiB)
+		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPassword, input.baseImage, settings)
 		if errors.Is(err, virt.ErrVMAlreadyExists) {
 			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
 				OK:    false,
@@ -566,39 +554,6 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
 			OK:      true,
 			Message: "VM creation started.",
-		})
-	})
-}
-
-func registerDashboardResourcesRoute(group huma.API, sessionManager *session.Manager) {
-	registerHiddenPost(group, "/dashboard/resources", func(ctx huma.Context) {
-		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(req, w, sessionManager, "dashboard resources", "update")
-		if !ok {
-			return
-		}
-
-		vcpu, err := parseDashboardVCPU(req.FormValue("vm_vcpu"))
-		if handleDashboardFormError(w, "dashboard resources", err) {
-			return
-		}
-		memoryMiB, err := parseDashboardMemoryMiB(req.FormValue("vm_memory_mib"))
-		if handleDashboardFormError(w, "dashboard resources", err) {
-			return
-		}
-
-		if err := virt.UpdateVMResources(name, vcpu, memoryMiB); err != nil {
-			log.Printf("update resources for vm %q failed: %v", name, err)
-			dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
-				OK:    false,
-				Error: err.Error(),
-			})
-			return
-		}
-
-		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
-			OK:      true,
-			Message: "VM resources updated.",
 		})
 	})
 }
@@ -810,51 +765,6 @@ func parseDashboardVMName(w http.ResponseWriter, req *http.Request, username str
 		return "", fmt.Errorf("vm name is too long")
 	}
 	return name, nil
-}
-
-func parseDashboardVCPU(raw string) (int, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, fmt.Errorf("cpu selection is required")
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("cpu selection is invalid")
-	}
-	allowedDashboardVCPU := map[int]struct{}{
-		1: {},
-		2: {},
-		4: {},
-		8: {},
-	}
-
-	if _, ok := allowedDashboardVCPU[value]; !ok {
-		return 0, fmt.Errorf("cpu selection is not supported")
-	}
-	return value, nil
-}
-
-func parseDashboardMemoryMiB(raw string) (int, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, fmt.Errorf("memory selection is required")
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, fmt.Errorf("memory selection is invalid")
-	}
-
-	allowedDashboardMemoryMiB := map[int]struct{}{
-		4096:  {},
-		8192:  {},
-		16384: {},
-		32768: {},
-	}
-
-	if _, ok := allowedDashboardMemoryMiB[value]; !ok {
-		return 0, fmt.Errorf("memory selection is not supported")
-	}
-	return value, nil
 }
 
 func handleDashboardFormError(w http.ResponseWriter, action string, err error) bool {
