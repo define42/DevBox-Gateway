@@ -64,17 +64,17 @@ func TestVbtcovBootNewVMEarlyValidation(t *testing.T) {
 	user := vbtcovNewUser(t, "cvbtvaliduser")
 
 	t.Run("nil owner", func(t *testing.T) {
-		_, err := BootNewVM("vm", nil, "", testGuestPassword, "img.img", nil, 1, 1024)
+		_, err := BootNewVM("vm", nil, "", testGuestPassword, "img.img", nil)
 		vbtcovRequireErrContains(t, err, "vm owner is required", "BootNewVM without owner")
 	})
 
 	t.Run("invalid hostname", func(t *testing.T) {
-		_, err := BootNewVM("Bad_Name!", user, "", testGuestPassword, "img.img", nil, 1, 1024)
+		_, err := BootNewVM("Bad_Name!", user, "", testGuestPassword, "img.img", nil)
 		vbtcovRequireErrContains(t, err, "vm name", "BootNewVM with invalid hostname")
 	})
 
 	t.Run("missing guest password", func(t *testing.T) {
-		_, err := BootNewVM("goodname", user, "", "", "img.img", nil, 1, 1024)
+		_, err := BootNewVM("goodname", user, "", "", "img.img", nil)
 		vbtcovRequireErrContains(t, err, "guest password is required", "BootNewVM without guest password")
 	})
 }
@@ -86,7 +86,7 @@ func TestVbtcovBootNewVMStoragePoolFailure(t *testing.T) {
 
 	// All request validation and base-image resolution succeed; the boot then
 	// fails while ensuring the storage pool, before any domain is defined.
-	_, err := BootNewVM("poolfail", user, "", testGuestPassword, imageName, settings, 1, 1024)
+	_, err := BootNewVM("poolfail", user, "", testGuestPassword, imageName, settings)
 	vbtcovRequireErrContains(t, err, "failed to ensure storage pool", "BootNewVM with file-blocked pool path")
 }
 

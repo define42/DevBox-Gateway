@@ -60,6 +60,12 @@ const (
 	// DefaultVMDiskSizeGB is the default virtual disk capacity, in GiB, for newly
 	// created VM volumes. Used when VM_DISK_SIZE_GB is unset or non-positive.
 	DefaultVMDiskSizeGB = 200
+	// DefaultVMVCPUCount is the default number of virtual CPUs assigned to every
+	// VM. Used when VM_VCPU_COUNT is unset or non-positive.
+	DefaultVMVCPUCount = 4
+	// DefaultVMMemoryMiB is the default memory, in MiB, assigned to every VM.
+	// Used when VM_MEMORY_MIB is unset or non-positive.
+	DefaultVMMemoryMiB = 4096
 	// DefaultMaxVDIPerUser is the default maximum number of VDIs (VMs) each user
 	// may own at once. Override with MAX_VDI_PER_USER.
 	DefaultMaxVDIPerUser = 10
@@ -82,6 +88,8 @@ func NewSettingType(printSettings bool) *SettingsType {
 
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable base VDI images (.img/.qcow2/.raw); must contain at least one image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
 	s.SetInt(VM_DISK_SIZE_GB, "Virtual disk capacity in GiB for newly created VM qcow2 volumes; the base image is grown to this size (qcow2 is thin-provisioned, so the host file only consumes written data). Values <=0 fall back to the default", DefaultVMDiskSizeGB)
+	s.SetInt(VM_VCPU_COUNT, "Number of virtual CPUs assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMVCPUCount)
+	s.SetInt(VM_MEMORY_MIB, "Memory in MiB assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMMemoryMiB)
 	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
@@ -232,6 +240,30 @@ func VMDiskCapacityBytes(settings *SettingsType) uint64 {
 		}
 	}
 	return uint64(sizeGB) * 1024 * 1024 * 1024
+}
+
+// VMVCPUCount resolves the number of virtual CPUs assigned to every VM. VM
+// resources are operator-defined only: users cannot choose or change them. A
+// non-positive or missing VM_VCPU_COUNT falls back to DefaultVMVCPUCount.
+func VMVCPUCount(settings *SettingsType) int {
+	if settings != nil {
+		if configured := settings.GetInt(VM_VCPU_COUNT); configured > 0 {
+			return configured
+		}
+	}
+	return DefaultVMVCPUCount
+}
+
+// VMMemoryMiB resolves the memory, in MiB, assigned to every VM. VM resources
+// are operator-defined only: users cannot choose or change them. A
+// non-positive or missing VM_MEMORY_MIB falls back to DefaultVMMemoryMiB.
+func VMMemoryMiB(settings *SettingsType) int {
+	if settings != nil {
+		if configured := settings.GetInt(VM_MEMORY_MIB); configured > 0 {
+			return configured
+		}
+	}
+	return DefaultVMMemoryMiB
 }
 
 // ---- Setters ----
@@ -452,6 +484,8 @@ const (
 	VIRT_STORAGE_POOL_NAME        = "VIRT_STORAGE_POOL_NAME"
 	BASE_IMAGE_DIR                = "BASE_IMAGE_DIR"
 	VM_DISK_SIZE_GB               = "VM_DISK_SIZE_GB"
+	VM_VCPU_COUNT                 = "VM_VCPU_COUNT"
+	VM_MEMORY_MIB                 = "VM_MEMORY_MIB"
 	TIMEOUT                       = "TIMEOUT"
 	DEBUG_CONNECTIONS             = "DEBUG_CONNECTIONS"
 

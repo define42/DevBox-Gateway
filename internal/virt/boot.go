@@ -467,7 +467,9 @@ func resolveGuestCredentials(user *types.User, guestUsername, guestPassword stri
 // for that guest account and is required.
 // baseImage is the file name of the base image to clone, selected from the
 // configured image library; it is validated against that library before use.
-func BootNewVM(name string, user *types.User, guestUsername, guestPassword, baseImage string, settings *config.SettingsType, vcpu int, memoryMiB int) (vmName string, err error) {
+// CPU and memory are operator-defined only (VM_VCPU_COUNT / VM_MEMORY_MIB):
+// they are resolved from settings here so no caller can pass user-chosen values.
+func BootNewVM(name string, user *types.User, guestUsername, guestPassword, baseImage string, settings *config.SettingsType) (vmName string, err error) {
 	if user == nil {
 		return "", fmt.Errorf("vm owner is required")
 	}
@@ -484,9 +486,8 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 		return vmName, err
 	}
 
-	if err := validateBootResources(vcpu, memoryMiB); err != nil {
-		return vmName, err
-	}
+	vcpu := config.VMVCPUCount(settings)
+	memoryMiB := config.VMMemoryMiB(settings)
 
 	// Validate the selected base image against the library and resolve it to an
 	// absolute path (the single path-traversal guard) before anything is created.
@@ -839,13 +840,6 @@ func defaultNetworkXML() string {
     </dhcp>
   </ip>
 </network>`, defaultNetworkName)
-}
-
-func validateBootResources(vcpu int, memoryMiB int) error {
-	if vcpu <= 0 || memoryMiB <= 0 {
-		return fmt.Errorf("invalid resources (vcpu=%d memoryMiB=%d)", vcpu, memoryMiB)
-	}
-	return nil
 }
 
 func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) error {

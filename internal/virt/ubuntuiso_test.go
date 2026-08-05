@@ -129,7 +129,7 @@ func waitForDomainActiveState(t *testing.T, name string, want bool, timeout time
 	t.Fatalf("domain %s did not reach active=%t within %s", name, want, timeout)
 }
 
-func TestPowerLifecycleAndResourceGuards(t *testing.T) {
+func TestPowerLifecycle(t *testing.T) {
 	settings := config.NewSettingType(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
@@ -144,7 +144,7 @@ func TestPowerLifecycleAndResourceGuards(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("power-vm", user, "", testGuestPassword, testBaseImageName, settings, 2, 4096)
+	vmName, err := BootNewVM("power-vm", user, "", testGuestPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -156,10 +156,6 @@ func TestPowerLifecycleAndResourceGuards(t *testing.T) {
 
 	if err := StartExistingVM(vmName); err != nil {
 		t.Fatalf("StartExistingVM on active domain: %v", err)
-	}
-
-	if err := UpdateVMResources(vmName, 1, 4096); err == nil || !strings.Contains(err.Error(), "must be stopped") {
-		t.Fatalf("expected running VM resource update to be rejected, got %v", err)
 	}
 
 	if err := ShutdownVM(vmName); err != nil {
@@ -175,22 +171,6 @@ func TestPowerLifecycleAndResourceGuards(t *testing.T) {
 		t.Fatalf("RestartVM on inactive domain: %v", err)
 	}
 	waitForDomainActiveState(t, vmName, true, powerTestTimeout)
-}
-
-func TestBootNewVMRejectsInvalidResources(t *testing.T) {
-	user, err := types.NewUser("invaliduser")
-	if err != nil {
-		t.Fatalf("new user: %v", err)
-	}
-
-	settings := config.NewSettingType(false)
-
-	if _, err := BootNewVM("bad-vm", user, "", testGuestPassword, testBaseImageName, settings, 0, 4096); err == nil {
-		t.Fatal("expected invalid vcpu error")
-	}
-	if _, err := BootNewVM("bad-vm", user, "", testGuestPassword, testBaseImageName, settings, 2, 0); err == nil {
-		t.Fatal("expected invalid memory error")
-	}
 }
 
 func TestEnsureStoragePoolRejectsInvalidArguments(t *testing.T) {

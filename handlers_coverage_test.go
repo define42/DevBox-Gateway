@@ -439,78 +439,6 @@ func TestValidateGuestPassword(t *testing.T) {
 	}
 }
 
-func TestParseDashboardVCPU(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    int
-		wantErr bool
-	}{
-		{"valid 1", "1", 1, false},
-		{"valid 2", "2", 2, false},
-		{"valid 4", "4", 4, false},
-		{"valid 8", "8", 8, false},
-		{"empty", "", 0, true},
-		{"invalid", "abc", 0, true},
-		{"unsupported", "3", 0, true},
-		{"negative", "-1", 0, true},
-		{"zero", "0", 0, true},
-		{"trimmed", " 2 ", 2, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseDashboardVCPU(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.input)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error for %q: %v", tc.input, err)
-			}
-			if got != tc.want {
-				t.Fatalf("expected %d, got %d", tc.want, got)
-			}
-		})
-	}
-}
-
-func TestParseDashboardMemoryMiB(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		want    int
-		wantErr bool
-	}{
-		{"valid 4096", "4096", 4096, false},
-		{"valid 8192", "8192", 8192, false},
-		{"valid 16384", "16384", 16384, false},
-		{"valid 32768", "32768", 32768, false},
-		{"empty", "", 0, true},
-		{"invalid", "abc", 0, true},
-		{"unsupported", "1024", 0, true},
-		{"trimmed", " 4096 ", 4096, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseDashboardMemoryMiB(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.input)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error for %q: %v", tc.input, err)
-			}
-			if got != tc.want {
-				t.Fatalf("expected %d, got %d", tc.want, got)
-			}
-		})
-	}
-}
-
 func TestParseDashboardVMName(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -908,9 +836,7 @@ func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
 	router := getRemoteGatewayRotuer(sm, settings)
 
 	form := url.Values{
-		"vm_name":       {"test-vm"},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"4096"},
+		"vm_name": {"test-vm"},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
@@ -981,9 +907,7 @@ func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{
-		"vm_name":       {"INVALID NAME!"},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"4096"},
+		"vm_name": {"INVALID NAME!"},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
@@ -1004,55 +928,7 @@ func TestDashboardPostInvalidVMName(t *testing.T) {
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{
-		"vm_name":       {"INVALID NAME!"},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"4096"},
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	setSameOriginHeader(req)
-	req.AddCookie(cookie)
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDashboardPostInvalidVCPU(t *testing.T) {
-	sm := session.NewManager()
-	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
-	cookie := issueSessionCookie(t, sm, "alice")
-
-	form := url.Values{
-		"vm_name":       {"my-vm"},
-		"vm_vcpu":       {"99"},
-		"vm_memory_mib": {"4096"},
-	}
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	setSameOriginHeader(req)
-	req.AddCookie(cookie)
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDashboardPostInvalidMemory(t *testing.T) {
-	sm := session.NewManager()
-	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
-	cookie := issueSessionCookie(t, sm, "alice")
-
-	form := url.Values{
-		"vm_name":       {"my-vm"},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"999"},
+		"vm_name": {"INVALID NAME!"},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
@@ -1073,9 +949,7 @@ func TestDashboardPostMissingPassword(t *testing.T) {
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{
-		"vm_name":       {"my-vm"},
-		"vm_vcpu":       {"2"},
-		"vm_memory_mib": {"4096"},
+		"vm_name": {"my-vm"},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
@@ -1099,8 +973,6 @@ func TestDashboardPostPasswordMismatch(t *testing.T) {
 		"vm_name":             {"my-vm"},
 		"vm_password":         {"secret-one"},
 		"vm_password_confirm": {"secret-two"},
-		"vm_vcpu":             {"2"},
-		"vm_memory_mib":       {"4096"},
 	}
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(form.Encode()))
@@ -1120,7 +992,7 @@ func TestDashboardPostRejectsOversizedForm(t *testing.T) {
 	router := getRemoteGatewayRotuer(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
-	body := "vm_name=" + strings.Repeat("a", maxFormBodyBytes) + "&vm_vcpu=2&vm_memory_mib=4096"
+	body := "vm_name=" + strings.Repeat("a", maxFormBodyBytes)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/dashboard", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

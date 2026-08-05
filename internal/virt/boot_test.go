@@ -53,7 +53,7 @@ func checkCPUAndMemory(testUsername, vmName string, vcpu, memory int, conn *libv
 			if v.VCPU == vcpu && v.MemoryMiB == memory {
 				return nil
 			}
-			return fmt.Errorf("vm %s has CPU %d and memory %dMB, expected CPU 2 and memory 2048MB", vmName, v.VCPU, v.MemoryMiB)
+			return fmt.Errorf("vm %s has CPU %d and memory %dMB, expected CPU %d and memory %dMB", vmName, v.VCPU, v.MemoryMiB, vcpu, memory)
 		}
 	}
 
@@ -260,7 +260,7 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(testVMName, user, "", testPassword, testBaseImageName, settings, 4, 4096)
+	vmName, err := virt.BootNewVM(testVMName, user, "", testPassword, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}
@@ -275,18 +275,16 @@ func TestStartVM(t *testing.T) {
 
 	waitForRunningVM(t, testUsername, vmName, conn, testTimeout)
 
+	// Resources are operator-defined only, so the booted VM must carry the
+	// config-resolved vCPU count and memory.
+	if err := checkCPUAndMemory(testUsername, vmName, config.VMVCPUCount(settings), config.VMMemoryMiB(settings), conn); err != nil {
+		t.Fatalf("VM %s does not have config-defined CPU and Memory: %v", vmName, err)
+	}
+
 	if err := virt.ShutdownVM(vmName); err != nil {
 		t.Fatalf("Failed to shutdown VM %s: %v", vmName, err)
 	}
 	waitForState(t, testUsername, vmName, "shut off", conn, testTimeout)
-
-	if err := virt.UpdateVMResources(vmName, 2, 2048); err != nil {
-		t.Fatalf("Failed to update VM %s resources: %v", vmName, err)
-	}
-
-	if err := checkCPUAndMemory(testUsername, vmName, 2, 2048, conn); err != nil {
-		t.Fatalf("VM %s does not have updated CPU and Memory as expected: %v", vmName, err)
-	}
 
 	if err := virt.StartExistingVM(vmName); err != nil {
 		t.Fatalf("Failed to start existing VM %s: %v", vmName, err)

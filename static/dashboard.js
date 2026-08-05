@@ -9,11 +9,7 @@ const RTT_GREEN_MAX_MS = 30;
 const RTT_YELLOW_MAX_MS = 50;
 const JITTER_GREEN_MAX_MS = 20;
 const JITTER_YELLOW_MAX_MS = 50;
-const DEFAULT_VCPU = "4";
-const DEFAULT_MEMORY_MIB = "4096";
 const LOGIN_PATH = "/login";
-const VCPU_OPTIONS = ["1", "2", "4", "8"];
-const MEMORY_OPTIONS = ["4096", "8192", "16384", "32768"];
 const state = {
     vms: [],
     filename: "rdpgw.rdp",
@@ -85,19 +81,6 @@ function setIconLabel(el, iconClass, label) {
     icon.className = `bi ${iconClass} me-1`;
     icon.setAttribute("aria-hidden", "true");
     el.append(icon, label);
-}
-function buildSelect(options, selectedValue, labelFn) {
-    const select = document.createElement("select");
-    for (const value of options) {
-        const option = document.createElement("option");
-        option.value = String(value);
-        option.textContent = labelFn(value);
-        if (String(value) === String(selectedValue)) {
-            option.selected = true;
-        }
-        select.appendChild(option);
-    }
-    return select;
 }
 function terminalWebSocketURL(name) {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -244,24 +227,6 @@ function bootstrap() {
               <label class="form-label" for="vm-password-confirm">Confirm Password</label>
               <input class="form-control" id="vm-password-confirm" name="vm_password_confirm" type="password" autocomplete="new-password" maxlength="128" title="Re-enter the password to confirm it matches." autocapitalize="none" spellcheck="false" required>
             </div>
-            <div class="col-6 col-lg-4">
-              <label class="form-label" for="vm-cpu">vCPU</label>
-              <select class="form-select" id="vm-cpu" name="vm_vcpu" required>
-                <option value="1">1 vCPU</option>
-                <option value="2">2 vCPU</option>
-                <option value="4" selected>4 vCPU</option>
-                <option value="8">8 vCPU</option>
-              </select>
-            </div>
-            <div class="col-6 col-lg-4">
-              <label class="form-label" for="vm-memory">Memory</label>
-              <select class="form-select" id="vm-memory" name="vm_memory_mib" required>
-                <option value="4096" selected>4 GB</option>
-                <option value="8192">8 GB</option>
-                <option value="16384">16 GB</option>
-                <option value="32768">32 GB</option>
-              </select>
-            </div>
             <div class="col-12 col-md-6 col-lg-4 d-grid align-self-end">
               <button class="btn btn-primary" id="create-button" type="submit"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
             </div>
@@ -275,8 +240,6 @@ function bootstrap() {
     const usernameInput = root.querySelector("#vm-username");
     const passwordInput = root.querySelector("#vm-password");
     const passwordConfirmInput = root.querySelector("#vm-password-confirm");
-    const cpuSelect = root.querySelector("#vm-cpu");
-    const memorySelect = root.querySelector("#vm-memory");
     const baseImageSelect = root.querySelector("#vm-base-image");
     const createButton = root.querySelector("#create-button");
     const rttIndicator = root.querySelector("#rtt-indicator");
@@ -316,8 +279,6 @@ function bootstrap() {
         !usernameInput ||
         !passwordInput ||
         !passwordConfirmInput ||
-        !cpuSelect ||
-        !memorySelect ||
         !baseImageSelect ||
         !createButton ||
         !rttIndicator ||
@@ -359,8 +320,6 @@ function bootstrap() {
     const usernameInputEl = usernameInput;
     const passwordInputEl = passwordInput;
     const passwordConfirmInputEl = passwordConfirmInput;
-    const cpuSelectEl = cpuSelect;
-    const memorySelectEl = memorySelect;
     const baseImageSelectEl = baseImageSelect;
     const createButtonEl = createButton;
     const rttIndicatorEl = rttIndicator;
@@ -1123,36 +1082,6 @@ function bootstrap() {
             });
             actions.appendChild(removeButton);
             actionStack.appendChild(actions);
-            if (hasName && !isActive) {
-                const resourceRow = document.createElement("div");
-                resourceRow.className = "d-flex flex-nowrap gap-2 align-items-center";
-                const vcpuSelect = buildSelect(VCPU_OPTIONS, vm.vcpu || DEFAULT_VCPU, (value) => `${value} vCPU`);
-                vcpuSelect.className = "form-select form-select-sm vm-resource-select w-auto";
-                vcpuSelect.setAttribute("aria-label", "vCPU");
-                vcpuSelect.disabled = state.busy;
-                const memorySelect = buildSelect(MEMORY_OPTIONS, vm.memoryMiB || DEFAULT_MEMORY_MIB, (value) => formatMemoryGB(value));
-                memorySelect.className = "form-select form-select-sm vm-resource-select w-auto";
-                memorySelect.setAttribute("aria-label", "Memory");
-                memorySelect.disabled = state.busy;
-                const applyButton = document.createElement("button");
-                applyButton.type = "button";
-                applyButton.className = "btn btn-sm btn-outline-primary w-auto";
-                setIconLabel(applyButton, "bi-check-lg", "Apply");
-                applyButton.disabled = state.busy;
-                applyButton.addEventListener("click", () => {
-                    void updateVMResources(rawName, vcpuSelect.value, memorySelect.value);
-                });
-                resourceRow.appendChild(vcpuSelect);
-                resourceRow.appendChild(memorySelect);
-                resourceRow.appendChild(applyButton);
-                actionStack.appendChild(resourceRow);
-            }
-            if (hasName && isActive) {
-                const note = document.createElement("div");
-                note.className = "text-body-secondary small";
-                note.textContent = "Stop VM to edit resources.";
-                actionStack.appendChild(note);
-            }
             actionCell.appendChild(actionStack);
             row.appendChild(actionCell);
             tbody.appendChild(row);
@@ -1201,8 +1130,6 @@ function bootstrap() {
         usernameInputEl.disabled = isBusy;
         passwordInputEl.disabled = isBusy;
         passwordConfirmInputEl.disabled = isBusy;
-        cpuSelectEl.disabled = isBusy;
-        memorySelectEl.disabled = isBusy;
         updateCreateAvailability();
         renderVMList();
     }
@@ -1355,7 +1282,7 @@ function bootstrap() {
             loadInFlight = false;
         }
     }
-    async function createVM(name, username, password, passwordConfirm, vcpu, memoryMiB, baseImage) {
+    async function createVM(name, username, password, passwordConfirm, baseImage) {
         if (state.busy) {
             return;
         }
@@ -1368,8 +1295,6 @@ function bootstrap() {
                 vm_username: username,
                 vm_password: password,
                 vm_password_confirm: passwordConfirm,
-                vm_vcpu: vcpu,
-                vm_memory_mib: memoryMiB,
                 vm_base_image: baseImage,
             });
             const result = await requestJSON("/api/dashboard", {
@@ -1396,8 +1321,6 @@ function bootstrap() {
             passwordInputEl.value = "";
             passwordConfirmInputEl.value = "";
             passwordConfirmInputEl.setCustomValidity("");
-            cpuSelectEl.value = DEFAULT_VCPU;
-            memorySelectEl.value = DEFAULT_MEMORY_MIB;
             closeCreate();
             await loadVMs();
         }
@@ -1432,43 +1355,6 @@ function bootstrap() {
                 return;
             }
             setActionMessage(result.data.message || successMessage);
-            await loadVMs();
-        }
-        finally {
-            setBusy(false);
-        }
-    }
-    async function updateVMResources(name, vcpu, memoryMiB) {
-        if (state.busy) {
-            return;
-        }
-        clearAction();
-        setBusy(true);
-        try {
-            const body = new URLSearchParams({
-                vm_name: name,
-                vm_vcpu: vcpu,
-                vm_memory_mib: memoryMiB,
-            });
-            const result = await requestJSON("/api/dashboard/resources", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: body.toString(),
-            });
-            if (!result) {
-                return;
-            }
-            if (!result.ok || !result.data) {
-                setActionError(result.error || "Failed to update VM resources.");
-                return;
-            }
-            if (!result.data.ok) {
-                setActionError(result.data.error || "Failed to update VM resources.");
-                return;
-            }
-            setActionMessage(result.data.message || "VM resources updated.");
             await loadVMs();
         }
         finally {
@@ -1580,7 +1466,7 @@ function bootstrap() {
         if (!formEl.reportValidity()) {
             return;
         }
-        void createVM(inputEl.value.trim(), usernameInputEl.value.trim(), passwordInputEl.value, passwordConfirmInputEl.value, cpuSelectEl.value, memorySelectEl.value, baseImageSelectEl.value);
+        void createVM(inputEl.value.trim(), usernameInputEl.value.trim(), passwordInputEl.value, passwordConfirmInputEl.value, baseImageSelectEl.value);
     });
     terminalBackdropEl.addEventListener("click", () => {
         closeTerminal();
