@@ -246,8 +246,8 @@ func TestNewTLSManagerACMERequiresFrontDomain(t *testing.T) {
 func TestNewTLSManagerACMEDefersIssuance(t *testing.T) {
 	// With ACME enabled and a front domain, NewTLSManager must prepare
 	// certificate management without any network I/O: issuance is deferred to
-	// StartManaging so it can run after the front listener (local or SSH tunnel)
-	// is accepting TLS-ALPN-01 validation.
+	// StartManaging so it can run after the front listener is accepting
+	// TLS-ALPN-01 validation.
 	t.Setenv(config.ACME_ENABLE, "true")
 	t.Setenv(config.FRONT_DOMAIN, "vdi.example.test")
 	t.Setenv(config.CERT_FILE, "")

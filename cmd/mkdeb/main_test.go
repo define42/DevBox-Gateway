@@ -149,11 +149,11 @@ func TestWriteDebWithLicense(t *testing.T) {
 	})
 }
 
-// The config file can hold secrets — a LOCAL_USER_SHA256 list of password
-// digests and the SSH tunnel key passphrase — so the data archive must install
-// it 0640, never group- or world-readable, no matter how the source file is
-// checked out. stageInputs writes the sources 0600, so a pass here also proves
-// the mode is set by the manifest rather than copied from disk.
+// The config file can hold secrets — such as a LOCAL_USER_SHA256 list of
+// password digests — so the data archive must install it 0640, never group- or
+// world-readable, no matter how the source file is checked out. stageInputs
+// writes the sources 0600, so a pass here also proves the mode is set by the
+// manifest rather than copied from disk.
 func TestWriteDebFileModes(t *testing.T) {
 	dir := t.TempDir()
 	bin, unit, conf := stageInputs(t, dir)

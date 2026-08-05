@@ -29,7 +29,6 @@ import (
 	consolepkg "devboxgateway/internal/console"
 	"devboxgateway/internal/rdp"
 	"devboxgateway/internal/session"
-	"devboxgateway/internal/sshtunnel"
 	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
@@ -67,45 +66,20 @@ func run() int {
 		}
 	}()
 
-	select {
-	case <-ctx.Done():
-		return 0
-	case err := <-gateway.Fatal():
-		// The front SSH tunnel dropped. Exit non-zero so the process supervisor
-		// (systemd Restart=on-failure) re-establishes it.
-		log.Printf("front listener failed: %v", err)
-		return 1
-	}
+	<-ctx.Done()
+	return 0
 }
 
 type gatewayRuntime struct {
 	listener net.Listener
 	frontTLS *cert.TLSManager
-	tunnel   *sshtunnel.Tunnel // nil when listening locally
 	done     <-chan struct{}
-}
-
-// Fatal reports a front SSH tunnel failure so run can exit and let a supervisor
-// reconnect. It returns a nil channel when listening locally, which blocks
-// forever in a select and therefore never fires.
-func (g *gatewayRuntime) Fatal() <-chan error {
-	if g.tunnel == nil {
-		return nil
-	}
-	return g.tunnel.Fatal()
 }
 
 func (g *gatewayRuntime) Close() error {
 	var errs []error
 
-	// In tunnel mode the listener is owned by the tunnel, so closing the tunnel
-	// also closes the listener; avoid closing it twice.
-	switch {
-	case g.tunnel != nil:
-		if err := g.tunnel.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	case g.listener != nil:
+	if g.listener != nil {
 		if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			errs = append(errs, err)
 		}
@@ -173,7 +147,7 @@ func bootGateway() (*gatewayRuntime, error) {
 		return nil, fmt.Errorf("tls setup: %w", err)
 	}
 
-	ln, tunnel, err := openFrontListener(settings)
+	ln, err := openFrontListener(settings)
 	if err != nil {
 		_ = frontTLS.Close()
 		return nil, err
@@ -186,10 +160,10 @@ func bootGateway() (*gatewayRuntime, error) {
 	}()
 
 	// Start ACME only once the front listener is accepting connections: ACME
-	// TLS-ALPN-01 validation is answered through that listener (bound locally or
-	// published via the SSH reverse tunnel). This is non-fatal — the gateway
-	// serves the self-signed fallback while certmagic keeps retrying issuance in
-	// the background, so a slow relay or DNS does not prevent boot.
+	// TLS-ALPN-01 validation is answered through that listener. This is
+	// non-fatal — the gateway serves the self-signed fallback while certmagic
+	// keeps retrying issuance in the background, so slow DNS does not prevent
+	// boot.
 	if err := frontTLS.StartManaging(); err != nil {
 		log.Printf("%v; continuing with the fallback certificate", err)
 	}
@@ -197,33 +171,20 @@ func bootGateway() (*gatewayRuntime, error) {
 	return &gatewayRuntime{
 		listener: ln,
 		frontTLS: frontTLS,
-		tunnel:   tunnel,
 		done:     done,
 	}, nil
 }
 
-// openFrontListener returns the listener that feeds the gateway accept loop.
-// With SSH_TUNNEL_ENABLE it dials a public relay over SSH and serves the
-// relay's remote listener (so the gateway can run behind NAT); otherwise it
-// binds LISTEN_ADDR locally. The returned tunnel is non-nil only in tunnel mode.
-func openFrontListener(settings *config.SettingsType) (net.Listener, *sshtunnel.Tunnel, error) {
-	if settings.GetBool(config.SSH_TUNNEL_ENABLE) {
-		tunnel, err := sshtunnel.Open(sshTunnelConfig(settings))
-		if err != nil {
-			return nil, nil, fmt.Errorf("open SSH tunnel: %w", err)
-		}
-		log.Printf("listening via SSH reverse tunnel: relay %s forwards %s",
-			settings.Get(config.SSH_TUNNEL_SERVER), settings.Get(config.SSH_TUNNEL_REMOTE_ADDR))
-		return limitListenerConnections(tunnel.Listener(), settings), tunnel, nil
-	}
-
+// openFrontListener binds LISTEN_ADDR and returns the listener that feeds the
+// gateway accept loop.
+func openFrontListener(settings *config.SettingsType) (net.Listener, error) {
 	listen := settings.Get(config.LISTEN_ADDR)
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
-		return nil, nil, fmt.Errorf("listen on %s: %w", listen, err)
+		return nil, fmt.Errorf("listen on %s: %w", listen, err)
 	}
 	log.Printf("listening on %s", listen)
-	return limitListenerConnections(ln, settings), nil, nil
+	return limitListenerConnections(ln, settings), nil
 }
 
 // limitListenerConnections caps the number of simultaneously accepted front
@@ -232,9 +193,7 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, *sshtunnel.
 // and exhaust the gateway's memory and file descriptors. Accept blocks once
 // MAX_CONCURRENT_CONNECTIONS connections are open and resumes as they close; a
 // blocked Accept is released by Close during shutdown. A value <=0 disables the
-// cap and restores the previous unbounded behavior. The cap is applied in both
-// local and SSH reverse-tunnel modes, so it counts every front connection
-// regardless of how the listener is published.
+// cap and restores the previous unbounded behavior.
 func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
 	maxConns := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
 	if maxConns <= 0 {
@@ -242,20 +201,6 @@ func limitListenerConnections(ln net.Listener, settings *config.SettingsType) ne
 	}
 	log.Printf("limiting to %d concurrent front connections", maxConns)
 	return netutil.LimitListener(ln, maxConns)
-}
-
-func sshTunnelConfig(settings *config.SettingsType) sshtunnel.Config {
-	return sshtunnel.Config{
-		User:              settings.Get(config.SSH_TUNNEL_USER),
-		Server:            settings.Get(config.SSH_TUNNEL_SERVER),
-		PrivateKeyPath:    settings.Get(config.SSH_TUNNEL_PRIVATE_KEY),
-		Passphrase:        []byte(settings.Get(config.SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE)),
-		KnownHostsPath:    settings.Get(config.SSH_TUNNEL_KNOWN_HOSTS),
-		RemoteListenAddr:  settings.Get(config.SSH_TUNNEL_REMOTE_ADDR),
-		DialTimeout:       settings.GetDuration(config.TIMEOUT),
-		KeepAliveInterval: settings.GetDuration(config.SSH_TUNNEL_KEEPALIVE_INTERVAL),
-		KeepAliveTimeout:  settings.GetDuration(config.SSH_TUNNEL_KEEPALIVE_TIMEOUT),
-	}
 }
 
 func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {
@@ -366,16 +311,6 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.SettingsType) {
-	// Over the SSH reverse tunnel the connection is an SSH channel whose deadline
-	// methods are no-ops. net/http's Hijack (used by the dashboard's WebSocket
-	// consoles) aborts a pending background read by setting a past read deadline
-	// and waiting for it; with no-op deadlines that wait never returns and the
-	// upgrade hangs. Give the HTTPS path a connection with working read deadlines.
-	// RDP keeps the raw channel, so its proxy path is unaffected.
-	if settings.GetBool(config.SSH_TUNNEL_ENABLE) {
-		raw = sshtunnel.NewReadDeadlineConn(raw)
-	}
-
 	// TLS handshake with client; get SNI
 	clientTLS := tls.Server(raw, frontTLS.GetTLSConfig())
 	if err := clientTLS.Handshake(); err != nil {

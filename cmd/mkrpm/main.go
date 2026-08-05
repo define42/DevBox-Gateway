@@ -170,13 +170,12 @@ type packageFile struct {
 }
 
 // packageFiles returns the install manifest. The config file is installed 0640
-// (root read/write, no group or world read) because it can hold secrets: a
-// LOCAL_USER_SHA256 list of password digests and the SSH tunnel key passphrase
-// (SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE). Combined with the root:root owner set in
-// addPackageFiles, that keeps the file readable only by root. The remaining
-// files carry no secrets and use the conventional world-readable modes. The
-// repository does not ship a LICENSE file, so it is bundled only when present
-// and packaging never fails on its absence.
+// (root read/write, no group or world read) because it can hold secrets such as
+// a LOCAL_USER_SHA256 list of password digests. Combined with the root:root
+// owner set in addPackageFiles, that keeps the file readable only by root. The
+// remaining files carry no secrets and use the conventional world-readable
+// modes. The repository does not ship a LICENSE file, so it is bundled only
+// when present and packaging never fails on its absence.
 func packageFiles(o options) []packageFile {
 	files := []packageFile{
 		{o.binarySrc, o.binaryDest, 0o755, rpmpack.GenericFile},

@@ -38,19 +38,15 @@ func debugf(format string, args ...any) {
 }
 
 // bridgeBufferSize is the read-chunk size when streaming console/VNC data to the
-// websocket. It matches the SSH channel's max packet (32 KiB), so a framebuffer
-// update is copied in far fewer reads/websocket frames than the previous 4 KiB,
-// reducing per-frame overhead over the tunnel without exceeding a single SSH
-// packet.
+// websocket. A 32 KiB chunk copies a framebuffer update in far fewer
+// reads/websocket frames than the previous 4 KiB, reducing per-frame overhead.
 const bridgeBufferSize = 32 * 1024
 
 const (
 	// wsWriteWait bounds a single websocket write — a data frame or a keepalive
 	// ping. A write that stalls longer than this (a dead or wedged peer, or a
 	// full send buffer) fails the pump and tears the bridge down instead of
-	// blocking a goroutine and its libvirt stream indefinitely. This is the only
-	// liveness bound over the SSH reverse tunnel, where socket-level deadlines are
-	// no-ops (see internal/sshtunnel).
+	// blocking a goroutine and its libvirt stream indefinitely.
 	wsWriteWait = 15 * time.Second
 
 	// wsPongWait bounds how long the gateway waits to hear anything from the peer
@@ -587,8 +583,7 @@ func hijackableResponseWriter(w http.ResponseWriter) http.ResponseWriter {
 // upgradeResponseWriter returns the writer handed to gorilla's Upgrade. It
 // unwraps to the underlying http.Hijacker and, when debug logging is on, wraps
 // it to trace exactly where a WebSocket upgrade blocks: the Hijack call and the
-// first network write (the 101 handshake). This is the diagnostic for upgrades
-// that never return over the SSH tunnel.
+// first network write (the 101 handshake).
 func upgradeResponseWriter(channel, name string, w http.ResponseWriter) http.ResponseWriter {
 	hijackable := hijackableResponseWriter(w)
 	if !debugLogging.Load() {

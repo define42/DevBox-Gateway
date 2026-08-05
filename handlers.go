@@ -270,10 +270,9 @@ func requestScheme(r *http.Request) string {
 
 // debugConnectionLogger logs every HTTP request (including WebSocket upgrades)
 // with its source address, method, and path. It is installed only when
-// DEBUG_CONNECTIONS is set, so operators can trace connectivity — for example,
-// to confirm that dashboard and console traffic arrives through the SSH reverse
-// tunnel and to see the originating address. It passes the ResponseWriter
-// through unwrapped so it never interferes with the WebSocket hijack.
+// DEBUG_CONNECTIONS is set, so operators can trace connectivity and see the
+// originating address. It passes the ResponseWriter through unwrapped so it
+// never interferes with the WebSocket hijack.
 func debugConnectionLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		kind := "http"

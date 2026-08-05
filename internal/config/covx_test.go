@@ -101,7 +101,7 @@ func TestCovxLoadOrCreateSNIHashSecretWriteError(t *testing.T) {
 
 func TestCovxNewSettingTypePrintMasksSecrets(t *testing.T) {
 	const secretValue = "covx-secret-value"
-	t.Setenv(SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE, secretValue)
+	t.Setenv(LOCAL_USER_SHA256, secretValue)
 
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
@@ -122,7 +122,7 @@ func TestCovxNewSettingTypePrintMasksSecrets(t *testing.T) {
 	os.Stdout = oldStdout
 	out := <-outCh
 
-	if got := s.Get(SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE); got != secretValue {
+	if got := s.Get(LOCAL_USER_SHA256); got != secretValue {
 		t.Fatalf("expected the real secret from Get, got %q", got)
 	}
 	if !strings.Contains(out, "***") {
