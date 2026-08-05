@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	testVMName            = "test-vm"
-	testUsername          = "testuser"
-	testPassword          = "dogood"
+	testVMName   = "test-vm"
+	testUsername = "testuser"
+	// testPasswordHash is the salted sha512_crypt digest BootNewVM requires in
+	// place of a cleartext guest password (this fixture hashes "GuestPass1!").
+	testPasswordHash      = "$6$WJFY1R5pSUjLUS/I$UhK5RfTTXlJCeMqs0kxS6YUm1Bw3DY2IiEMdP7gitriP0NPsTGVvcYyGiSEqML/CVCQ1yqChTcUb5UGM77arQ/"
 	testTimeout           = 30 * time.Second
 	legacyDefaultImageDir = "/data/desktop"
 	testBaseImageName     = "resolute-desktop-cloudimg-amd64-v0.0.9.img"
@@ -260,7 +262,7 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(testVMName, user, "", testPassword, testBaseImageName, settings)
+	vmName, err := virt.BootNewVM(testVMName, user, "", testPasswordHash, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}

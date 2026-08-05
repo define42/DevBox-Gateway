@@ -21,6 +21,13 @@ func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username 
 
 func issueSessionCookieFromIP(t *testing.T, sessionManager *session.Manager, username string, remoteAddr string) *http.Cookie {
 	t.Helper()
+	// Real logins always store the salted sha512_crypt digest of the login
+	// password in the session, so the standard test session does too.
+	return issueSessionCookieWithHash(t, sessionManager, username, remoteAddr, testGuestPasswordHash)
+}
+
+func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, username, remoteAddr, loginPasswordHash string) *http.Cookie {
+	t.Helper()
 
 	user, err := types.NewUser(username)
 	if err != nil {
@@ -32,7 +39,7 @@ func issueSessionCookieFromIP(t *testing.T, sessionManager *session.Manager, use
 	req.RemoteAddr = remoteAddr
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr); err != nil {
+		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -63,7 +70,7 @@ func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user)
+		completeLogin(sessionManager, w, r, user, testGuestPasswordHash)
 	}))
 	handler.ServeHTTP(rec, req)
 

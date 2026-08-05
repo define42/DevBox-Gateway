@@ -19,8 +19,10 @@ const (
 	testBaseImageURL  = "https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img"
 	testBaseImageName = "resolute-desktop-cloudimg-amd64-v0.0.9.img"
 
-	// testGuestPassword is the mandatory guest VDI password BootNewVM now requires.
-	testGuestPassword = "GuestPass1!"
+	// testGuestPasswordHash is the mandatory salted sha512_crypt guest password
+	// hash BootNewVM now requires. In production it is the digest of the owner's
+	// gateway login password captured at login; this fixture hashes "GuestPass1!".
+	testGuestPasswordHash = "$6$WJFY1R5pSUjLUS/I$UhK5RfTTXlJCeMqs0kxS6YUm1Bw3DY2IiEMdP7gitriP0NPsTGVvcYyGiSEqML/CVCQ1yqChTcUb5UGM77arQ/"
 )
 
 func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {

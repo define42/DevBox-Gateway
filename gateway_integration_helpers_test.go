@@ -73,11 +73,11 @@ func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) s
 	createClient := *server.client
 	createClient.Timeout = 2 * time.Minute
 
+	// No password fields: the gateway seeds the guest account with the hash of
+	// the login password held in the session established by the test's login.
 	assertGatewayStatus(t, &createClient, http.MethodPost, server.baseURL+"/api/dashboard", url.Values{
-		"vm_name":             {shortName},
-		"vm_password":         {"devbox-pass"},
-		"vm_password_confirm": {"devbox-pass"},
-		"vm_base_image":       {testBaseImageName},
+		"vm_name":       {shortName},
+		"vm_base_image": {testBaseImageName},
 	}, http.StatusOK)
 	return fullName
 }
@@ -88,10 +88,8 @@ func assertGatewayVMCreateConflict(t *testing.T, server gatewayTestServer, short
 	t.Helper()
 
 	assertGatewayStatusContains(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard", url.Values{
-		"vm_name":             {shortName},
-		"vm_password":         {"devbox-pass"},
-		"vm_password_confirm": {"devbox-pass"},
-		"vm_base_image":       {testBaseImageName},
+		"vm_name":       {shortName},
+		"vm_base_image": {testBaseImageName},
 	}, http.StatusConflict, "already exists")
 }
 

@@ -348,13 +348,8 @@ function bootstrap(): void {
               <label class="form-label" for="vm-username">Username</label>
               <input class="form-control" id="vm-username" name="vm_username" autocomplete="off" pattern="[a-z_][a-z0-9_\\-]*" maxlength="32" title="Login user created inside the DevBox. Lowercase letters, numbers, hyphens, or underscores. Must start with a letter or underscore. Max 32 characters." autocapitalize="none" spellcheck="false">
             </div>
-            <div class="col-12 col-md-6 col-lg-6">
-              <label class="form-label" for="vm-password">Password</label>
-              <input class="form-control" id="vm-password" name="vm_password" type="password" autocomplete="new-password" maxlength="128" title="Password for the account created inside the DevBox. Max 128 characters." autocapitalize="none" spellcheck="false" required>
-            </div>
-            <div class="col-12 col-md-6 col-lg-6">
-              <label class="form-label" for="vm-password-confirm">Confirm Password</label>
-              <input class="form-control" id="vm-password-confirm" name="vm_password_confirm" type="password" autocomplete="new-password" maxlength="128" title="Re-enter the password to confirm it matches." autocapitalize="none" spellcheck="false" required>
+            <div class="col-12">
+              <p class="form-text mb-0">The DevBox account is created with the password you used to sign in to this gateway.</p>
             </div>
             <div class="col-12 col-md-6 col-lg-4 d-grid align-self-end">
               <button class="btn btn-primary" id="create-button" type="submit"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
@@ -368,8 +363,6 @@ function bootstrap(): void {
     const form = root.querySelector<HTMLFormElement>("#create-form");
     const input = root.querySelector<HTMLInputElement>("#vm-name");
     const usernameInput = root.querySelector<HTMLInputElement>("#vm-username");
-    const passwordInput = root.querySelector<HTMLInputElement>("#vm-password");
-    const passwordConfirmInput = root.querySelector<HTMLInputElement>("#vm-password-confirm");
     const baseImageSelect = root.querySelector<HTMLSelectElement>("#vm-base-image");
     const createButton = root.querySelector<HTMLButtonElement>("#create-button");
     const rttIndicator = root.querySelector<HTMLSpanElement>("#rtt-indicator");
@@ -409,8 +402,6 @@ function bootstrap(): void {
         !form ||
         !input ||
         !usernameInput ||
-        !passwordInput ||
-        !passwordConfirmInput ||
         !baseImageSelect ||
         !createButton ||
         !rttIndicator ||
@@ -452,8 +443,6 @@ function bootstrap(): void {
     const formEl = form;
     const inputEl = input;
     const usernameInputEl = usernameInput;
-    const passwordInputEl = passwordInput;
-    const passwordConfirmInputEl = passwordConfirmInput;
     const baseImageSelectEl = baseImageSelect;
     const createButtonEl = createButton;
     const rttIndicatorEl = rttIndicator;
@@ -1329,8 +1318,6 @@ function bootstrap(): void {
         state.busy = isBusy;
         inputEl.disabled = isBusy;
         usernameInputEl.disabled = isBusy;
-        passwordInputEl.disabled = isBusy;
-        passwordConfirmInputEl.disabled = isBusy;
         updateCreateAvailability();
         renderVMList();
     }
@@ -1492,7 +1479,7 @@ function bootstrap(): void {
         }
     }
 
-    async function createVM(name: string, username: string, password: string, passwordConfirm: string, baseImage: string): Promise<void> {
+    async function createVM(name: string, username: string, baseImage: string): Promise<void> {
         if (state.busy) {
             return;
         }
@@ -1500,11 +1487,11 @@ function bootstrap(): void {
         setCreateError("");
         setBusy(true);
         try {
+            // No password fields: the server provisions the DevBox account with
+            // the (hashed) gateway login password held in the session.
             const body = new URLSearchParams({
                 vm_name: name,
                 vm_username: username,
-                vm_password: password,
-                vm_password_confirm: passwordConfirm,
                 vm_base_image: baseImage,
             });
             const result = await requestJSON<DashboardActionResponse>("/api/dashboard", {
@@ -1528,9 +1515,6 @@ function bootstrap(): void {
             setActionMessage(result.data.message || "VM creation started.");
             inputEl.value = "";
             usernameInputEl.value = defaultUsername;
-            passwordInputEl.value = "";
-            passwordConfirmInputEl.value = "";
-            passwordConfirmInputEl.setCustomValidity("");
             closeCreate();
             await loadVMs();
         } finally {
@@ -1675,27 +1659,14 @@ function bootstrap(): void {
         }
     }
 
-    // Keep the native "passwords must match" message in sync as the user types,
-    // so the confirm field reflects the current match state on the next submit.
-    const syncPasswordMatch = (): void => {
-        passwordConfirmInputEl.setCustomValidity(
-            passwordInputEl.value === passwordConfirmInputEl.value ? "" : "Passwords do not match.",
-        );
-    };
-    passwordInputEl.addEventListener("input", syncPasswordMatch);
-    passwordConfirmInputEl.addEventListener("input", syncPasswordMatch);
-
     formEl.addEventListener("submit", (event) => {
         event.preventDefault();
-        syncPasswordMatch();
         if (!formEl.reportValidity()) {
             return;
         }
         void createVM(
             inputEl.value.trim(),
             usernameInputEl.value.trim(),
-            passwordInputEl.value,
-            passwordConfirmInputEl.value,
             baseImageSelectEl.value,
         );
     });

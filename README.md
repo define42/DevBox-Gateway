@@ -265,8 +265,11 @@ Sign in with the seeded test account:
 
 A successful login redirects to `/api/dashboard`, where you can:
 
-- Create a new VM (name, base image, guest username and password). Every VM
-  gets the operator-configured CPU and memory (`VM_VCPU_COUNT` /
+- Create a new VM (name, base image, guest username). The guest account is
+  provisioned with the password you logged in to the gateway with: only its
+  salted sha512_crypt hash is kept in the in-memory session at login and
+  embedded in the VM's cloud-init seed — the cleartext is never stored. Every
+  VM gets the operator-configured CPU and memory (`VM_VCPU_COUNT` /
   `VM_MEMORY_MIB`); users cannot pick or change them.
 - Start / restart / shutdown / remove existing VMs that you own.
 - Open a serial console or noVNC session in the browser.

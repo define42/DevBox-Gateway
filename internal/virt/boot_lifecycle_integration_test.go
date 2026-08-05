@@ -326,7 +326,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	user := newBootTestUser(t, "recreateuser")
 	shortName := "recreate-vm"
 
-	vmName, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings)
+	vmName, err := BootNewVM(shortName, user, "", testGuestPasswordHash, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	if err := settings.OverwriteForTestInt(config.VM_MEMORY_MIB, wantMemoryMiB*2); err != nil {
 		t.Fatalf("overwrite VM_MEMORY_MIB: %v", err)
 	}
-	if _, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings); !errors.Is(err, ErrVMAlreadyExists) {
+	if _, err := BootNewVM(shortName, user, "", testGuestPasswordHash, testBaseImageName, settings); !errors.Is(err, ErrVMAlreadyExists) {
 		t.Fatalf("expected ErrVMAlreadyExists on duplicate create, got %v", err)
 	}
 
@@ -382,7 +382,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}
 
-	firstVM, err := BootNewVM("limit-vm-a", user, "", testGuestPassword, testBaseImageName, settings)
+	firstVM, err := BootNewVM("limit-vm-a", user, "", testGuestPasswordHash, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM initial: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 
 	// The user now owns as many VDIs as the limit allows, so creating another VM
 	// (under a fresh name) must be refused.
-	if _, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings); !errors.Is(err, ErrVMLimitReached) {
+	if _, err := BootNewVM("limit-vm-b", user, "", testGuestPasswordHash, testBaseImageName, settings); !errors.Is(err, ErrVMLimitReached) {
 		t.Fatalf("expected ErrVMLimitReached on create beyond limit, got %v", err)
 	}
 
@@ -424,7 +424,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, 2); err != nil {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}
-	secondVM, err := BootNewVM("limit-vm-b", user, "", testGuestPassword, testBaseImageName, settings)
+	secondVM, err := BootNewVM("limit-vm-b", user, "", testGuestPasswordHash, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM within raised limit: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("metadata-vm", user, "", testGuestPassword, testBaseImageName, settings)
+	vmName, err := BootNewVM("metadata-vm", user, "", testGuestPasswordHash, testBaseImageName, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	}
 	// The image library under this test's data root is empty, so resolving the
 	// selected base image fails fast before any VM is created.
-	vmName, err := BootNewVM("vm", user, "", testGuestPassword, testBaseImageName, settings)
+	vmName, err := BootNewVM("vm", user, "", testGuestPasswordHash, testBaseImageName, settings)
 	if err == nil {
 		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}
@@ -532,7 +532,7 @@ func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 
 	// Empty image library => BootNewVM fails fast at base image resolution, but
 	// only after composing the VM name, which is what this test inspects.
-	vmName, err := BootNewVM(chosenName, user, guestUsername, testGuestPassword, testBaseImageName, settings)
+	vmName, err := BootNewVM(chosenName, user, guestUsername, testGuestPasswordHash, testBaseImageName, settings)
 	if err == nil {
 		t.Fatal("expected BootNewVM to fail with an empty base image library")
 	}

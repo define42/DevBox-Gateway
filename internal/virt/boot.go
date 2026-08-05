@@ -2,7 +2,6 @@ package virt
 
 import (
 	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
 	"devboxgateway/internal/types"
 	"devboxgateway/internal/vmname"
 	"errors"
@@ -439,37 +438,45 @@ func InitVirt(settings *config.SettingsType) error {
 	return nil
 }
 
+// cloudInitPasswordHashPrefix is the sha512_crypt scheme marker every guest
+// password hash must carry. resolveGuestCredentials rejects anything else so a
+// cleartext password can never reach the cloud-init seed by mistake.
+const cloudInitPasswordHashPrefix = "$6$"
+
 // resolveGuestCredentials returns the guest login name and its cloud-init
-// password hash. The name falls back to the owner's name when not set per VM;
-// the guest password is required (set at VM creation) and has no fallback, so
-// the owner's gateway login password is never reused as the guest password.
-func resolveGuestCredentials(user *types.User, guestUsername, guestPassword string) (string, string, error) {
+// password hash. The name falls back to the owner's name when not set per VM.
+// The password hash is required and must already be a salted sha512_crypt
+// ($6$) digest: it is the hash of the owner's gateway login password, captured
+// at login (see session.PasswordHashFromContext), so no cleartext password is
+// ever passed through the VM provisioning path.
+func resolveGuestCredentials(user *types.User, guestUsername, guestPasswordHash string) (string, string, error) {
 	guestUsername = strings.TrimSpace(guestUsername)
 	if guestUsername == "" {
 		guestUsername = user.GetName()
 	}
 
-	if guestPassword == "" {
-		return "", "", fmt.Errorf("guest password is required")
+	if guestPasswordHash == "" {
+		return "", "", fmt.Errorf("guest password hash is required")
 	}
-	cloudInitPasswordHash, err := hash.CloudInitPasswordHash(guestPassword)
-	if err != nil {
-		return "", "", fmt.Errorf("hash guest password: %w", err)
+	if !strings.HasPrefix(guestPasswordHash, cloudInitPasswordHashPrefix) {
+		return "", "", fmt.Errorf("guest password hash must be a sha512_crypt (%s) digest", cloudInitPasswordHashPrefix)
 	}
-	return guestUsername, cloudInitPasswordHash, nil
+	return guestUsername, guestPasswordHash, nil
 }
 
 // BootNewVM creates or recreates a VM for the user and starts it with owner metadata.
 // The resulting VM (VDI) name is always "<username>-<hostname>", enforced via
 // vmname.Compose; an invalid owner or hostname is rejected before anything is created.
 // guestUsername is the login account provisioned inside the guest (and used for RDP);
-// it falls back to the owning user's name when empty. guestPassword is the password
-// for that guest account and is required.
+// it falls back to the owning user's name when empty. guestPasswordHash is the salted
+// sha512_crypt ($6$) digest of that account's password — the hash of the owner's
+// gateway login password stored in the session at login — and is required; cleartext
+// passwords are never accepted here.
 // baseImage is the file name of the base image to clone, selected from the
 // configured image library; it is validated against that library before use.
 // CPU and memory are operator-defined only (VM_VCPU_COUNT / VM_MEMORY_MIB):
 // they are resolved from settings here so no caller can pass user-chosen values.
-func BootNewVM(name string, user *types.User, guestUsername, guestPassword, baseImage string, settings *config.SettingsType) (vmName string, err error) {
+func BootNewVM(name string, user *types.User, guestUsername, guestPasswordHash, baseImage string, settings *config.SettingsType) (vmName string, err error) {
 	if user == nil {
 		return "", fmt.Errorf("vm owner is required")
 	}
@@ -481,7 +488,7 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPassword, base
 		return "", err
 	}
 
-	guestUsername, cloudInitPasswordHash, err := resolveGuestCredentials(user, guestUsername, guestPassword)
+	guestUsername, cloudInitPasswordHash, err := resolveGuestCredentials(user, guestUsername, guestPasswordHash)
 	if err != nil {
 		return vmName, err
 	}
