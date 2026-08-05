@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -70,7 +71,17 @@ func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user, testGuestPasswordHash)
+		completeLogin(sessionManager, w, r, user, "dogood")
+		storedHash, ok := sessionManager.PasswordHashFromContext(r.Context())
+		if !ok {
+			t.Error("expected completeLogin to store the login password hash in the session")
+		}
+		if !strings.HasPrefix(storedHash, "$6$") {
+			t.Errorf("expected a salted sha512_crypt ($6$) hash in the session, got %q", storedHash)
+		}
+		if strings.Contains(storedHash, "dogood") {
+			t.Error("session must never contain the cleartext login password")
+		}
 	}))
 	handler.ServeHTTP(rec, req)
 

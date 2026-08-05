@@ -117,33 +117,16 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 			return
 		}
 
-		authenticateAndCompleteLogin(sessionManager, loginLimiter, settings, w, r, username, password)
-	}
-}
+		user, err := authenticateLogin(username, password, settings)
+		if err != nil {
+			log.Printf("auth failed for %s: %v", username, err)
+			recordFailedLogin(w, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
+			return
+		}
 
-// authenticateAndCompleteLogin verifies the submitted credentials and, on
-// success, establishes the session. The verified password is digested right
-// away so only its salted sha512_crypt hash outlives the request: the hash is
-// stored in the session and later seeds the guest account when the user
-// creates a VDI. The cleartext is never retained. A hash failure is a server
-// error, not a credential failure, so it does not count against the limiter.
-func authenticateAndCompleteLogin(sessionManager *session.Manager, loginLimiter *loginRateLimiter, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, username, password string) {
-	user, err := authenticateLogin(username, password, settings)
-	if err != nil {
-		log.Printf("auth failed for %s: %v", username, err)
-		recordFailedLogin(w, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
-		return
+		loginLimiter.RecordSuccess(username, r.RemoteAddr)
+		completeLogin(sessionManager, w, r, user, password)
 	}
-
-	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
-	if err != nil {
-		log.Printf("hash login password for %s: %v", username, err)
-		serveLogin(w, "Login failed.")
-		return
-	}
-
-	loginLimiter.RecordSuccess(username, r.RemoteAddr)
-	completeLogin(sessionManager, w, r, user, loginPasswordHash)
 }
 
 func rejectRateLimitedLogin(w http.ResponseWriter, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
@@ -178,9 +161,19 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 	return ldap.AuthenticateAccess(username, password, settings)
 }
 
-func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User, loginPasswordHash string) {
-	if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash); err != nil {
-		log.Printf("session create failed for %s: %v", user.GetName(), err)
+// completeLogin establishes the authenticated session for a user whose
+// credentials have just been verified. The password is digested right away so
+// only its salted sha512_crypt hash outlives this request: the hash is stored
+// in the in-memory session and later seeds the guest account when the user
+// creates a VDI; the cleartext is never retained. Hashing and session creation
+// share one failure path — both are server-side errors that abort the login.
+func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
+	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
+	if err == nil {
+		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
+	}
+	if err != nil {
+		log.Printf("login completion failed for %s: %v", user.GetName(), err)
 		serveLogin(w, "Login failed.")
 		return
 	}

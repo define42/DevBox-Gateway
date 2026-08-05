@@ -434,7 +434,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.AddCookie(cookie)
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user, testGuestPasswordHash)
+		completeLogin(sessionManager, w, r, user, "hcovpass")
 	}))
 	handler.ServeHTTP(rec, req)
 
