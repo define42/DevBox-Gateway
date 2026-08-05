@@ -336,9 +336,19 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 
 	waitForDomainState(t, conn, vmName, true, bootLifecycleTimeout)
 	firstUUID := lookupDomainUUID(t, conn, vmName)
+	wantVCPU := config.VMVCPUCount(settings)
+	wantMemoryMiB := config.VMMemoryMiB(settings)
 
 	// Creating again with the same name must be refused (no silent recreate) so
 	// the existing VM is preserved; the user is expected to delete it first.
+	// Change the configured resources first so the resource check below proves
+	// the refused create did not touch the existing VM.
+	if err := settings.OverwriteForTestInt(config.VM_VCPU_COUNT, wantVCPU+1); err != nil {
+		t.Fatalf("overwrite VM_VCPU_COUNT: %v", err)
+	}
+	if err := settings.OverwriteForTestInt(config.VM_MEMORY_MIB, wantMemoryMiB*2); err != nil {
+		t.Fatalf("overwrite VM_MEMORY_MIB: %v", err)
+	}
 	if _, err := BootNewVM(shortName, user, "", testGuestPassword, testBaseImageName, settings); !errors.Is(err, ErrVMAlreadyExists) {
 		t.Fatalf("expected ErrVMAlreadyExists on duplicate create, got %v", err)
 	}
@@ -357,8 +367,8 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 	if vm.State != "running" {
 		t.Fatalf("expected existing VM to still be running, got %q", vm.State)
 	}
-	if vm.VCPU != 2 || vm.MemoryMiB != 4096 {
-		t.Fatalf("expected existing VM resources unchanged (2 vcpu / 4096 MiB), got %d vcpu / %d MiB", vm.VCPU, vm.MemoryMiB)
+	if vm.VCPU != wantVCPU || vm.MemoryMiB != wantMemoryMiB {
+		t.Fatalf("expected existing VM resources unchanged (%d vcpu / %d MiB), got %d vcpu / %d MiB", wantVCPU, wantMemoryMiB, vm.VCPU, vm.MemoryMiB)
 	}
 }
 
