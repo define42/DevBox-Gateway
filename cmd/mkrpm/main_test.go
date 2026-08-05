@@ -46,10 +46,10 @@ func TestPackageRelations(t *testing.T) {
 	}
 }
 
-// The config file can hold secrets — a LOCAL_USER_SHA256 list of password
-// digests and the SSH tunnel key passphrase — so it must be installed 0640 and
-// never group- or world-readable. The binary and unit carry no secrets and keep
-// their conventional world-readable modes.
+// The config file can hold secrets — such as a LOCAL_USER_SHA256 list of
+// password digests — so it must be installed 0640 and never group- or
+// world-readable. The binary and unit carry no secrets and keep their
+// conventional world-readable modes.
 func TestPackageFileModes(t *testing.T) {
 	o := options{
 		binarySrc:  "dist/devbox-gateway",

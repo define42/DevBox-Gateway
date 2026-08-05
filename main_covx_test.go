@@ -1,17 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/tls"
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/virt"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -22,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 	"libvirt.org/go/libvirt"
 )
 
@@ -64,7 +57,6 @@ func mcovBootEnv(t *testing.T) string {
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.ACME_ENABLE, "false")
-	t.Setenv(config.SSH_TUNNEL_ENABLE, "false")
 	t.Setenv(config.FRONT_DOMAIN, "mcov.gateway.test")
 	t.Setenv(config.SNI_HASH_SECRET, "")
 
@@ -107,12 +99,6 @@ func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 	}
 	defer func() { _ = gateway.Close() }()
 
-	if gateway.tunnel != nil {
-		t.Fatal("expected no SSH tunnel in local mode")
-	}
-	if gateway.Fatal() != nil {
-		t.Fatal("expected nil Fatal channel in local mode")
-	}
 	addr, ok := gateway.listener.Addr().(*net.TCPAddr)
 	if !ok || addr.Port == 0 {
 		t.Fatalf("expected bound TCP listener, got %v", gateway.listener.Addr())
@@ -165,6 +151,19 @@ func TestMcovBootGatewayFrontDomainError(t *testing.T) {
 	_, err := bootGateway()
 	if err == nil || !strings.Contains(err.Error(), config.FRONT_DOMAIN) {
 		t.Fatalf("expected FRONT_DOMAIN validation error, got %v", err)
+	}
+}
+
+func TestMcovBootGatewayRejectsRemovedSSHTunnelMode(t *testing.T) {
+	// A configuration preserved from before the SSH reverse-tunnel mode was
+	// removed may still enable it; boot must fail fast instead of silently
+	// binding LISTEN_ADDR on a host that never exposed a local listener.
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv("SSH_TUNNEL_ENABLE", "true")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), "SSH reverse-tunnel mode has been removed") {
+		t.Fatalf("expected removed SSH-tunnel mode error, got %v", err)
 	}
 }
 
@@ -235,185 +234,6 @@ func TestMcovRunReturnsZeroOnSigterm(t *testing.T) {
 			t.Fatal("run did not exit after SIGTERM")
 		}
 	}
-}
-
-func TestMcovRunExitsOnTunnelFailure(t *testing.T) {
-	mcovBootEnv(t)
-	srv := mcovStartSSHServer(t)
-	mcovSetTunnelEnv(t, srv)
-
-	codeCh := make(chan int, 1)
-	go func() { codeCh <- run() }()
-
-	serverConn := srv.waitForConn(t)
-	// A keepalive probe proves sshtunnel.Open returned, so boot is past the
-	// tunnel setup; killing the transport now must surface on the Fatal channel
-	// and make run exit non-zero for the process supervisor.
-	srv.waitForKeepalive(t)
-	_ = serverConn.Close()
-
-	select {
-	case code := <-codeCh:
-		if code != 1 {
-			t.Fatalf("expected run to exit 1 after tunnel failure, got %d", code)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("run did not exit after the SSH tunnel died")
-	}
-}
-
-func mcovSetTunnelEnv(t *testing.T, srv *mcovSSHServer) {
-	t.Helper()
-	t.Setenv(config.SSH_TUNNEL_ENABLE, "true")
-	t.Setenv(config.SSH_TUNNEL_USER, "mcov")
-	t.Setenv(config.SSH_TUNNEL_SERVER, srv.addr)
-	t.Setenv(config.SSH_TUNNEL_PRIVATE_KEY, srv.clientKeyPath)
-	t.Setenv(config.SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE, "")
-	t.Setenv(config.SSH_TUNNEL_KNOWN_HOSTS, srv.knownHostsPath)
-	// The relay never binds this port; the fake server only approves the
-	// tcpip-forward request, so no real listener conflicts with other tests.
-	t.Setenv(config.SSH_TUNNEL_REMOTE_ADDR, "127.0.0.1:9")
-	t.Setenv(config.SSH_TUNNEL_KEEPALIVE_INTERVAL, "50ms")
-	t.Setenv(config.SSH_TUNNEL_KEEPALIVE_TIMEOUT, "1s")
-}
-
-// mcovSSHServer is a minimal in-process SSH relay: it accepts one client,
-// grants tcpip-forward so Client.Listen succeeds, and records keepalive probes.
-type mcovSSHServer struct {
-	addr           string
-	clientKeyPath  string
-	knownHostsPath string
-	conns          chan *ssh.ServerConn
-	keepalives     chan struct{}
-}
-
-func mcovStartSSHServer(t *testing.T) *mcovSSHServer {
-	t.Helper()
-
-	_, hostSigner := mcovWriteSSHKey(t)
-	clientKeyPath, clientSigner := mcovWriteSSHKey(t)
-
-	cfg := &ssh.ServerConfig{
-		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			if bytes.Equal(key.Marshal(), clientSigner.PublicKey().Marshal()) {
-				return &ssh.Permissions{}, nil
-			}
-			return nil, errors.New("unknown public key")
-		},
-	}
-	cfg.AddHostKey(hostSigner)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen for ssh server: %v", err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	srv := &mcovSSHServer{
-		addr:           ln.Addr().String(),
-		clientKeyPath:  clientKeyPath,
-		knownHostsPath: mcovWriteKnownHosts(t, ln.Addr().String(), hostSigner.PublicKey()),
-		conns:          make(chan *ssh.ServerConn, 1),
-		keepalives:     make(chan struct{}, 16),
-	}
-	go srv.acceptLoop(ln, cfg)
-	return srv
-}
-
-func (s *mcovSSHServer) acceptLoop(ln net.Listener, cfg *ssh.ServerConfig) {
-	for {
-		nConn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		serverConn, channels, requests, err := ssh.NewServerConn(nConn, cfg)
-		if err != nil {
-			_ = nConn.Close()
-			continue
-		}
-		go s.handleRequests(requests)
-		go mcovRejectChannels(channels)
-		s.conns <- serverConn
-	}
-}
-
-// handleRequests grants tcpip-forward (so Client.Listen succeeds) and replies
-// failure to everything else; a failure reply to a keepalive probe still
-// confirms the transport is alive, matching a real relay's behavior.
-func (s *mcovSSHServer) handleRequests(requests <-chan *ssh.Request) {
-	for req := range requests {
-		if req.Type == "tcpip-forward" {
-			_ = req.Reply(true, nil)
-			continue
-		}
-		if req.WantReply {
-			_ = req.Reply(false, nil)
-		}
-		select {
-		case s.keepalives <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func mcovRejectChannels(channels <-chan ssh.NewChannel) {
-	for ch := range channels {
-		_ = ch.Reject(ssh.UnknownChannelType, "mcov: no channels accepted")
-	}
-}
-
-func (s *mcovSSHServer) waitForConn(t *testing.T) *ssh.ServerConn {
-	t.Helper()
-	select {
-	case c := <-s.conns:
-		return c
-	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for SSH connection")
-		return nil
-	}
-}
-
-func (s *mcovSSHServer) waitForKeepalive(t *testing.T) {
-	t.Helper()
-	select {
-	case <-s.keepalives:
-	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for SSH keepalive probe")
-	}
-}
-
-func mcovWriteSSHKey(t *testing.T) (string, ssh.Signer) {
-	t.Helper()
-
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate ssh key: %v", err)
-	}
-	block, err := ssh.MarshalPrivateKey(priv, "mcov")
-	if err != nil {
-		t.Fatalf("marshal ssh key: %v", err)
-	}
-	pemBytes := pem.EncodeToMemory(block)
-
-	path := filepath.Join(t.TempDir(), "id_ed25519")
-	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
-		t.Fatalf("write ssh key: %v", err)
-	}
-	signer, err := ssh.ParsePrivateKey(pemBytes)
-	if err != nil {
-		t.Fatalf("parse ssh key: %v", err)
-	}
-	return path, signer
-}
-
-func mcovWriteKnownHosts(t *testing.T, addr string, key ssh.PublicKey) string {
-	t.Helper()
-	line := knownhosts.Line([]string{knownhosts.Normalize(addr)}, key)
-	path := filepath.Join(t.TempDir(), "known_hosts")
-	if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
-		t.Fatalf("write known_hosts: %v", err)
-	}
-	return path
 }
 
 // mcovListener is a stub net.Listener whose Accept and Close fail with
@@ -602,44 +422,4 @@ func TestMcovHandleSharedConnEarlyExits(t *testing.T) {
 			t.Fatal("handleSharedConn did not return after a deadline error")
 		}
 	})
-}
-
-func TestMcovHandleHTTPSTunnelModeServesRequest(t *testing.T) {
-	t.Setenv(config.SSH_TUNNEL_ENABLE, "true")
-	frontTLS, settings := newTestTLSManager(t)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Test", "ok")
-		_, _ = w.Write([]byte("hello"))
-	})
-
-	client, server := net.Pipe()
-	defer func() { _ = client.Close() }()
-
-	done := make(chan struct{})
-	go func() {
-		handleHTTPS(server, frontTLS, handler, settings)
-		close(done)
-	}()
-
-	if err := client.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("set deadline: %v", err)
-	}
-	tlsClient := tls.Client(client, &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         "example.com",
-	})
-	defer func() { _ = tlsClient.Close() }()
-
-	if err := tlsClient.Handshake(); err != nil {
-		t.Fatalf("client tls handshake: %v", err)
-	}
-	if _, err := io.WriteString(tlsClient, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"); err != nil {
-		t.Fatalf("write request: %v", err)
-	}
-
-	assertHandleHTTPSResponse(t, tlsClient)
-	_ = tlsClient.Close()
-	_ = client.Close()
-	waitHandleHTTPSDone(t, done)
 }

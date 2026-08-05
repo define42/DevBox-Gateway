@@ -271,6 +271,21 @@ func TestHandleSharedConnSetupDeadlineClosesIdleClient(t *testing.T) {
 	}
 }
 
+func TestOpenFrontListener(t *testing.T) {
+	t.Setenv(config.LISTEN_ADDR, "127.0.0.1:0")
+	settings := config.NewSettingType(false)
+
+	ln, err := openFrontListener(settings)
+	if err != nil {
+		t.Fatalf("openFrontListener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	if _, ok := ln.Addr().(*net.TCPAddr); !ok {
+		t.Fatalf("expected TCP listener, got %T", ln.Addr())
+	}
+}
+
 func TestBootGatewayErrors(t *testing.T) {
 	t.Run("invalid listen address", func(t *testing.T) {
 		t.Setenv(config.LISTEN_ADDR, "bad::addr")

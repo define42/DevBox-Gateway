@@ -122,8 +122,7 @@ func (tm *TLSManager) setManagedDomains(domains []string) {
 // NewTLSManager builds the frontend TLS manager from the active settings. When
 // ACME is enabled it prepares certificate management but does not yet obtain any
 // certificates: the caller must invoke StartManaging once the front listener is
-// accepting connections, so that ACME TLS-ALPN-01 validation can be answered
-// (which matters when the listener is published through the SSH reverse tunnel).
+// accepting connections, so that ACME TLS-ALPN-01 validation can be answered.
 func NewTLSManager(settings *config.SettingsType) (*TLSManager, error) {
 	fallback, err := LoadOrGenerateCert(settings)
 	if err != nil {
@@ -196,12 +195,11 @@ func newACMETLSManager(settings *config.SettingsType, fallback tls.Certificate) 
 
 // StartManaging begins ACME certificate management. It must be called only after
 // the gateway's front listener is accepting connections, because ACME
-// TLS-ALPN-01 validation is answered through that listener's TLS handshakes —
-// whether bound locally or published via the SSH reverse tunnel. Certificates
-// are obtained in the background with exponential-backoff retry, so a transient
-// validation failure at startup does not block the gateway: it serves the
-// self-signed fallback certificate until issuance succeeds. For a static
-// (non-ACME) manager this is a no-op.
+// TLS-ALPN-01 validation is answered through that listener's TLS handshakes.
+// Certificates are obtained in the background with exponential-backoff retry,
+// so a transient validation failure at startup does not block the gateway: it
+// serves the self-signed fallback certificate until issuance succeeds. For a
+// static (non-ACME) manager this is a no-op.
 func (tm *TLSManager) StartManaging() error {
 	if tm.magic == nil {
 		return nil

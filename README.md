@@ -35,7 +35,6 @@ else is treated as an RDP X.224 Connection Request.
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
   - [Disabling clipboard and drive redirection](#disabling-clipboard-and-drive-redirection)
-  - [SSH reverse tunnel (publish behind NAT)](#ssh-reverse-tunnel-publish-behind-nat)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
   - [Local users](#local-users)
@@ -144,7 +143,7 @@ The package installs:
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                        | The gateway binary.                                  |
 | `/usr/lib/systemd/system/devbox-gateway.service` | systemd unit (runs as root, binds `:443`).           |
-| `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests and the tunnel key passphrase), marked `%config(noreplace)` so your edits survive upgrades. |
+| `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests), marked `%config(noreplace)` so your edits survive upgrades. |
 
 It requires `libvirt-libs` and `ca-certificates`, plus `libvirt-daemon-kvm` and
 `qemu-kvm` — the local libvirt/KVM stack that hosts the virtual desktops.
@@ -228,7 +227,7 @@ The package installs:
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                     | The gateway binary.                                  |
 | `/lib/systemd/system/devbox-gateway.service`  | systemd unit (runs as root, binds `:443`).           |
-| `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests and the tunnel key passphrase), registered as a `conffile` so your edits survive upgrades. |
+| `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests), registered as a `conffile` so your edits survive upgrades. |
 
 It depends on `libvirt0` and `ca-certificates`, plus `libvirt-daemon-system` and
 `qemu-system-x86` — the local libvirt/KVM stack that hosts the virtual desktops
@@ -356,16 +355,7 @@ file**, which keeps container and development overrides working.
 | `LOGIN_RATE_LIMIT_LOCKOUT` | `15m`                                                                                                           | How long login attempts are rejected after the failure limit is reached.                          |
 | `RDP_DISABLE_CLIPBOARD`   | `false`                                                                                                          | When `true`, strip the `cliprdr` virtual channel from every proxied session.                      |
 | `RDP_DISABLE_DRIVES`      | `false`                                                                                                          | When `true`, strip the `rdpdr` virtual channel from every proxied session.                        |
-| `DEBUG_CONNECTIONS`       | `false`                                                                                                          | When `true`, log every accepted front connection (HTTPS vs RDP, with source address) and every HTTP/WebSocket request (type, source address, method, path). Useful for tracing connectivity through the SSH reverse tunnel; noisy, so leave off in normal operation. |
-| `SSH_TUNNEL_ENABLE`       | `false`                                                                                                          | Publish the front listener through an SSH reverse tunnel to a public relay instead of binding `LISTEN_ADDR` locally. See [SSH reverse tunnel](#ssh-reverse-tunnel-publish-behind-nat). |
-| `SSH_TUNNEL_SERVER`       | _(empty)_                                                                                                        | Relay SSH endpoint as `<ip>:<port>`. Must be a literal IP (not a hostname) so DNS cannot redirect the outbound dial. |
-| `SSH_TUNNEL_USER`         | _(empty)_                                                                                                        | SSH username used to authenticate to the relay.                                                   |
-| `SSH_TUNNEL_PRIVATE_KEY`  | `/etc/devbox-gateway/ssh/id_ed25519`                                                                            | Path to the PEM SSH private key used to authenticate to the relay.                                |
-| `SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE` | _(empty)_                                                                                              | Passphrase for the private key; empty for an unencrypted key. Masked in the printed settings table. |
-| `SSH_TUNNEL_KNOWN_HOSTS`  | `/etc/devbox-gateway/ssh/known_hosts`                                                                           | `known_hosts` file pinning the relay's SSH host key.                                              |
-| `SSH_TUNNEL_REMOTE_ADDR`  | `:443`                                                                                                           | Address the relay listens on and forwards back through the tunnel.                                |
-| `SSH_TUNNEL_KEEPALIVE_INTERVAL` | `15s`                                                                                                     | Interval between SSH keepalive probes that detect a dead tunnel.                                  |
-| `SSH_TUNNEL_KEEPALIVE_TIMEOUT`  | `10s`                                                                                                     | How long to wait for a keepalive reply before treating the tunnel as dead.                        |
+| `DEBUG_CONNECTIONS`       | `false`                                                                                                          | When `true`, log every accepted front connection (HTTPS vs RDP, with source address) and every HTTP/WebSocket request (type, source address, method, path). Useful for tracing connectivity; noisy, so leave off in normal operation. |
 
 Booleans accept anything `strconv.ParseBool` recognises (`true`, `false`,
 `1`, `0`, `yes`, `no`, …). Durations accept Go's `time.ParseDuration`
@@ -386,118 +376,6 @@ ever bound to the renamed channels.
 |--------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `RDP_DISABLE_CLIPBOARD`  | `false` | When `true`, strip the `cliprdr` virtual channel so clipboard redirection is disabled.                                                                          |
 | `RDP_DISABLE_DRIVES`     | `false` | When `true`, strip the `rdpdr` virtual channel so local drive mapping (and other RDPDR redirections such as printers and smart cards over RDPDR) is disabled.   |
-
-### SSH reverse tunnel (publish behind NAT)
-
-By default the gateway binds `LISTEN_ADDR` (`:443`) directly, which requires the
-host to be reachable from clients. When the gateway runs behind NAT — on a home
-or lab network with no inbound port forwarding — set `SSH_TUNNEL_ENABLE=true` to
-publish it through a **public relay** instead:
-
-```
-                       SSH (gateway dials OUT)
-   ┌─────────────┐   ───────────────────────────►   ┌──────────────────┐
-   │  gateway    │   reverse tunnel (ssh -R)         │  public relay    │
-   │  behind NAT │ ◄─────────────────────────────   │  (sshd)          │
-   └─────────────┘   forwarded RDP/HTTPS conns       └────────┬─────────┘
-                                                              │ :443
-                                                       clients connect here
-```
-
-The gateway opens an outbound SSH connection to `SSH_TUNNEL_SERVER`, asks the
-relay to listen on `SSH_TUNNEL_REMOTE_ADDR`, and serves every connection the
-relay forwards back down the tunnel with the exact same HTTPS + RDP handling
-used for a local listener. No inbound firewall rule is needed on the gateway
-side; only the relay exposes a public port.
-
-**Relay (`sshd`) requirements.** A stock OpenSSH server permits the reverse
-tunnel but will *not* expose it on a public `:443` without changes, because of
-two independent defaults plus one rule that is not configurable:
-
-| `sshd_config` setting | Default | Effect on a `-R` reverse tunnel |
-|-----------------------|---------|---------------------------------|
-| `AllowTcpForwarding`  | `yes`   | Remote (`-R`) forwarding is allowed. |
-| `GatewayPorts`        | `no`    | The forwarded port binds to `127.0.0.1` only, so no other host can connect to it. |
-| `PermitListen`        | `any`   | Does not restrict which port may be forwarded (443 is not blocked here). |
-
-On top of that, OpenSSH enforces — with no override — that **only the superuser
-can forward privileged ports** (below 1024). So an ordinary login user cannot
-bind `443` on the relay at all, even with `GatewayPorts yes`. Publishing the
-relay's public `:443` therefore means working around both the loopback default
-and the privileged-port rule. Pick one:
-
-**Option A — unprivileged user + a root TCP proxy (recommended).** The gateway
-forwards a high port on the relay's loopback (allowed for any user, and needing
-no `GatewayPorts` change), and a small root-run service publishes `:443` by
-relaying the raw TCP stream to it. Use a byte-level proxy — **not** an
-HTTP/TLS-terminating reverse proxy, which would break SNI routing and the ACME
-TLS-ALPN-01 challenge:
-
-```bash
-# On the relay, as a root system service (so it may bind privileged :443):
-socat TCP-LISTEN:443,fork,reuseaddr TCP:127.0.0.1:8443
-```
-On the gateway: `SSH_TUNNEL_USER=rdptunnel`, `SSH_TUNNEL_REMOTE_ADDR=127.0.0.1:8443`.
-
-**Option B — root SSH binding `:443` directly.** Simpler, but it grants the
-gateway root SSH access to the relay. Enable wildcard binding and key-only root
-login in the relay's `sshd_config`:
-
-```
-GatewayPorts yes
-PermitRootLogin prohibit-password
-```
-On the gateway: `SSH_TUNNEL_USER=root`, `SSH_TUNNEL_REMOTE_ADDR=:443`.
-
-In either case, lock the tunnel key down in the relay user's `authorized_keys`
-so it can do nothing but the one forward, then restart `sshd`:
-
-```
-restrict,port-forwarding,permitlisten="127.0.0.1:8443" ssh-ed25519 AAAA...key... devbox-gateway
-```
-(use `permitlisten="443"` for Option B).
-
-**Gateway setup.**
-
-1. Generate a key pair for the gateway and install the public key in the relay
-   user's `authorized_keys` (`ssh-keygen` does not create the parent directory):
-   ```bash
-   mkdir -p /etc/devbox-gateway/ssh
-   ssh-keygen -t ed25519 -f /etc/devbox-gateway/ssh/id_ed25519 -N ''
-   ```
-2. Pin the relay's host key so the outbound dial cannot be spoofed:
-   ```bash
-   ssh-keyscan -p 22 <relay-ip> > /etc/devbox-gateway/ssh/known_hosts
-   ```
-3. Configure the tunnel (config file or environment). `SSH_TUNNEL_USER` and
-   `SSH_TUNNEL_REMOTE_ADDR` follow whichever relay option you chose above; the
-   recommended Option A looks like:
-   ```ini
-   SSH_TUNNEL_ENABLE=true
-   SSH_TUNNEL_SERVER=203.0.113.10:22
-   SSH_TUNNEL_USER=rdptunnel
-   SSH_TUNNEL_REMOTE_ADDR=127.0.0.1:8443
-   ```
-
-`SSH_TUNNEL_SERVER` must be a literal IP address, not a hostname: on a private
-host DNS may be resolved through a VPN, and pinning by IP closes the only
-attacker-controlled lookup before the host-key pin is checked. If the tunnel
-drops, a keepalive probe (`SSH_TUNNEL_KEEPALIVE_INTERVAL` /
-`SSH_TUNNEL_KEEPALIVE_TIMEOUT`) detects it and the process exits with a failure
-status so `systemd` (`Restart=on-failure`) re-establishes the connection.
-
-**ACME over the tunnel.** `ACME_ENABLE=true` works through the tunnel: the
-gateway brings the tunnel up first and only then starts certificate management,
-so Let's Encrypt's TLS-ALPN-01 validation (which arrives on the relay's `:443`
-and is forwarded down the tunnel) is answered by the gateway's own TLS
-handshake. This requires that the relay's public `:443` is a **raw-TCP** path to
-the gateway (the byte proxy in Option A or the direct forward in Option B — never
-a TLS-terminating reverse proxy) and that every managed name — `FRONT_DOMAIN` and
-each VM's routing label under it — resolves to the **relay's** public IP.
-Issuance runs in the background with retry, so the
-gateway boots immediately on the self-signed fallback and swaps in the real
-certificate once it is obtained; a slow relay or unpropagated DNS never blocks
-start-up.
 
 ### TLS certificates
 
@@ -698,7 +576,6 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy, channel stripping.
 │   ├── session/     Cookie session manager and middleware.
-│   ├── sshtunnel/   SSH reverse tunnel that publishes the front listener via a relay.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   └── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 ├── ui/              TypeScript sources for the dashboard.
@@ -736,9 +613,6 @@ Some integration tests (e.g. `ldap_integration_test.go`,
   `internal/config/config.go`. Reading `os.Getenv` directly from feature code
   is not allowed and is enforced by `make lint`.
 - The gateway listens on `:443` only. There is no plaintext HTTP listener.
-- When the SSH reverse tunnel is enabled, `SSH_TUNNEL_SERVER` must be a literal
-  IP and the relay's host key must be pinned in `SSH_TUNNEL_KNOWN_HOSTS`; keep
-  the tunnel private key (`SSH_TUNNEL_PRIVATE_KEY`) readable only by the gateway.
 
 ## License
 

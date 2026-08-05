@@ -109,10 +109,9 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetBool(RDP_DISABLE_CLIPBOARD, "Strip clipboard (cliprdr) channel from RDP sessions so the gateway prevents clipboard redirection regardless of client/VM policy", false)
 	s.SetBool(RDP_DISABLE_DRIVES, "Strip drive redirection (rdpdr) channel from RDP sessions so the gateway prevents local drive mapping regardless of client/VM policy", false)
 
-	s.SetBool(DEBUG_CONNECTIONS, "Verbose debug logging of every accepted front connection and HTTP/WebSocket request (type, source address, method, path); use to trace connectivity, e.g. through the SSH reverse tunnel", false)
+	s.SetBool(DEBUG_CONNECTIONS, "Verbose debug logging of every accepted front connection and HTTP/WebSocket request (type, source address, method, path); use to trace connectivity", false)
 
 	s.setAuthDefaults()
-	s.setSSHTunnelDefaults()
 
 	if printSettings {
 		table := tablewriter.NewWriter(os.Stdout)
@@ -149,22 +148,6 @@ func (s *SettingsType) setAuthDefaults() {
 	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username or client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
 	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after LOGIN_RATE_LIMIT_MAX_ATTEMPTS failures", 15*time.Minute)
-}
-
-// setSSHTunnelDefaults registers the SSH reverse-tunnel settings. Instead of
-// binding the front listener locally, the gateway can dial out to a public
-// relay over SSH and have it listen on the gateway's behalf, so a gateway behind
-// NAT can publish its :443 service on a reachable host.
-func (s *SettingsType) setSSHTunnelDefaults() {
-	s.SetBool(SSH_TUNNEL_ENABLE, "Publish the front listener through an SSH reverse tunnel to a public relay instead of binding locally; lets the gateway run behind NAT", false)
-	s.SetString(SSH_TUNNEL_SERVER, "Relay SSH endpoint as <ip>:<port> (literal IP required so DNS cannot redirect the outbound dial)", "")
-	s.SetString(SSH_TUNNEL_USER, "SSH username used to authenticate to the relay", "")
-	s.SetString(SSH_TUNNEL_PRIVATE_KEY, "Path to the PEM SSH private key used to authenticate to the relay", "/etc/devbox-gateway/ssh/id_ed25519")
-	s.SetSecretString(SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE, "Passphrase for the SSH private key; leave empty for an unencrypted key", "")
-	s.SetString(SSH_TUNNEL_KNOWN_HOSTS, "Path to a known_hosts file pinning the relay's SSH host key", "/etc/devbox-gateway/ssh/known_hosts")
-	s.SetString(SSH_TUNNEL_REMOTE_ADDR, "Address the relay listens on and forwards back through the tunnel", ":443")
-	s.SetDuration(SSH_TUNNEL_KEEPALIVE_INTERVAL, "Interval between SSH keepalive probes that detect a dead tunnel", 15*time.Second)
-	s.SetDuration(SSH_TUNNEL_KEEPALIVE_TIMEOUT, "Time to wait for an SSH keepalive reply before treating the tunnel as dead", 10*time.Second)
 }
 
 // DataRootDir resolves the root directory for gateway-managed data.
@@ -488,16 +471,6 @@ const (
 	VM_MEMORY_MIB                 = "VM_MEMORY_MIB"
 	TIMEOUT                       = "TIMEOUT"
 	DEBUG_CONNECTIONS             = "DEBUG_CONNECTIONS"
-
-	SSH_TUNNEL_ENABLE                 = "SSH_TUNNEL_ENABLE"
-	SSH_TUNNEL_SERVER                 = "SSH_TUNNEL_SERVER"
-	SSH_TUNNEL_USER                   = "SSH_TUNNEL_USER"
-	SSH_TUNNEL_PRIVATE_KEY            = "SSH_TUNNEL_PRIVATE_KEY"
-	SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE = "SSH_TUNNEL_PRIVATE_KEY_PASSPHRASE"
-	SSH_TUNNEL_KNOWN_HOSTS            = "SSH_TUNNEL_KNOWN_HOSTS"
-	SSH_TUNNEL_REMOTE_ADDR            = "SSH_TUNNEL_REMOTE_ADDR"
-	SSH_TUNNEL_KEEPALIVE_INTERVAL     = "SSH_TUNNEL_KEEPALIVE_INTERVAL"
-	SSH_TUNNEL_KEEPALIVE_TIMEOUT      = "SSH_TUNNEL_KEEPALIVE_TIMEOUT"
 )
 
 // OverwriteForTestString replaces a string setting value for tests.
