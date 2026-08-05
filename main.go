@@ -107,20 +107,8 @@ func bootGateway() (*gatewayRuntime, error) {
 
 	rdp.InitLogging()
 
-	// Configuration lives in a KEY=VALUE config file (default
-	// /etc/devbox-gateway/devbox-gateway.conf, overridable via CONFIG_FILE).
-	// Explicit environment variables still take precedence, so containers and
-	// development setups can override individual values.
-	if err := config.LoadConfigFile(config.FilePath()); err != nil {
-		return nil, fmt.Errorf("failed to load config file: %w", err)
-	}
-	settings := config.NewSettingType(true)
-
-	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
-	// routing label; with it empty every RDP connection is rejected while the
-	// dashboard still issues .rdp files. Refuse to boot in that broken state
-	// rather than fail silently at connect time.
-	if err := config.ValidateFrontDomain(settings); err != nil {
+	settings, err := loadBootSettings()
+	if err != nil {
 		return nil, err
 	}
 
@@ -173,6 +161,35 @@ func bootGateway() (*gatewayRuntime, error) {
 		frontTLS: frontTLS,
 		done:     done,
 	}, nil
+}
+
+// loadBootSettings resolves the process configuration for boot. Configuration
+// lives in a KEY=VALUE config file (default
+// /etc/devbox-gateway/devbox-gateway.conf, overridable via CONFIG_FILE), with
+// explicit environment variables taking precedence so containers and
+// development setups can override individual values.
+func loadBootSettings() (*config.SettingsType, error) {
+	if err := config.LoadConfigFile(config.FilePath()); err != nil {
+		return nil, fmt.Errorf("failed to load config file: %w", err)
+	}
+
+	// Refuse to boot when a leftover config still enables the removed SSH
+	// reverse-tunnel mode, rather than silently bind LISTEN_ADDR on a host that
+	// only ever published itself through an outbound tunnel.
+	if err := config.ValidateRemovedSSHTunnelMode(); err != nil {
+		return nil, err
+	}
+
+	settings := config.NewSettingType(true)
+
+	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
+	// routing label; with it empty every RDP connection is rejected while the
+	// dashboard still issues .rdp files. Refuse to boot in that broken state
+	// rather than fail silently at connect time.
+	if err := config.ValidateFrontDomain(settings); err != nil {
+		return nil, err
+	}
+	return settings, nil
 }
 
 // openFrontListener binds LISTEN_ADDR and returns the listener that feeds the

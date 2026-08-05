@@ -154,6 +154,19 @@ func TestMcovBootGatewayFrontDomainError(t *testing.T) {
 	}
 }
 
+func TestMcovBootGatewayRejectsRemovedSSHTunnelMode(t *testing.T) {
+	// A configuration preserved from before the SSH reverse-tunnel mode was
+	// removed may still enable it; boot must fail fast instead of silently
+	// binding LISTEN_ADDR on a host that never exposed a local listener.
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv("SSH_TUNNEL_ENABLE", "true")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), "SSH reverse-tunnel mode has been removed") {
+		t.Fatalf("expected removed SSH-tunnel mode error, got %v", err)
+	}
+}
+
 func TestMcovBootGatewaySNIHashSecretError(t *testing.T) {
 	root := mcovBootEnv(t)
 
