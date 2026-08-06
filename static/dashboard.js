@@ -913,12 +913,12 @@ function bootstrap() {
             const rawName = vm.name || "";
             const displayName = vm.displayName || rawName;
             const normalizedState = (vm.state || "").trim().toLowerCase();
-            const ipValue = (vm.ip || "").trim();
-            const hasIP = ipValue !== "" && ipValue.toLowerCase() !== "n/a";
+            const rdpReady = Boolean(vm.rdpReady);
             const ttyReady = Boolean(vm.ttyReady);
             const vncReady = Boolean(vm.vncReady);
             const hasName = rawName.trim() !== "";
             const isActive = isActiveState(normalizedState);
+            const isBooting = normalizedState === "running" && !rdpReady;
             const nameCell = document.createElement("td");
             nameCell.className = "fw-semibold";
             nameCell.textContent = displayName || "n/a";
@@ -931,7 +931,7 @@ function bootstrap() {
                 const connectActions = document.createElement("div");
                 connectActions.className = "d-flex flex-wrap gap-2";
                 if (displayName.trim() !== "") {
-                    if (hasIP) {
+                    if (rdpReady) {
                         // The RDP button is a deliberate action, not a static
                         // download link: clicking it POSTs to the server, which
                         // opens a short-lived RDP authorization window for this
@@ -1017,16 +1017,16 @@ function bootstrap() {
             const stateCell = document.createElement("td");
             const stateBadge = document.createElement("span");
             let stateClass = "text-bg-secondary";
-            if (normalizedState === "running") {
+            if (normalizedState === "running" && rdpReady) {
                 stateClass = "text-bg-success";
             }
-            else if (normalizedState === "paused") {
+            else if (isBooting || normalizedState === "paused") {
                 stateClass = "text-bg-warning";
             }
             else if (normalizedState === "suspended") {
                 stateClass = "text-bg-danger";
             }
-            const stateText = normalizedState ? (vm.state || "").trim() : "n/a";
+            const stateText = isBooting ? "booting" : normalizedState ? (vm.state || "").trim() : "n/a";
             stateBadge.className = `badge ${stateClass}`;
             if (normalizedState) {
                 stateBadge.classList.add("text-capitalize");

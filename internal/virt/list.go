@@ -24,6 +24,11 @@ import (
 // with defaultNetworkXML.
 const defaultNetworkRoutingCIDR = "192.168.122.0/24"
 
+const (
+	rdpPort                  = "3389"
+	rdpReadinessProbeTimeout = 500 * time.Millisecond
+)
+
 // VMInfo describes a VM entry shown in the dashboard and worker cache.
 type VMInfo struct {
 	Name         string
@@ -38,6 +43,7 @@ type VMInfo struct {
 	VolumeUsedGB int
 	IP           string
 	PrimaryIP    string
+	RDPReady     bool
 	TTYReady     bool
 	VNCReady     bool
 }
@@ -101,6 +107,7 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		VolumeUsedGB: diskUsedGB,
 		IP:           ip,
 		PrimaryIP:    primaryIP,
+		RDPReady:     domainRDPReady(primaryIP),
 		TTYReady:     domainTTYReady(&d),
 		VNCReady:     domainVNCReady(&d),
 	}, true
@@ -232,6 +239,27 @@ func domainVNCReady(d *libvirt.Domain) bool {
 		return false
 	}
 	return ok
+}
+
+// domainRDPReady reports whether the guest's RDP service is accepting TCP
+// connections. primaryIP comes from the trusted DHCP lease constrained to the
+// gateway's own VM subnet, so this probe cannot be redirected by guest-reported
+// interface data. A short timeout keeps the background VM refresh responsive
+// while a guest is still booting or its firewall is dropping connections.
+func domainRDPReady(primaryIP string) bool {
+	if primaryIP == "" {
+		return false
+	}
+	return tcpEndpointReady(net.JoinHostPort(primaryIP, rdpPort), rdpReadinessProbeTimeout)
+}
+
+func tcpEndpointReady(address string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func domainResources(d libvirt.Domain) (int, int) {

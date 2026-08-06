@@ -144,6 +144,7 @@ func TestBuildDashboardRows(t *testing.T) {
 			MemoryMiB: 4096,
 			VCPU:      2,
 			VolumeGB:  40,
+			RDPReady:  true,
 			TTYReady:  true,
 			VNCReady:  false,
 		},
@@ -161,6 +162,9 @@ func TestBuildDashboardRows(t *testing.T) {
 	}
 	if row.Name != "alice.vm" || row.IP != "192.0.2.10" || row.State != "running" {
 		t.Fatalf("unexpected row data: %+v", row)
+	}
+	if !row.RDPReady {
+		t.Fatal("expected RDP readiness to be copied to the dashboard row")
 	}
 	if row.RDPFilename != "alice.vm.rdp" {
 		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)

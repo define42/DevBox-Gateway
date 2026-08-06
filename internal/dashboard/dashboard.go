@@ -38,6 +38,7 @@ type VM struct {
 	VCPU         int    `json:"vcpu"`
 	VolumeGB     int    `json:"volumeGB"`
 	VolumeUsedGB int    `json:"volumeUsedGB"`
+	RDPReady     bool   `json:"rdpReady"`
 	TTYReady     bool   `json:"ttyReady"`
 	VNCReady     bool   `json:"vncReady"`
 }
@@ -200,6 +201,7 @@ func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 			VCPU:         vm.VCPU,
 			VolumeGB:     vm.VolumeGB,
 			VolumeUsedGB: vm.VolumeUsedGB,
+			RDPReady:     vm.RDPReady,
 			TTYReady:     vm.TTYReady,
 			VNCReady:     vm.VNCReady,
 		})

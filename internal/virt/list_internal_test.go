@@ -3,8 +3,10 @@ package virt
 import (
 	"devboxgateway/internal/hash"
 	"fmt"
+	"net"
 	"sync"
 	"testing"
+	"time"
 
 	"libvirt.org/go/libvirt"
 )
@@ -76,6 +78,36 @@ func TestFormatState(t *testing.T) {
 				t.Fatalf("formatState(%d) = %q, want %q", tc.state, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTCPEndpointReady(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	if !tcpEndpointReady(listener.Addr().String(), time.Second) {
+		t.Fatal("expected listening TCP endpoint to be ready")
+	}
+}
+
+func TestTCPEndpointNotReady(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	if tcpEndpointReady(address, 100*time.Millisecond) {
+		t.Fatal("expected closed TCP endpoint to be unavailable")
+	}
+	if domainRDPReady("") {
+		t.Fatal("expected a VM without a trusted routing IP to be unavailable")
 	}
 }
 
