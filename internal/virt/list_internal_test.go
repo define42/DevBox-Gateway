@@ -57,6 +57,61 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSubscribeVMChangesNotifiesOnlyForChangedSnapshots(t *testing.T) {
+	worker := &SingletonWorker{}
+	updates, unsubscribe := worker.SubscribeVMChanges()
+	defer unsubscribe()
+
+	first := []VMInfo{{Name: "alice-desktop", Owner: "alice", State: "running"}}
+	worker.setVMs(first)
+	select {
+	case <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for changed VM snapshot notification")
+	}
+
+	worker.setVMs(first)
+	select {
+	case <-updates:
+		t.Fatal("received a notification for an unchanged VM snapshot")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	worker.setVMs([]VMInfo{{Name: "alice-desktop", Owner: "alice", State: "running", RDPReady: true}})
+	select {
+	case <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for RDP readiness notification")
+	}
+}
+
+func TestSubscribeVMChangesCoalescesAndUnsubscribes(t *testing.T) {
+	worker := &SingletonWorker{}
+	updates, unsubscribe := worker.SubscribeVMChanges()
+
+	worker.setVMs([]VMInfo{{Name: "vm-1"}})
+	worker.setVMs([]VMInfo{{Name: "vm-2"}})
+	worker.setVMs([]VMInfo{{Name: "vm-3"}})
+
+	select {
+	case <-updates:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for coalesced VM snapshot notification")
+	}
+	select {
+	case <-updates:
+		t.Fatal("expected rapid VM updates to coalesce into one notification")
+	default:
+	}
+
+	unsubscribe()
+	unsubscribe()
+	if _, ok := <-updates; ok {
+		t.Fatal("expected unsubscribe to close the notification channel")
+	}
+	worker.setVMs([]VMInfo{{Name: "vm-4"}})
+}
+
 func TestFormatState(t *testing.T) {
 	tests := []struct {
 		state libvirt.DomainState

@@ -31,7 +31,7 @@ const (
 	cacheControlValue = "no-store, no-cache, must-revalidate, max-age=0"
 	pragmaValue       = "no-cache"
 	expiresValue      = "0"
-	rdpFilename       = "rdpgw.rdp"
+	rdpFilename       = dashboard.DefaultRDPFilename
 	forbiddenOrigin   = "Forbidden request origin."
 	loginLocked       = "Too many login attempts. Try again later."
 	maxFormBodyBytes  = 1 << 20
@@ -362,7 +362,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	registerAPI(api, sessionManager, settings)
 	router.Get("/api/dashboard/console/{name}/ws", consolepkg.HandleDashboardConsoleWS(sessionManager))
 	router.Get("/api/dashboard/vnc/{name}/ws", consolepkg.HandleDashboardVNCWS(sessionManager))
-	router.Get("/api/dashboard/ping/ws", consolepkg.HandleDashboardPingWS(sessionManager))
+	router.Get("/api/dashboard/ws", consolepkg.HandleDashboardWS(sessionManager, settings))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -443,28 +443,14 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		vmRows, err := dashboard.ListDashboardVMs(user.Name)
+		response, err := dashboard.DataForUser(settings, user.Name)
 		if err != nil {
 			log.Printf("list vms: %v", err)
-			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.DataResponse{
-				Filename: rdpFilename,
-				Error:    "Unable to load virtual machines right now.",
-			})
+			response.Error = "Unable to load virtual machines right now."
+			dashboard.WriteJSON(w, http.StatusInternalServerError, response)
 			return
 		}
-		baseImages, err := virt.ListBaseImages(settings)
-		if err != nil {
-			// A listing failure should not blank the whole dashboard; the create
-			// form just shows no selectable images.
-			log.Printf("list base images: %v", err)
-			baseImages = nil
-		}
-		dashboard.WriteJSON(w, http.StatusOK, dashboard.DataResponse{
-			Filename:   rdpFilename,
-			Username:   user.Name,
-			VMs:        vmRows,
-			BaseImages: baseImages,
-		})
+		dashboard.WriteJSON(w, http.StatusOK, response)
 	})
 }
 

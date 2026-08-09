@@ -1,11 +1,14 @@
 package console
 
 import (
+	"devboxgateway/internal/config"
 	"devboxgateway/internal/session"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -208,32 +211,67 @@ func TestBridgeDashboardSocket(t *testing.T) {
 	}
 }
 
-func TestBridgePingSocketEchoesProbes(t *testing.T) {
+func readDashboardMessageType(t *testing.T, conn *websocket.Conn, wantType string) dashboardServerMessage {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(websocketTestTimeout)); err != nil {
+		t.Fatalf("set websocket read deadline: %v", err)
+	}
+	for {
+		var message dashboardServerMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("read dashboard websocket message: %v", err)
+		}
+		if message.Type == wantType {
+			return message
+		}
+	}
+}
+
+func TestBridgeDashboardControlSocketMultiplexesVMsAndPongs(t *testing.T) {
 	clientWS, serverWS, cleanup := newWebsocketPair(t)
 	defer cleanup()
+	settings := config.NewSettingType(false)
+	baseImageDir := t.TempDir()
+	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, baseImageDir); err != nil {
+		t.Fatalf("overwrite base image directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(baseImageDir, "desktop.qcow2"), []byte("image"), 0o600); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
 
 	done := make(chan struct{})
 	go func() {
-		bridgePingSocket(serverWS)
+		bridgeDashboardControlSocket(
+			serverWS,
+			"dashboard-socket-test-user",
+			settings,
+			time.Now().Add(websocketTestTimeout),
+		)
 		close(done)
 	}()
 
-	for _, want := range []string{"123.45", "678.9"} {
-		if err := clientWS.WriteMessage(websocket.TextMessage, []byte(want)); err != nil {
-			t.Fatalf("write probe %q: %v", want, err)
+	dashboardUpdate := readDashboardMessageType(t, clientWS, "dashboard")
+	if dashboardUpdate.Data == nil {
+		t.Fatal("expected initial dashboard update to contain data")
+	}
+	if dashboardUpdate.Data.Username != "dashboard-socket-test-user" {
+		t.Fatalf("expected dashboard username, got %q", dashboardUpdate.Data.Username)
+	}
+	if dashboardUpdate.Data.Filename != "rdpgw.rdp" {
+		t.Fatalf("expected RDP filename, got %q", dashboardUpdate.Data.Filename)
+	}
+	if len(dashboardUpdate.Data.BaseImages) != 1 || dashboardUpdate.Data.BaseImages[0] != "desktop.qcow2" {
+		t.Fatalf("expected base image metadata, got %v", dashboardUpdate.Data.BaseImages)
+	}
+
+	for _, want := range []float64{123.45, 678.9} {
+		probe := want
+		if err := clientWS.WriteJSON(dashboardClientMessage{Type: "ping", ID: &probe}); err != nil {
+			t.Fatalf("write probe %v: %v", want, err)
 		}
-		if err := clientWS.SetReadDeadline(time.Now().Add(websocketTestTimeout)); err != nil {
-			t.Fatalf("set websocket read deadline: %v", err)
-		}
-		messageType, got, err := clientWS.ReadMessage()
-		if err != nil {
-			t.Fatalf("read echoed probe: %v", err)
-		}
-		if messageType != websocket.TextMessage {
-			t.Fatalf("expected text websocket message, got %d", messageType)
-		}
-		if string(got) != want {
-			t.Fatalf("expected echoed probe %q, got %q", want, string(got))
+		pong := readDashboardMessageType(t, clientWS, "pong")
+		if pong.ID == nil || *pong.ID != want {
+			t.Fatalf("expected pong ID %v, got %+v", want, pong.ID)
 		}
 	}
 
@@ -242,7 +280,7 @@ func TestBridgePingSocketEchoesProbes(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(websocketTestTimeout):
-		t.Fatal("bridgePingSocket did not return after client close")
+		t.Fatal("bridgeDashboardControlSocket did not return after client close")
 	}
 }
 

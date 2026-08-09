@@ -15,8 +15,12 @@ import (
 	"strings"
 )
 
-// DashboardHTMLPath is the embedded dashboard HTML template location.
-const DashboardHTMLPath = "static/dashboard.html"
+const (
+	// DashboardHTMLPath is the embedded dashboard HTML template location.
+	DashboardHTMLPath = "static/dashboard.html"
+	// DefaultRDPFilename is the fallback download name sent in dashboard data.
+	DefaultRDPFilename = "rdpgw.rdp"
+)
 
 const (
 	cacheControlValue = "no-store, no-cache, must-revalidate, max-age=0"
@@ -173,6 +177,32 @@ func WriteRDPFile(w http.ResponseWriter, settings *config.SettingsType, user, vm
 func ListDashboardVMs(user string) ([]VM, error) {
 	vmList := virt.GetInstance().GetVMs(user)
 	return buildDashboardRows(vmList, user), nil
+}
+
+// DataForUser builds the complete dashboard snapshot shared by the initial HTTP
+// response and subsequent WebSocket updates.
+func DataForUser(settings *config.SettingsType, user string) (DataResponse, error) {
+	response := DataResponse{
+		Filename: DefaultRDPFilename,
+		Username: user,
+	}
+
+	vmRows, err := ListDashboardVMs(user)
+	if err != nil {
+		return response, err
+	}
+	response.VMs = vmRows
+
+	baseImages, err := virt.ListBaseImages(settings)
+	if err != nil {
+		// A listing failure should not blank the VM list; the create form just
+		// shows no selectable images until a later dashboard snapshot succeeds.
+		log.Printf("list base images: %v", err)
+		baseImages = nil
+	}
+	response.BaseImages = baseImages
+
+	return response, nil
 }
 
 func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {

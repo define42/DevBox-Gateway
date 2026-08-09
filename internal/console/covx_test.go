@@ -2,6 +2,8 @@ package console
 
 import (
 	"bufio"
+	"context"
+	"devboxgateway/internal/config"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/types"
 	"errors"
@@ -25,6 +27,15 @@ const (
 // covxSessionCookie logs username in through the session manager and returns
 // the resulting session cookie for authenticated follow-up requests.
 func covxSessionCookie(t *testing.T, manager *session.Manager, username string) *http.Cookie {
+	return covxSessionCookieWithDeadline(t, manager, username, time.Time{})
+}
+
+func covxSessionCookieWithDeadline(
+	t *testing.T,
+	manager *session.Manager,
+	username string,
+	deadline time.Time,
+) *http.Cookie {
 	t.Helper()
 
 	user, err := types.NewUser(username)
@@ -39,6 +50,9 @@ func covxSessionCookie(t *testing.T, manager *session.Manager, username string) 
 	handler := manager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := manager.CreateSession(r.Context(), user, r.RemoteAddr, ""); err != nil {
 			t.Errorf("create session: %v", err)
+		}
+		if !deadline.IsZero() {
+			manager.SetDeadline(r.Context(), deadline)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -65,7 +79,7 @@ func covxDashboardServer(t *testing.T, manager *session.Manager) *httptest.Serve
 	router.Use(manager.LoadAndSave)
 	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(manager))
 	router.Get("/api/dashboard/vnc/{name}/ws", HandleDashboardVNCWS(manager))
-	router.Get("/api/dashboard/ping/ws", HandleDashboardPingWS(manager))
+	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, config.NewSettingType(false)))
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
@@ -145,11 +159,11 @@ func covxAwaitWebsocketClosed(t *testing.T, conn *websocket.Conn) {
 	}
 }
 
-func TestCovxPingWSRejectsUnauthenticated(t *testing.T) {
+func TestCovxDashboardWSRejectsUnauthenticated(t *testing.T) {
 	manager := session.NewManager()
 	server := covxDashboardServer(t, manager)
 
-	status, body := covxGetStatus(t, server, "/api/dashboard/ping/ws", nil)
+	status, body := covxGetStatus(t, server, "/api/dashboard/ws", nil)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("expected %d, got %d with body %s", http.StatusUnauthorized, status, body)
 	}
@@ -158,20 +172,20 @@ func TestCovxPingWSRejectsUnauthenticated(t *testing.T) {
 	}
 }
 
-func TestCovxPingWSUpgradeFailure(t *testing.T) {
+func TestCovxDashboardWSUpgradeFailure(t *testing.T) {
 	manager := session.NewManager()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
 	// A plain GET with a valid session is not a websocket handshake, so the
 	// upgrade fails after authentication succeeded.
-	status, body := covxGetStatus(t, server, "/api/dashboard/ping/ws", cookie)
+	status, body := covxGetStatus(t, server, "/api/dashboard/ws", cookie)
 	if status != http.StatusBadRequest {
 		t.Fatalf("expected %d, got %d with body %s", http.StatusBadRequest, status, body)
 	}
 }
 
-func TestCovxPingWSEchoWithDebugLogging(t *testing.T) {
+func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	// Debug logging routes the upgrade through debugUpgradeWriter/debugConn and
 	// exercises the debugf logging branch.
 	SetDebugLogging(true)
@@ -181,39 +195,53 @@ func TestCovxPingWSEchoWithDebugLogging(t *testing.T) {
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
-	conn := covxDialWebsocket(t, server, "/api/dashboard/ping/ws", cookie)
+	conn := covxDialWebsocket(t, server, "/api/dashboard/ws", cookie)
 
-	const probe = "123.456"
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(probe)); err != nil {
+	probe := 123.456
+	if err := conn.WriteJSON(dashboardClientMessage{Type: "ping", ID: &probe}); err != nil {
 		t.Fatalf("write ping probe: %v", err)
 	}
-	if err := conn.SetReadDeadline(time.Now().Add(websocketTestTimeout)); err != nil {
-		t.Fatalf("set read deadline: %v", err)
-	}
-	messageType, got, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read echoed probe: %v", err)
-	}
-	if messageType != websocket.TextMessage {
-		t.Fatalf("expected text echo, got message type %d", messageType)
-	}
-	if string(got) != probe {
-		t.Fatalf("expected echoed probe %q, got %q", probe, string(got))
+	pong := readDashboardMessageType(t, conn, "pong")
+	if pong.ID == nil || *pong.ID != probe {
+		t.Fatalf("expected pong ID %v, got %+v", probe, pong.ID)
 	}
 
 	closeWebsocketClient(t, conn)
 }
 
-func TestCovxPingWSClosedOnUserRevocation(t *testing.T) {
+func TestCovxDashboardWSClosedOnUserRevocation(t *testing.T) {
 	manager := session.NewManager()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
-	conn := covxDialWebsocket(t, server, "/api/dashboard/ping/ws", cookie)
+	conn := covxDialWebsocket(t, server, "/api/dashboard/ws", cookie)
 
 	// Closing the user's tracked connections runs the handler's registered
 	// close callback, which shuts the websocket down server-side.
 	covxRevokeUserConnections(t, manager, covxTestUsername)
+	covxAwaitWebsocketClosed(t, conn)
+}
+
+func TestCovxDashboardWSClosesAtSessionDeadline(t *testing.T) {
+	manager := session.NewManager()
+	server := covxDashboardServer(t, manager)
+	cookie := covxSessionCookieWithDeadline(
+		t,
+		manager,
+		covxTestUsername,
+		time.Now().Add(time.Second),
+	)
+
+	conn := covxDialWebsocket(t, server, "/api/dashboard/ws", cookie)
+	probe := 123.456
+	if err := conn.WriteJSON(dashboardClientMessage{Type: "ping", ID: &probe}); err != nil {
+		t.Fatalf("write ping probe before session expiry: %v", err)
+	}
+	pong := readDashboardMessageType(t, conn, "pong")
+	if pong.ID == nil || *pong.ID != probe {
+		t.Fatalf("expected pong ID %v before session expiry, got %+v", probe, pong.ID)
+	}
+
 	covxAwaitWebsocketClosed(t, conn)
 }
 
@@ -230,30 +258,24 @@ func TestCovxBridgeDashboardSocketLogsUnexpectedError(t *testing.T) {
 	bridgeDashboardSocket("vnc", "covx-vm", serverWS, backendConn)
 }
 
-func TestCovxBridgePingSocketWriteFailure(t *testing.T) {
+func TestCovxDashboardMessageWriterStopsOnWriteFailure(t *testing.T) {
 	clientWS, serverWS, cleanup := newWebsocketPair(t)
 	defer cleanup()
+	_ = clientWS.Close()
+	_ = serverWS.Close()
 
-	// An already-expired write deadline makes the echo write fail while the
-	// preceding read still succeeds.
-	if err := serverWS.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
-		t.Fatalf("set expired write deadline: %v", err)
-	}
-
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	outbound := make(chan dashboardServerMessage, 1)
+	probe := 1.0
+	outbound <- dashboardServerMessage{Type: "pong", ID: &probe}
 	done := make(chan struct{})
-	go func() {
-		bridgePingSocket(serverWS)
-		close(done)
-	}()
-
-	if err := clientWS.WriteMessage(websocket.TextMessage, []byte("1.0")); err != nil {
-		t.Fatalf("write probe: %v", err)
-	}
+	go writeDashboardMessages(ctx, cancel, serverWS, outbound, done)
 
 	select {
 	case <-done:
 	case <-time.After(websocketTestTimeout):
-		t.Fatal("bridgePingSocket did not return after echo write failure")
+		t.Fatal("dashboard message writer did not return after write failure")
 	}
 }
 

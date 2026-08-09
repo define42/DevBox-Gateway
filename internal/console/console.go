@@ -3,6 +3,9 @@ package console
 
 import (
 	"bufio"
+	"context"
+	"devboxgateway/internal/config"
+	"devboxgateway/internal/dashboard"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/virt"
 	"errors"
@@ -238,33 +241,47 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 	}
 }
 
-// pingReadLimit caps the size of an RTT probe message. Probes carry only a tiny
-// client-generated token, so a small limit is plenty and keeps the echo loop
-// from buffering anything large.
-const pingReadLimit = 1024
+const (
+	// dashboardControlReadLimit caps inbound dashboard control messages. The
+	// browser only sends a tiny typed RTT probe, so 1 KiB is ample.
+	dashboardControlReadLimit = 1024
+	dashboardOutboundQueue    = 16
+)
 
-// HandleDashboardPingWS serves a lightweight echo websocket the dashboard uses to
-// measure live round-trip time to the gateway. It keeps the connection open and
-// echoes each client message straight back so the browser can time the round
-// trip. Browsers do not expose WebSocket protocol-level ping/pong to JavaScript,
-// so the probe is an application-level echo. No VM ownership is involved; it only
-// requires an authenticated session like the other dashboard sockets.
-func HandleDashboardPingWS(sessionManager *session.Manager) http.HandlerFunc {
+type dashboardClientMessage struct {
+	Type string   `json:"type"`
+	ID   *float64 `json:"id,omitempty"`
+}
+
+type dashboardServerMessage struct {
+	Type  string                  `json:"type"`
+	ID    *float64                `json:"id,omitempty"`
+	Data  *dashboard.DataResponse `json:"data,omitempty"`
+	Error string                  `json:"error,omitempty"`
+}
+
+// HandleDashboardWS serves the dashboard's shared control websocket. Typed
+// messages multiplex application-level RTT probes with user-filtered VM status
+// pushes, avoiding a second long-lived SSE connection. Browsers do not expose
+// protocol-level ping/pong to JavaScript, so RTT still uses explicit ping/pong
+// messages while WebSocket control frames keep the transport alive.
+func HandleDashboardWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
-			log.Printf("reject ping websocket from %s: no authenticated session", r.RemoteAddr)
+			log.Printf("reject dashboard websocket from %s: no authenticated session", r.RemoteAddr)
 			http.Error(w, "Login required.", http.StatusUnauthorized)
 			return
 		}
+		sessionDeadline := sessionManager.Deadline(r.Context())
 
 		dashboardSocketUpgrader := websocket.Upgrader{
 			CheckOrigin: sameOriginWebsocketRequest,
 		}
 
-		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("ping", "rtt", w), r, nil)
+		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("dashboard", "control", w), r, nil)
 		if err != nil {
-			log.Printf("upgrade dashboard ping websocket failed: %v", err)
+			log.Printf("upgrade dashboard websocket failed: %v", err)
 			return
 		}
 		unregisterConnection := sessionManager.RegisterUserConnection(user.GetName(), func() {
@@ -272,35 +289,133 @@ func HandleDashboardPingWS(sessionManager *session.Manager) http.HandlerFunc {
 		})
 		defer unregisterConnection()
 
-		bridgePingSocket(ws)
+		bridgeDashboardControlSocket(ws, user.GetName(), settings, sessionDeadline)
 	}
 }
 
-// bridgePingSocket echoes every client probe back until the connection closes.
-func bridgePingSocket(ws *websocket.Conn) {
-	defer func() { _ = ws.Close() }()
+func bridgeDashboardControlSocket(
+	ws *websocket.Conn,
+	username string,
+	settings *config.SettingsType,
+	sessionDeadline time.Time,
+) {
+	configureWebsocketKeepalive(ws, dashboardControlReadLimit)
+	ctx, cancel := context.WithDeadline(context.Background(), sessionDeadline)
+	outbound := make(chan dashboardServerMessage, dashboardOutboundQueue)
+	writerDone := make(chan struct{})
+	publisherDone := make(chan struct{})
+	keepaliveDone := make(chan struct{})
+	socketCloserDone := make(chan struct{})
 
-	configureWebsocketKeepalive(ws, pingReadLimit)
+	go writeDashboardMessages(ctx, cancel, ws, outbound, writerDone)
+	go publishDashboardVMUpdates(ctx, username, settings, outbound, publisherDone)
+	go pingWebsocketUntil(ws, keepaliveDone)
+	go closeDashboardSocketWhenDone(ctx, ws, socketCloserDone)
 
-	done := make(chan struct{})
-	defer close(done)
-	go pingWebsocketUntil(ws, done)
+	defer func() {
+		cancel()
+		_ = ws.Close()
+		close(keepaliveDone)
+		<-writerDone
+		<-publisherDone
+		<-socketCloserDone
+	}()
 
 	for {
-		messageType, payload, err := ws.ReadMessage()
-		if err != nil {
+		var message dashboardClientMessage
+		if err := ws.ReadJSON(&message); err != nil {
 			return
 		}
 		_ = ws.SetReadDeadline(time.Now().Add(wsPongWait))
-		if messageType != websocket.TextMessage && messageType != websocket.BinaryMessage {
+		if message.Type != "ping" || message.ID == nil {
 			continue
 		}
-		// No per-write deadline here: the echo is a tiny control payload, and a
-		// stalled write is already bounded by pingWebsocketUntil, whose periodic
-		// WriteControl sets a write deadline on the shared connection.
-		if err := ws.WriteMessage(messageType, payload); err != nil {
+		response := dashboardServerMessage{Type: "pong", ID: message.ID}
+		select {
+		case outbound <- response:
+		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+func closeDashboardSocketWhenDone(ctx context.Context, ws *websocket.Conn, done chan<- struct{}) {
+	defer close(done)
+	<-ctx.Done()
+	// Closing the socket is required in addition to cancelling the publishers:
+	// ReadJSON may otherwise remain blocked after the authenticated session has
+	// reached its absolute deadline.
+	_ = ws.Close()
+}
+
+func writeDashboardMessages(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	ws *websocket.Conn,
+	outbound <-chan dashboardServerMessage,
+	done chan<- struct{},
+) {
+	defer close(done)
+	defer cancel()
+
+	for {
+		select {
+		case message := <-outbound:
+			_ = ws.SetWriteDeadline(time.Now().Add(wsWriteWait))
+			if err := ws.WriteJSON(message); err != nil {
+				_ = ws.Close()
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func publishDashboardVMUpdates(
+	ctx context.Context,
+	username string,
+	settings *config.SettingsType,
+	outbound chan<- dashboardServerMessage,
+	done chan<- struct{},
+) {
+	defer close(done)
+	updates, unsubscribe := virt.GetInstance().SubscribeVMChanges()
+	defer unsubscribe()
+
+	if !queueDashboardDataUpdate(ctx, username, settings, outbound) {
+		return
+	}
+	for {
+		select {
+		case _, ok := <-updates:
+			if !ok || !queueDashboardDataUpdate(ctx, username, settings, outbound) {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func queueDashboardDataUpdate(
+	ctx context.Context,
+	username string,
+	settings *config.SettingsType,
+	outbound chan<- dashboardServerMessage,
+) bool {
+	data, err := dashboard.DataForUser(settings, username)
+	message := dashboardServerMessage{Type: "dashboard", Data: &data}
+	if err != nil {
+		log.Printf("list vms for dashboard websocket: %v", err)
+		message = dashboardServerMessage{Type: "dashboard", Error: "Unable to load virtual machines right now."}
+	}
+
+	select {
+	case outbound <- message:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 

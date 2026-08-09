@@ -84,3 +84,33 @@ func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
 		t.Fatal("dashboard JavaScript must not expose logout as a GET navigation")
 	}
 }
+
+func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
+	sessionManager := session.NewManager()
+	settings := config.NewSettingType(false)
+	router := getRemoteGatewayRotuer(sessionManager, settings)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `new WebSocket(dashboardWebSocketURL())`) {
+		t.Fatal("expected dashboard JavaScript to open the shared dashboard WebSocket")
+	}
+	if !strings.Contains(body, `message.type === "dashboard"`) {
+		t.Fatal("expected dashboard JavaScript to handle complete dashboard snapshots")
+	}
+	if !strings.Contains(body, "baseImages = data.baseImages || []") {
+		t.Fatal("expected WebSocket dashboard snapshots to refresh base image metadata")
+	}
+	if strings.Contains(body, "EventSource") {
+		t.Fatal("dashboard JavaScript must not retain the SSE VM update stream")
+	}
+	if strings.Contains(body, "AUTO_REFRESH_INTERVAL_MS") {
+		t.Fatal("dashboard JavaScript must not retain timer-based VM polling")
+	}
+}

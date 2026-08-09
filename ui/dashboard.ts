@@ -2,7 +2,6 @@
 
 const DEFAULT_VM_ERROR = "Unable to load virtual machines right now.";
 const SESSION_CHECK_ERROR = "Unable to verify your session. Reload and sign in again.";
-const AUTO_REFRESH_INTERVAL_MS = 10000;
 const RTT_PING_INTERVAL_MS = 2000;
 const RTT_RECONNECT_DELAY_MS = 2000;
 const RTT_GREEN_MAX_MS = 30;
@@ -70,6 +69,13 @@ type DashboardDataResponse = {
     error?: string;
 };
 
+type DashboardSocketMessage = {
+    type?: string;
+    id?: number;
+    data?: DashboardDataResponse;
+    error?: string;
+};
+
 type DashboardActionResponse = {
     ok?: boolean;
     message?: string;
@@ -126,10 +132,6 @@ type RequestResult<T> = {
     error?: string;
 };
 
-type LoadVMOptions = {
-    showLoading?: boolean;
-};
-
 const state: DashboardState = {
     vms: [],
     filename: "rdpgw.rdp",
@@ -167,6 +169,7 @@ const state: DashboardState = {
 };
 
 let loadInFlight = false;
+let dashboardInitialLoadComplete = false;
 
 function isActiveState(vmState: string): boolean {
     const normalized = vmState.trim().toLowerCase();
@@ -213,9 +216,9 @@ function terminalWebSocketURL(name: string): string {
     return `${scheme}://${window.location.host}/api/dashboard/console/${encodeURIComponent(name)}/ws`;
 }
 
-function pingWebSocketURL(): string {
+function dashboardWebSocketURL(): string {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${scheme}://${window.location.host}/api/dashboard/ping/ws`;
+    return `${scheme}://${window.location.host}/api/dashboard/ws`;
 }
 
 function vncFrameURL(name: string): string {
@@ -587,10 +590,11 @@ function bootstrap(): void {
         }
     }
 
-    let rttSocket: WebSocket | null = null;
+    let dashboardSocket: WebSocket | null = null;
     let rttPingHandle = 0;
-    let rttReconnectHandle = 0;
-    let rttClosing = false;
+    let dashboardReconnectHandle = 0;
+    let dashboardSocketClosing = false;
+    let dashboardSocketErrorChecked = false;
     let rttPrev: number | null = null;
     let rttJitter = 0;
     let rttHasJitter = false;
@@ -614,16 +618,14 @@ function bootstrap(): void {
         renderRTT(rttMs, rttHasJitter ? rttJitter : null);
     }
 
-    // sendRTTProbe stamps the current time into the probe payload and bounces it
-    // off the server's echo socket; the round trip is computed when the echo
-    // returns. Carrying the send time in the payload keeps the reading correct
-    // even if a probe is dropped or replies arrive out of step.
+    // sendRTTProbe stamps the current time into a typed ping message. The shared
+    // dashboard socket returns a typed pong while also carrying VM updates.
     function sendRTTProbe(): void {
-        if (!rttSocket || rttSocket.readyState !== WebSocket.OPEN) {
+        if (!dashboardSocket || dashboardSocket.readyState !== WebSocket.OPEN) {
             return;
         }
         try {
-            rttSocket.send(String(performance.now()));
+            dashboardSocket.send(JSON.stringify({ type: "ping", id: performance.now() }));
         } catch {
             // A failed send means the socket is going away; onclose handles it.
         }
@@ -636,37 +638,94 @@ function bootstrap(): void {
         }
     }
 
-    function scheduleRTTReconnect(): void {
-        if (rttClosing || rttReconnectHandle) {
+    function scheduleDashboardReconnect(): void {
+        if (dashboardSocketClosing || dashboardReconnectHandle) {
             return;
         }
-        rttReconnectHandle = window.setTimeout(() => {
-            rttReconnectHandle = 0;
-            connectRTT();
+        dashboardReconnectHandle = window.setTimeout(() => {
+            dashboardReconnectHandle = 0;
+            connectDashboardSocket();
         }, RTT_RECONNECT_DELAY_MS);
     }
 
-    // connectRTT opens (and keeps open) the persistent RTT websocket, firing a
-    // probe on a timer while it is connected and auto-reconnecting if it drops.
-    function connectRTT(): void {
-        if (rttClosing || rttSocket) {
+    function applyDashboardData(data: DashboardDataResponse): void {
+        state.vms = data.vms || [];
+        baseImages = data.baseImages || [];
+        renderBaseImageOptions();
+        if (data.filename) {
+            state.filename = data.filename;
+        }
+        if (typeof data.username === "string" && data.username !== "") {
+            defaultUsername = data.username;
+            usernameInputEl.placeholder = defaultUsername;
+            // Prefill the default once so a WebSocket recovery after a failed
+            // HTTP bootstrap restores the logged-in user's guest username.
+            if (!usernameInitialized && document.activeElement !== usernameInputEl) {
+                usernameInputEl.value = defaultUsername;
+                usernameInitialized = true;
+            }
+        }
+        state.vmError = data.error || "";
+    }
+
+    function applyDashboardUpdate(message: DashboardSocketMessage): void {
+        if (typeof message.error === "string" && message.error !== "") {
+            state.vmError = message.error;
+            renderVMList();
+            return;
+        }
+        if (!message.data || !Array.isArray(message.data.vms)) {
+            state.vmError = DEFAULT_VM_ERROR;
+            renderVMList();
+            return;
+        }
+        applyDashboardData(message.data);
+        state.loading = false;
+        renderVMList();
+    }
+
+    function handleDashboardSocketMessage(event: MessageEvent): void {
+        if (typeof event.data !== "string") {
+            return;
+        }
+        let message: DashboardSocketMessage;
+        try {
+            message = JSON.parse(event.data) as DashboardSocketMessage;
+        } catch {
+            return;
+        }
+
+        if (message.type === "pong" && typeof message.id === "number") {
+            recordRTTSample(performance.now() - message.id);
+            return;
+        }
+        if (message.type === "dashboard") {
+            applyDashboardUpdate(message);
+        }
+    }
+
+    // connectDashboardSocket keeps one authenticated connection open for both
+    // RTT probes and cache-driven VM status pushes.
+    function connectDashboardSocket(): void {
+        if (dashboardSocketClosing || dashboardSocket) {
             return;
         }
         let socket: WebSocket;
         try {
-            socket = new WebSocket(pingWebSocketURL());
+            socket = new WebSocket(dashboardWebSocketURL());
         } catch {
             resetRTTStats();
             renderRTT(null, null);
-            scheduleRTTReconnect();
+            scheduleDashboardReconnect();
             return;
         }
-        rttSocket = socket;
+        dashboardSocket = socket;
 
         socket.onopen = () => {
-            if (rttSocket !== socket) {
+            if (dashboardSocket !== socket) {
                 return;
             }
+            dashboardSocketErrorChecked = false;
             sendRTTProbe();
             stopRTTPing();
             rttPingHandle = window.setInterval(() => {
@@ -678,49 +737,51 @@ function bootstrap(): void {
         };
 
         socket.onmessage = (event: MessageEvent) => {
-            if (rttSocket !== socket || typeof event.data !== "string") {
+            if (dashboardSocket !== socket) {
                 return;
             }
-            const sent = Number(event.data);
-            if (Number.isNaN(sent)) {
-                return;
-            }
-            recordRTTSample(performance.now() - sent);
+            handleDashboardSocketMessage(event);
         };
 
         socket.onerror = () => {
-            if (rttSocket === socket) {
+            if (dashboardSocket === socket) {
                 renderRTT(null, null);
+                if (!dashboardSocketErrorChecked) {
+                    dashboardSocketErrorChecked = true;
+                    // WebSocket does not expose handshake status codes. This
+                    // request redirects an expired session to the login page.
+                    void requestJSON<DashboardDataResponse>("/api/dashboard/data");
+                }
             }
         };
 
         socket.onclose = () => {
-            if (rttSocket === socket) {
-                rttSocket = null;
+            if (dashboardSocket === socket) {
+                dashboardSocket = null;
             }
             stopRTTPing();
             // Drop the prior sample so a reconnect does not register a bogus
             // jitter spike across the gap.
             resetRTTStats();
             renderRTT(null, null);
-            scheduleRTTReconnect();
+            scheduleDashboardReconnect();
         };
     }
 
-    function teardownRTT(): void {
-        rttClosing = true;
+    function teardownDashboardSocket(): void {
+        dashboardSocketClosing = true;
         stopRTTPing();
-        if (rttReconnectHandle) {
-            window.clearTimeout(rttReconnectHandle);
-            rttReconnectHandle = 0;
+        if (dashboardReconnectHandle) {
+            window.clearTimeout(dashboardReconnectHandle);
+            dashboardReconnectHandle = 0;
         }
-        if (rttSocket) {
+        if (dashboardSocket) {
             try {
-                rttSocket.close();
+                dashboardSocket.close();
             } catch {
                 // Ignore close errors during teardown.
             }
-            rttSocket = null;
+            dashboardSocket = null;
         }
     }
 
@@ -1176,24 +1237,10 @@ function bootstrap(): void {
                     connectStack.appendChild(note);
                 }
 
-                if (!ttyReady) {
-                    const note = document.createElement("div");
-                    note.className = "text-body-secondary small";
-                    note.textContent = "TTY available only for newly created VMs.";
-                    connectStack.appendChild(note);
-                }
-
                 if (vncReady && !isActive) {
                     const note = document.createElement("div");
                     note.className = "text-body-secondary small";
                     note.textContent = "Start VM to open NoVNC.";
-                    connectStack.appendChild(note);
-                }
-
-                if (!vncReady) {
-                    const note = document.createElement("div");
-                    note.className = "text-body-secondary small";
-                    note.textContent = "NoVNC available only for newly created VMs.";
                     connectStack.appendChild(note);
                 }
 
@@ -1449,17 +1496,14 @@ function bootstrap(): void {
         return { ok: true, data: payload as T };
     }
 
-    async function loadVMs(options: LoadVMOptions = {}): Promise<void> {
+    async function loadVMs(): Promise<void> {
         if (loadInFlight) {
             return;
         }
         loadInFlight = true;
-        const showLoading = options.showLoading ?? state.vms.length === 0;
-        if (showLoading) {
-            state.loading = true;
-            state.vmError = "";
-            renderVMList();
-        }
+        state.loading = true;
+        state.vmError = "";
+        renderVMList();
         try {
             const result = await requestJSON<DashboardDataResponse>("/api/dashboard/data");
             if (!result) {
@@ -1470,27 +1514,7 @@ function bootstrap(): void {
                 state.vmError = result.error || DEFAULT_VM_ERROR;
                 return;
             }
-            state.vms = result.data.vms || [];
-            baseImages = result.data.baseImages || [];
-            renderBaseImageOptions();
-            if (result.data.filename) {
-                state.filename = result.data.filename;
-            }
-            if (typeof result.data.username === "string" && result.data.username !== "") {
-                defaultUsername = result.data.username;
-                usernameInputEl.placeholder = defaultUsername;
-                // Prefill the default once so the field shows the logged-in user
-                // without clobbering anything the user has already typed.
-                if (!usernameInitialized && document.activeElement !== usernameInputEl) {
-                    usernameInputEl.value = defaultUsername;
-                    usernameInitialized = true;
-                }
-            }
-            if (result.data.error) {
-                state.vmError = result.data.error;
-            } else {
-                state.vmError = "";
-            }
+            applyDashboardData(result.data);
         } finally {
             state.loading = false;
             renderVMList();
@@ -1535,7 +1559,6 @@ function bootstrap(): void {
             inputEl.value = "";
             usernameInputEl.value = defaultUsername;
             closeCreate();
-            await loadVMs();
         } finally {
             setBusy(false);
         }
@@ -1573,7 +1596,6 @@ function bootstrap(): void {
                 return;
             }
             setActionMessage(result.data.message || successMessage);
-            await loadVMs();
         } finally {
             setBusy(false);
         }
@@ -1765,38 +1787,29 @@ function bootstrap(): void {
     renderCreate();
     updateCreateAvailability();
     renderRTT(null, null);
-    void loadVMs();
-    connectRTT();
-
-    const refreshHandle = window.setInterval(() => {
-        if (document.hidden || state.busy) {
-            return;
-        }
-        void loadVMs({ showLoading: false });
-    }, AUTO_REFRESH_INTERVAL_MS);
+    void loadVMs().then(() => {
+        dashboardInitialLoadComplete = true;
+        connectDashboardSocket();
+    });
 
     document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
-            void loadVMs({ showLoading: false });
             // Re-probe immediately on return; reconnect if the socket dropped.
-            connectRTT();
+            if (dashboardInitialLoadComplete) {
+                connectDashboardSocket();
+            }
             sendRTTProbe();
         }
     });
 
-    window.addEventListener("focus", () => {
-        if (!state.busy) {
-            void loadVMs({ showLoading: false });
+    window.addEventListener("pageshow", (event) => {
+        if (event.persisted && dashboardInitialLoadComplete) {
+            connectDashboardSocket();
         }
     });
 
-    window.addEventListener("pageshow", () => {
-        void loadVMs({ showLoading: false });
-    });
-
     window.addEventListener("beforeunload", () => {
-        window.clearInterval(refreshHandle);
-        teardownRTT();
+        teardownDashboardSocket();
         terminalResizeObserver.disconnect();
         teardownTerminalRuntime();
         closeVNC();

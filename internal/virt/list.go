@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -374,11 +375,13 @@ func formatState(state libvirt.DomainState) string {
 
 // SingletonWorker caches VM metadata in the background for fast read access.
 type SingletonWorker struct {
-	ticker *time.Ticker
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.RWMutex
-	vms    []VMInfo
+	ticker           *time.Ticker
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mu               sync.RWMutex
+	vms              []VMInfo
+	nextSubscriberID uint64
+	subscribers      map[uint64]chan struct{}
 }
 
 // GetVMs returns the cached VMs, optionally filtered by owner.
@@ -441,18 +444,52 @@ func (s *SingletonWorker) snapshotVMs() []VMInfo {
 	return snapshot
 }
 
+// SubscribeVMChanges returns a coalescing notification channel for successful
+// libvirt refreshes whose VM snapshot differs from the cached snapshot. The
+// caller must invoke unsubscribe when it no longer needs updates. Notifications
+// carry no VM data: subscribers take a fresh, user-filtered snapshot after each
+// signal, which prevents one user's VM metadata from being broadcast to another.
+func (s *SingletonWorker) SubscribeVMChanges() (<-chan struct{}, func()) {
+	updates := make(chan struct{}, 1)
+
+	s.mu.Lock()
+	if s.subscribers == nil {
+		s.subscribers = make(map[uint64]chan struct{})
+	}
+	s.nextSubscriberID++
+	id := s.nextSubscriberID
+	s.subscribers[id] = updates
+	s.mu.Unlock()
+
+	var unsubscribeOnce sync.Once
+	return updates, func() {
+		unsubscribeOnce.Do(func() {
+			s.mu.Lock()
+			delete(s.subscribers, id)
+			close(updates)
+			s.mu.Unlock()
+		})
+	}
+}
+
 func (s *SingletonWorker) setVMs(vms []VMInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if len(vms) == 0 {
-		s.vms = nil
+	next := slices.Clone(vms)
+	if slices.Equal(s.vms, next) {
 		return
 	}
-
-	next := make([]VMInfo, len(vms))
-	copy(next, vms)
 	s.vms = next
+
+	for _, updates := range s.subscribers {
+		select {
+		case updates <- struct{}{}:
+		default:
+			// A pending notification already tells this subscriber to take the
+			// latest snapshot, so intermediate refreshes can be coalesced.
+		}
+	}
 }
 
 var (
