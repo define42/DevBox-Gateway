@@ -19,7 +19,7 @@ require (
 	github.com/tomatome/grdp v0.1.0
 	github.com/tredoe/osutil v1.5.0
 	golang.org/x/net v0.57.0
-	libvirt.org/go/libvirt v1.12005.0
+	libvirt.org/go/libvirt v1.12006.0
 )
 
 require (
