@@ -366,18 +366,19 @@ func TestHcovLoginPostRejectsInvalidUsername(t *testing.T) {
 	}
 }
 
-// TestHcovLoginPostUsernameLockRejectedFromNewIP locks the username bucket via
-// a failure from one IP and verifies a fresh IP is rejected by the post-
-// validation rate-limit check keyed on the username.
-func TestHcovLoginPostUsernameLockRejectedFromNewIP(t *testing.T) {
+// TestHcovLoginPostPairLockAllowsSameUserFromNewIP verifies that the primary
+// lock follows the username-and-IP pair rather than globally locking the user.
+func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "")
+	t.Setenv(config.LOCAL_USER_SHA256, localUserSHA256("hcovlockuser", "secret"))
 	t.Setenv(config.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "1")
+	t.Setenv(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "50")
 	t.Setenv(config.LOGIN_RATE_LIMIT_WINDOW, "1m")
 	t.Setenv(config.LOGIN_RATE_LIMIT_LOCKOUT, "1h")
 	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
-	form := url.Values{"username": {"hcovlockuser"}, "password": {"wrong"}}.Encode()
+	failedForm := url.Values{"username": {"hcovlockuser"}, "password": {"wrong"}}.Encode()
 
-	rec := hcovPostLoginForm(t, router, "198.51.100.71:4000", form)
+	rec := hcovPostLoginForm(t, router, "198.51.100.71:4000", failedForm)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected first failure to lock immediately with 429, got %d", rec.Code)
 	}
@@ -385,18 +386,16 @@ func TestHcovLoginPostUsernameLockRejectedFromNewIP(t *testing.T) {
 		t.Fatal("expected Retry-After header on lockout")
 	}
 
-	rec = hcovPostLoginForm(t, router, "198.51.100.72:4000", form)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected username lock to reject a new IP with 429, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), loginLocked) {
-		t.Fatalf("expected lockout message, got %q", rec.Body.String())
+	successForm := url.Values{"username": {"hcovlockuser"}, "password": {"secret"}}.Encode()
+	rec = hcovPostLoginForm(t, router, "198.51.100.72:4000", successForm)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected same username from a new IP to remain available, got %d", rec.Code)
 	}
 
-	// The locked client IP is rejected before credentials are even validated.
-	rec = hcovPostLoginForm(t, router, "198.51.100.71:4001", form)
+	// The original username-and-IP pair remains locked even with valid credentials.
+	rec = hcovPostLoginForm(t, router, "198.51.100.71:4001", successForm)
 	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected locked IP to be rejected up front with 429, got %d", rec.Code)
+		t.Fatalf("expected original pair to remain locked with 429, got %d", rec.Code)
 	}
 }
 

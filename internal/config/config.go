@@ -145,9 +145,10 @@ func (s *SettingsType) setAuthDefaults() {
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
 	s.SetSecretString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
-	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username or client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
+	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username-and-client-IP pair within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
+	s.SetInt(LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "Maximum failed login attempts allowed across all usernames from one client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables the IP-wide limit", 50)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
-	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after LOGIN_RATE_LIMIT_MAX_ATTEMPTS failures", 15*time.Minute)
+	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after either login failure limit is reached", 15*time.Minute)
 }
 
 // DataRootDir resolves the root directory for gateway-managed data.
@@ -441,36 +442,37 @@ func (s *SettingsType) GetDuration(id string) time.Duration {
 
 // Environment-backed configuration keys.
 const (
-	ACME_EMAIL                    = "ACME_EMAIL"
-	ACME_CA                       = "ACME_CA"
-	ACME_ENABLE                   = "ACME_ENABLE"
-	CERT_FILE                     = "CERT_FILE"
-	DATA_ROOT_DIR                 = "DATA_ROOT_DIR"
-	FRONT_DOMAIN                  = "FRONT_DOMAIN"
-	KEY_FILE                      = "KEY_FILE"
-	LDAP_URL                      = "LDAP_URL"
-	LDAP_BASE_DN                  = "LDAP_BASE_DN"
-	LDAP_USER_FILTER              = "LDAP_USER_FILTER"
-	LDAP_USER_DOMAIN              = "LDAP_USER_DOMAIN"
-	LDAP_STARTTLS                 = "LDAP_STARTTLS"
-	LDAP_SKIP_TLS_VERIFY          = "LDAP_SKIP_TLS_VERIFY"
-	LOCAL_USER_SHA256             = "LOCAL_USER_SHA256"
-	LOGIN_RATE_LIMIT_MAX_ATTEMPTS = "LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
-	LOGIN_RATE_LIMIT_WINDOW       = "LOGIN_RATE_LIMIT_WINDOW"
-	LOGIN_RATE_LIMIT_LOCKOUT      = "LOGIN_RATE_LIMIT_LOCKOUT"
-	LISTEN_ADDR                   = "LISTEN_ADDR"
-	MAX_CONCURRENT_CONNECTIONS    = "MAX_CONCURRENT_CONNECTIONS"
-	MAX_VDI_PER_USER              = "MAX_VDI_PER_USER"
-	RDP_DISABLE_CLIPBOARD         = "RDP_DISABLE_CLIPBOARD"
-	RDP_DISABLE_DRIVES            = "RDP_DISABLE_DRIVES"
-	SNI_HASH_SECRET               = "SNI_HASH_SECRET"
-	VIRT_STORAGE_POOL_NAME        = "VIRT_STORAGE_POOL_NAME"
-	BASE_IMAGE_DIR                = "BASE_IMAGE_DIR"
-	VM_DISK_SIZE_GB               = "VM_DISK_SIZE_GB"
-	VM_VCPU_COUNT                 = "VM_VCPU_COUNT"
-	VM_MEMORY_MIB                 = "VM_MEMORY_MIB"
-	TIMEOUT                       = "TIMEOUT"
-	DEBUG_CONNECTIONS             = "DEBUG_CONNECTIONS"
+	ACME_EMAIL                       = "ACME_EMAIL"
+	ACME_CA                          = "ACME_CA"
+	ACME_ENABLE                      = "ACME_ENABLE"
+	CERT_FILE                        = "CERT_FILE"
+	DATA_ROOT_DIR                    = "DATA_ROOT_DIR"
+	FRONT_DOMAIN                     = "FRONT_DOMAIN"
+	KEY_FILE                         = "KEY_FILE"
+	LDAP_URL                         = "LDAP_URL"
+	LDAP_BASE_DN                     = "LDAP_BASE_DN"
+	LDAP_USER_FILTER                 = "LDAP_USER_FILTER"
+	LDAP_USER_DOMAIN                 = "LDAP_USER_DOMAIN"
+	LDAP_STARTTLS                    = "LDAP_STARTTLS"
+	LDAP_SKIP_TLS_VERIFY             = "LDAP_SKIP_TLS_VERIFY"
+	LOCAL_USER_SHA256                = "LOCAL_USER_SHA256"
+	LOGIN_RATE_LIMIT_MAX_ATTEMPTS    = "LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
+	LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS = "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS"
+	LOGIN_RATE_LIMIT_WINDOW          = "LOGIN_RATE_LIMIT_WINDOW"
+	LOGIN_RATE_LIMIT_LOCKOUT         = "LOGIN_RATE_LIMIT_LOCKOUT"
+	LISTEN_ADDR                      = "LISTEN_ADDR"
+	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
+	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
+	RDP_DISABLE_CLIPBOARD            = "RDP_DISABLE_CLIPBOARD"
+	RDP_DISABLE_DRIVES               = "RDP_DISABLE_DRIVES"
+	SNI_HASH_SECRET                  = "SNI_HASH_SECRET"
+	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"
+	BASE_IMAGE_DIR                   = "BASE_IMAGE_DIR"
+	VM_DISK_SIZE_GB                  = "VM_DISK_SIZE_GB"
+	VM_VCPU_COUNT                    = "VM_VCPU_COUNT"
+	VM_MEMORY_MIB                    = "VM_MEMORY_MIB"
+	TIMEOUT                          = "TIMEOUT"
+	DEBUG_CONNECTIONS                = "DEBUG_CONNECTIONS"
 )
 
 // OverwriteForTestString replaces a string setting value for tests.

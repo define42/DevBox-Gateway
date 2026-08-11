@@ -27,6 +27,9 @@ func TestNewSettingTypeDefaults(t *testing.T) {
 	if got := s.GetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS); got != 5 {
 		t.Fatalf("expected default LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5, got %d", got)
 	}
+	if got := s.GetInt(LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS); got != 50 {
+		t.Fatalf("expected default LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS=50, got %d", got)
+	}
 	if got := s.GetDuration(LOGIN_RATE_LIMIT_WINDOW); got != 5*time.Minute {
 		t.Fatalf("expected default LOGIN_RATE_LIMIT_WINDOW=5m, got %v", got)
 	}

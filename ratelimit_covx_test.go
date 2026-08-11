@@ -21,11 +21,12 @@ func hcovNewClock() *hcovClock {
 
 func hcovNewLimiter(maxAttempts int, window, lockout time.Duration, clock *hcovClock) *loginRateLimiter {
 	return &loginRateLimiter{
-		maxAttempts: maxAttempts,
-		window:      window,
-		lockout:     lockout,
-		attempts:    make(map[string]*loginAttemptBucket),
-		now:         clock.now,
+		maxAttempts:   maxAttempts,
+		maxIPAttempts: maxAttempts,
+		window:        window,
+		lockout:       lockout,
+		attempts:      make(map[string]*loginAttemptBucket),
+		now:           clock.now,
 	}
 }
 
