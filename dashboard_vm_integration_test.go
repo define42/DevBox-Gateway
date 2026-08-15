@@ -25,7 +25,7 @@ func waitForDashboardVM(t *testing.T, user, name string, timeout time.Duration) 
 			t.Fatalf("dashboard.ListDashboardVMs(%q): %v", user, err)
 		}
 		for _, row := range rows {
-			if row.Name == name && row.State == "running" && row.TTYReady {
+			if row.Name == name && row.State == "running" {
 				return row
 			}
 		}
@@ -97,9 +97,6 @@ func assertDashboardVMRow(t *testing.T, settings *config.SettingsType, row dashb
 	}
 	if row.VolumeGB != config.DefaultVMDiskSizeGB {
 		t.Fatalf("expected disk %d GB, got %d", config.DefaultVMDiskSizeGB, row.VolumeGB)
-	}
-	if !row.TTYReady {
-		t.Fatal("expected TTYReady=true")
 	}
 }
 

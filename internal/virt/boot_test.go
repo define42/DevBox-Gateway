@@ -97,7 +97,7 @@ func waitForState(t *testing.T, username, vmName, state string, conn *libvirt.Co
 	t.Fatalf("VM %s did not reach state %s within %s: %v", vmName, state, timeout, lastErr)
 }
 
-func waitForSerialSocket(t *testing.T, vmName string, timeout time.Duration) {
+func waitForSerialConsole(t *testing.T, vmName string, timeout time.Duration) {
 	t.Helper()
 
 	deadline := time.Now().Add(timeout)
@@ -119,7 +119,7 @@ func waitForSerialSocket(t *testing.T, vmName string, timeout time.Duration) {
 		t.Fatalf("OpenSerialConsole(%s) failed: %v", vmName, err)
 	}
 
-	t.Fatalf("serial socket for %s was not ready within %s: %v", vmName, timeout, lastErr)
+	t.Fatalf("serial console for %s was not ready within %s: %v", vmName, timeout, lastErr)
 }
 
 func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
@@ -236,7 +236,7 @@ func waitForRunningVM(t *testing.T, username, vmName string, conn *libvirt.Conne
 	t.Helper()
 
 	waitForState(t, username, vmName, "running", conn, timeout)
-	waitForSerialSocket(t, vmName, timeout)
+	waitForSerialConsole(t, vmName, timeout)
 	waitForVNCSocket(t, vmName, timeout)
 }
 

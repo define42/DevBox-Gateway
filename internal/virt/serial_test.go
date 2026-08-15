@@ -20,32 +20,44 @@ func TestUbuntuDomainUsesManagedSerialPTY(t *testing.T) {
 }
 
 func TestSerialSocketPathFromDomainXML(t *testing.T) {
-	// A running PTY serial exposes its allocated device via <source path>.
-	xml := `<domain><devices><serial type='pty'><source path='/dev/pts/3'/><target port='0'/></serial></devices></domain>`
+	tests := []struct {
+		name           string
+		xml            string
+		wantPath       string
+		wantConfigured bool
+	}{
+		{
+			name:           "allocated PTY",
+			xml:            `<domain><devices><serial type='pty'><source path='/dev/pts/3'/><target port='0'/></serial></devices></domain>`,
+			wantPath:       filepath.Clean("/dev/pts/3"),
+			wantConfigured: true,
+		},
+		{
+			name:           "configured without live source",
+			xml:            `<domain><devices><serial type='pty'><target port='0'/></serial></devices></domain>`,
+			wantConfigured: true,
+		},
+		{
+			name: "no serial device",
+			xml:  `<domain><devices><console type='pty'/></devices></domain>`,
+		},
+	}
 
-	path, ok, err := serialSocketPathFromDomainXML(xml)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected serial console to be detected")
-	}
-	if path != filepath.Clean("/dev/pts/3") {
-		t.Fatalf("expected serial console path %q, got %q", "/dev/pts/3", path)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path, configured, err := serialSocketPathFromDomainXML(tc.xml)
+			if err != nil {
+				t.Fatalf("parse serial XML: %v", err)
+			}
+			if path != tc.wantPath || configured != tc.wantConfigured {
+				t.Fatalf("got (%q, %v), want (%q, %v)", path, configured, tc.wantPath, tc.wantConfigured)
+			}
+		})
 	}
 }
 
-func TestSerialSocketPathFromDomainXMLReturnsFalseForLegacyDomain(t *testing.T) {
-	xml := `<domain><devices><console type='pty'/></devices></domain>`
-
-	path, ok, err := serialSocketPathFromDomainXML(xml)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ok {
-		t.Fatalf("expected no serial socket path, got %q", path)
-	}
-	if path != "" {
-		t.Fatalf("expected empty path, got %q", path)
+func TestSerialSocketPathFromDomainXMLRejectsMalformedXML(t *testing.T) {
+	if _, _, err := serialSocketPathFromDomainXML("<domain"); err == nil {
+		t.Fatal("expected malformed XML error")
 	}
 }

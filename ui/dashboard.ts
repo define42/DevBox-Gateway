@@ -58,7 +58,6 @@ type DashboardVM = {
     vcpu: number;
     volumeGB: number;
     rdpReady: boolean;
-    ttyReady: boolean;
 };
 
 type DashboardDataResponse = {
@@ -1293,7 +1292,6 @@ function bootstrap(): void {
             const displayName = vm.displayName || rawName;
             const normalizedState = (vm.state || "").trim().toLowerCase();
             const rdpReady = Boolean(vm.rdpReady);
-            const ttyReady = Boolean(vm.ttyReady);
             const hasName = rawName.trim() !== "";
             const isActive = isActiveState(normalizedState);
             const isBooting = normalizedState === "running" && !rdpReady;
@@ -1341,7 +1339,7 @@ function bootstrap(): void {
                 terminalButton.type = "button";
                 terminalButton.className = "btn btn-sm btn-outline-info";
                 setIconLabel(terminalButton, "bi-terminal", "Terminal");
-                terminalButton.disabled = state.busy || !ttyReady || !isActive;
+                terminalButton.disabled = state.busy || !isActive;
                 terminalButton.addEventListener("click", () => {
                     openTerminal(vm);
                 });
@@ -1367,13 +1365,6 @@ function bootstrap(): void {
                 connectActions.appendChild(infoButton);
 
                 connectStack.appendChild(connectActions);
-
-                if (ttyReady && !isActive) {
-                    const note = document.createElement("div");
-                    note.className = "text-body-secondary small";
-                    note.textContent = "Start VM to open terminal.";
-                    connectStack.appendChild(note);
-                }
 
                 connectCell.appendChild(connectStack);
             } else {

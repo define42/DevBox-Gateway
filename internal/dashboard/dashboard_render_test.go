@@ -145,7 +145,6 @@ func TestBuildDashboardRows(t *testing.T) {
 			VCPU:      2,
 			VolumeGB:  40,
 			RDPReady:  true,
-			TTYReady:  true,
 		},
 	}, "alice")
 

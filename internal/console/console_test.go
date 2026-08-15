@@ -86,7 +86,7 @@ func TestParseDashboardVMPathParam(t *testing.T) {
 
 // The serial console no longer dials a socket path — virt.OpenSerialConsole
 // streams it via libvirt's OpenConsole, which needs a live domain and is covered
-// by the virt package's integration test (waitForSerialSocket).
+// by the virt package's integration test (waitForSerialConsole).
 
 func TestWriteDashboardSerialSocketError(t *testing.T) {
 	tests := []struct {

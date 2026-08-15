@@ -11,21 +11,7 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-func TestViocovSerialSocketPathParsingEdgeCases(t *testing.T) {
-	if _, _, err := serialSocketPathFromDomainXML("<domain"); err == nil {
-		t.Fatal("expected parse error for malformed XML")
-	}
-
-	// A serial device whose source path is blank is skipped.
-	xmlDesc := `<domain><devices><serial type='pty'><source path='   '/></serial></devices></domain>`
-	path, ok, err := serialSocketPathFromDomainXML(xmlDesc)
-	if err != nil {
-		t.Fatalf("parsing blank source path: %v", err)
-	}
-	if ok || path != "" {
-		t.Fatalf("expected blank source path to be skipped, got %q", path)
-	}
-
+func TestViocovDomainSerialSocketPathErrors(t *testing.T) {
 	if _, _, err := domainSerialSocketPath(nil); err == nil {
 		t.Fatal("expected error for nil domain")
 	}
@@ -108,11 +94,7 @@ func TestViocovConsoleAndVNCUnavailableStates(t *testing.T) {
 func TestViocovSerialConsoleOnRunningDomain(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	name := viocovUniqueName("serial")
-	dom := viocovStartDomain(t, conn, name, "<serial type='pty'><target port='0'/></serial>")
-
-	if !domainTTYReady(dom) {
-		t.Fatal("expected running PTY serial to report TTY ready")
-	}
+	viocovStartDomain(t, conn, name, "<serial type='pty'><target port='0'/></serial>")
 
 	console, err := OpenSerialConsole(name)
 	if err != nil {
@@ -135,12 +117,21 @@ func TestViocovConsoleAndVNCWithoutDevices(t *testing.T) {
 	name := viocovUniqueName("nodev")
 	viocovStartDomain(t, conn, name, "")
 
-	// A running domain without any console device fails inside OpenConsole.
-	if _, err := OpenSerialConsole(name); err == nil || !strings.Contains(err.Error(), "open console") {
-		t.Fatalf("expected open-console failure, got %v", err)
+	if _, err := OpenSerialConsole(name); !errors.Is(err, ErrSerialConsoleNotConfigured) {
+		t.Fatalf("expected ErrSerialConsoleNotConfigured, got %v", err)
 	}
 	if _, err := OpenVNCConn(name); !errors.Is(err, ErrVNCNotConfigured) {
 		t.Fatalf("expected ErrVNCNotConfigured, got %v", err)
+	}
+}
+
+func TestViocovSerialConsoleNotReadyWithoutLiveSource(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	name := viocovUniqueName("serial-not-ready")
+	viocovStartDomain(t, conn, name, "<serial type='null'><target port='0'/></serial>")
+
+	if _, err := OpenSerialConsole(name); !errors.Is(err, ErrSerialConsoleNotReady) {
+		t.Fatalf("expected ErrSerialConsoleNotReady, got %v", err)
 	}
 }
 

@@ -43,7 +43,6 @@ type VM struct {
 	VolumeGB     int    `json:"volumeGB"`
 	VolumeUsedGB int    `json:"volumeUsedGB"`
 	RDPReady     bool   `json:"rdpReady"`
-	TTYReady     bool   `json:"ttyReady"`
 }
 
 // DataResponse is the API response for /api/dashboard/data.
@@ -231,7 +230,6 @@ func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 			VolumeGB:     vm.VolumeGB,
 			VolumeUsedGB: vm.VolumeUsedGB,
 			RDPReady:     vm.RDPReady,
-			TTYReady:     vm.TTYReady,
 		})
 	}
 	return rows

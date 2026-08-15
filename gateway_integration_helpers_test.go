@@ -106,10 +106,27 @@ func waitForGatewayVMReady(t *testing.T, server gatewayTestServer, vmName string
 	t.Helper()
 
 	row := waitForDashboardVMRow(t, server.client, server.baseURL, vmName, func(vm dashboard.VM) bool {
-		return vm.State == "running" && vm.TTYReady
+		return vm.State == "running"
 	})
 
 	deadline := time.Now().Add(gatewayTestTimeout)
+	serialReady := false
+	var lastSerialErr error
+	for time.Now().Before(deadline) {
+		console, err := virt.OpenSerialConsole(vmName)
+		if err == nil {
+			_ = console.Close()
+			serialReady = true
+			break
+		}
+		lastSerialErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !serialReady {
+		t.Fatalf("VM %s did not accept an on-demand serial console in time: %v", vmName, lastSerialErr)
+	}
+
+	deadline = time.Now().Add(gatewayTestTimeout)
 	for time.Now().Before(deadline) {
 		vncConn, err := virt.OpenVNCConn(vmName)
 		if err == nil {

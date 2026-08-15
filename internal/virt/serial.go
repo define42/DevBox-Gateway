@@ -26,21 +26,20 @@ type domainSerialXML struct {
 }
 
 type domainSerialDeviceXML struct {
-	Type   string `xml:"type,attr"`
 	Source struct {
 		Path string `xml:"path,attr"`
 	} `xml:"source"`
 }
 
-func serialSocketPathFromDomainXML(xmlDesc string) (string, bool, error) {
+// serialSocketPathFromDomainXML returns the first allocated serial source path.
+// configured distinguishes a domain with no serial device from one whose serial
+// device exists but has not received a live source path yet.
+func serialSocketPathFromDomainXML(xmlDesc string) (path string, configured bool, err error) {
 	var parsed domainSerialXML
 	if err := xml.Unmarshal([]byte(xmlDesc), &parsed); err != nil {
 		return "", false, fmt.Errorf("parse domain xml: %w", err)
 	}
 
-	// A serial with an allocated source path (a PTY like /dev/pts/N on a running
-	// domain, or a unix socket) indicates a usable console. A stopped domain's PTY
-	// serial has no source path yet, so this reports the console as unavailable.
 	for _, serial := range parsed.Devices.Serials {
 		path := filepath.Clean(strings.TrimSpace(serial.Source.Path))
 		if path == "" || path == "." {
@@ -49,10 +48,10 @@ func serialSocketPathFromDomainXML(xmlDesc string) (string, bool, error) {
 		return path, true, nil
 	}
 
-	return "", false, nil
+	return "", len(parsed.Devices.Serials) > 0, nil
 }
 
-func domainSerialSocketPath(dom *libvirt.Domain) (string, bool, error) {
+func domainSerialSocketPath(dom *libvirt.Domain) (path string, configured bool, err error) {
 	if dom == nil {
 		return "", false, fmt.Errorf("domain is nil")
 	}
@@ -103,6 +102,23 @@ func OpenSerialConsole(name string) (*SerialConsole, error) {
 		_ = dom.Free()
 		_, _ = conn.Close()
 		return nil, ErrSerialConsoleNotRunning
+	}
+
+	serialPath, configured, err := domainSerialSocketPath(dom)
+	if err != nil {
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, fmt.Errorf("resolve serial console for %s: %w", name, err)
+	}
+	if !configured {
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, ErrSerialConsoleNotConfigured
+	}
+	if serialPath == "" {
+		_ = dom.Free()
+		_, _ = conn.Close()
+		return nil, ErrSerialConsoleNotReady
 	}
 
 	// Blocking stream (flags 0): Recv/Send block until data/EOF, so no libvirt

@@ -115,7 +115,7 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 	}
 }
 
-func TestDashboardJavaScriptOpensVNCOnDemand(t *testing.T) {
+func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
 	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
 	rec := httptest.NewRecorder()
@@ -128,11 +128,20 @@ func TestDashboardJavaScriptOpensVNCOnDemand(t *testing.T) {
 	if strings.Contains(body, "vm.vncReady") {
 		t.Fatal("dashboard JavaScript must not depend on inventory-time VNC readiness")
 	}
+	if strings.Contains(body, "vm.ttyReady") {
+		t.Fatal("dashboard JavaScript must not depend on inventory-time serial readiness")
+	}
 	if !strings.Contains(body, "vncButton.disabled = state.busy || !isActive") {
 		t.Fatal("expected NoVNC button availability to depend on active VM state")
 	}
+	if !strings.Contains(body, "terminalButton.disabled = state.busy || !isActive") {
+		t.Fatal("expected Terminal button availability to depend on active VM state")
+	}
 	if !strings.Contains(body, "state.vnc.src = vncFrameURL(vm.name)") {
 		t.Fatal("expected NoVNC to resolve its websocket only when the viewer opens")
+	}
+	if !strings.Contains(body, "new WebSocket(terminalWebSocketURL(vm.name))") {
+		t.Fatal("expected serial console websocket to open only when the terminal opens")
 	}
 }
 

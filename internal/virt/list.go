@@ -46,7 +46,6 @@ type VMInfo struct {
 	IP             string
 	PrimaryIP      string
 	RDPReady       bool
-	TTYReady       bool
 	rdpGeneration  uint64
 	rdpObservation uint64
 }
@@ -110,7 +109,6 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		VolumeUsedGB: diskUsedGB,
 		IP:           ip,
 		PrimaryIP:    primaryIP,
-		TTYReady:     domainTTYReady(&d),
 	}, true
 }
 
@@ -222,15 +220,6 @@ func domainCanReportIPs(state libvirt.DomainState) bool {
 	default:
 		return false
 	}
-}
-
-func domainTTYReady(d *libvirt.Domain) bool {
-	_, ok, err := domainSerialSocketPath(d)
-	if err != nil {
-		log.Printf("domain tty readiness: %v", err)
-		return false
-	}
-	return ok
 }
 
 func tcpEndpointReady(address string, timeout time.Duration) bool {
