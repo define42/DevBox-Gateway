@@ -501,7 +501,7 @@ docker compose build
 ```
 
 The multi-stage `Dockerfile` compiles the TypeScript UI and the Go binary in a
-`golang:1.25-alpine` builder (pinned via the `GO_VERSION` build arg) and ships
+`golang:1.26-alpine` builder (pinned via the `GO_VERSION` build arg) and ships
 only the resulting binary plus `libvirt-libs` and `ca-certificates` in the
 runtime image.
 
