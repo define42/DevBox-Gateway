@@ -314,13 +314,46 @@ var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-
 
 // reserveUserVMSlot refuses creation when the owner already has as many VDIs as
 // MAX_VDI_PER_USER allows, counting both existing domains and creations still
-// in flight. Ownership is read from the same domain owner metadata the
-// dashboard listing filters on, so the enforced count matches what the user
-// sees. On success it reserves a creation slot; the caller must invoke the
-// returned release exactly once, after the domain (with its owner metadata)
-// exists or the creation failed. A limit of 0 (configured <=0) disables the
-// check and returns a no-op release.
+// in flight. The existing-domain count comes from the background worker's
+// cached snapshot when that snapshot is fresh — the same owner-filtered view
+// the dashboard shows, so the enforced count matches what the user sees without
+// an O(domains) libvirt scan per create. When the worker is not running or its
+// snapshot is stale, the count falls back to live libvirt state. On success it
+// reserves a creation slot; the caller must invoke the returned release exactly
+// once, after the domain (with its owner metadata) exists or the creation
+// failed. A limit of 0 (configured <=0) disables the check and returns a no-op
+// release.
+//
+// Using the cached snapshot makes the limit eventually consistent at its edges:
+// a VM whose creation completed within the last sweep interval (~2s) is covered
+// neither by the snapshot nor by the in-flight reservation (already released),
+// so a create racing that window can overshoot the limit by one; conversely a
+// VM deleted within the last sweep interval still counts, so a create can be
+// transiently refused until the next sweep. Both windows are bounded by
+// vmQuotaSnapshotMaxAge and self-heal; the in-flight reservations still make
+// concurrent creates race-free.
 func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, owner string) (release func(), err error) {
+	return reserveUserVMSlotWithCounter(conn, settings, owner, cachedVMCountForQuota)
+}
+
+// cachedVMCountForQuota returns the worker's cached per-owner VM count. It
+// deliberately peeks at the singleton instead of starting it: when the worker
+// is not running (or its snapshot is stale) the second result is false and the
+// quota check counts live libvirt state instead.
+func cachedVMCountForQuota(owner string) (int, bool) {
+	worker := peekInstance()
+	if worker == nil {
+		return 0, false
+	}
+	return worker.CountVMsOwnedBy(owner)
+}
+
+func reserveUserVMSlotWithCounter(
+	conn *libvirt.Connect,
+	settings *config.SettingsType,
+	owner string,
+	cachedCount func(string) (int, bool),
+) (release func(), err error) {
 	limit := config.MaxVDIPerUser(settings)
 	if limit <= 0 {
 		return func() {}, nil
@@ -329,9 +362,12 @@ func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, own
 	vmCreationMu.Lock()
 	defer vmCreationMu.Unlock()
 
-	count, err := countDomainsOwnedBy(conn, owner)
-	if err != nil {
-		return nil, fmt.Errorf("count VMs owned by %s: %w", owner, err)
+	count, counted := cachedCount(owner)
+	if !counted {
+		count, err = countDomainsOwnedBy(conn, owner)
+		if err != nil {
+			return nil, fmt.Errorf("count VMs owned by %s: %w", owner, err)
+		}
 	}
 	if have := count + inflightVMCreations[owner]; have >= limit {
 		return nil, fmt.Errorf("%w: user %s already has %d of %d allowed VMs (including creations in progress)", ErrVMLimitReached, owner, have, limit)
@@ -352,8 +388,11 @@ func releaseUserVMSlot(owner string) {
 	inflightVMCreations[owner]--
 }
 
-// countDomainsOwnedBy counts domains whose owner metadata matches username. A
-// domain whose metadata cannot be read is logged and skipped, mirroring how the
+// countDomainsOwnedBy counts domains whose owner metadata matches username by
+// scanning live libvirt state. It is the quota check's fallback for when the
+// background worker's cached snapshot is unavailable or stale; the scan costs
+// one metadata read per domain, so the cached count is preferred. A domain
+// whose metadata cannot be read is logged and skipped, mirroring how the
 // dashboard listing treats it (not attributed to any user).
 func countDomainsOwnedBy(conn *libvirt.Connect, username string) (int, error) {
 	doms, err := conn.ListAllDomains(0)

@@ -12,9 +12,19 @@ import (
 )
 
 func TestSingletonWorkerDoWorkNilConn(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &SingletonWorker{metadataByUUID: map[string]domainMetadataSnapshot{
+		"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
+	}, diskByUUID: map[string]domainDiskSnapshot{
+		"cached-domain": {UsedGB: 1, TotalGB: 2},
+	}}
 	if err := worker.doWork(nil); err == nil {
 		t.Fatal("expected error for nil libvirt connection")
+	}
+	if len(worker.metadataByUUID) != 1 {
+		t.Fatalf("nil connection cleared metadata cache: %+v", worker.metadataByUUID)
+	}
+	if len(worker.diskByUUID) != 1 {
+		t.Fatalf("nil connection cleared disk cache: %+v", worker.diskByUUID)
 	}
 }
 
@@ -269,6 +279,56 @@ func TestResolveVMNameByLabel(t *testing.T) {
 	// The same name under a different secret must not resolve.
 	if _, ok := worker.ResolveVMNameByLabel([]byte("other-secret"), label); ok {
 		t.Fatal("expected label to be secret-specific")
+	}
+}
+
+func TestCountVMsOwnedByRequiresFreshSweep(t *testing.T) {
+	worker := &SingletonWorker{}
+	worker.setVMs([]VMInfo{
+		{Name: "alice-desktop", Owner: "alice"},
+		{Name: "alice-dev", Owner: "alice"},
+		{Name: "bob-desktop", Owner: "bob"},
+	})
+
+	if _, ok := worker.CountVMsOwnedBy("alice"); ok {
+		t.Fatal("snapshot without a completed sweep was treated as authoritative")
+	}
+
+	worker.markVMSnapshotSwept()
+	if count, ok := worker.CountVMsOwnedBy("alice"); !ok || count != 2 {
+		t.Fatalf("alice count = (%d, %v), want (2, true)", count, ok)
+	}
+	if count, ok := worker.CountVMsOwnedBy("bob"); !ok || count != 1 {
+		t.Fatalf("bob count = (%d, %v), want (1, true)", count, ok)
+	}
+	if count, ok := worker.CountVMsOwnedBy("carol"); !ok || count != 0 {
+		t.Fatalf("carol count = (%d, %v), want (0, true)", count, ok)
+	}
+	if _, ok := worker.CountVMsOwnedBy(" "); ok {
+		t.Fatal("blank owner must never be counted from the snapshot")
+	}
+
+	worker.snapshotSweptAt = time.Now().Add(-vmQuotaSnapshotMaxAge - time.Second)
+	if _, ok := worker.CountVMsOwnedBy("alice"); ok {
+		t.Fatal("stale snapshot was treated as authoritative")
+	}
+}
+
+func TestInvalidateVMSnapshotStopsQuotaCounting(t *testing.T) {
+	worker := &SingletonWorker{}
+	worker.setVMs([]VMInfo{{Name: "alice-desktop", Owner: "alice"}})
+	worker.markVMSnapshotSwept()
+	if count, ok := worker.CountVMsOwnedBy("alice"); !ok || count != 1 {
+		t.Fatalf("pre-invalidation count = (%d, %v), want (1, true)", count, ok)
+	}
+
+	worker.invalidateVMSnapshot()
+
+	if _, ok := worker.CountVMsOwnedBy("alice"); ok {
+		t.Fatal("invalidated snapshot was treated as authoritative")
+	}
+	if vms := worker.GetVMs(""); len(vms) != 0 {
+		t.Fatalf("invalidation retained the visible snapshot: %+v", vms)
 	}
 }
 

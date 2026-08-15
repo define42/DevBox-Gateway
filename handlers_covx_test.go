@@ -34,6 +34,21 @@ import (
 // metadata so tests can mark a bare test domain as owned by a user.
 const hcovOwnerMetadataNamespace = "urn:devboxgateway:domain:owner"
 
+// hcovWaitForCachedVM starts the background VM cache worker if needed and
+// polls until it lists a VM owned by the user; the worker refreshes from
+// libvirt every couple of seconds.
+func hcovWaitForCachedVM(t *testing.T, owner string) {
+	t.Helper()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for len(virt.GetInstance().GetVMs(owner)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for a VM owned by %q in the cache", owner)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func hcovUniqueName(prefix string) string {
 	return prefix + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
@@ -703,6 +718,10 @@ func TestHcovDashboardCreateConflictsWhenVMExists(t *testing.T) {
 func TestHcovDashboardCreateEnforcesPerUserLimit(t *testing.T) {
 	user := hcovUniqueName("hcovlim")
 	hcovDefineOwnedDomain(t, user+vmname.Separator+"one", user)
+	// The quota check counts from the background worker's cached snapshot when
+	// it is fresh, so the refusal below is only deterministic once the worker
+	// has observed the pre-existing domain.
+	hcovWaitForCachedVM(t, user)
 	settings, baseImage := hcovVirtCreateSettings(t, hcovUniqueName("hcov-pool-lim"))
 	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, 1); err != nil {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)

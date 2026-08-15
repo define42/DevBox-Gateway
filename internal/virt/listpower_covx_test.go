@@ -105,9 +105,23 @@ func TestViocovListVMsAndDoWorkErrors(t *testing.T) {
 	if _, err := ListVMs("", &libvirt.Connect{}); err == nil {
 		t.Fatal("expected ListVMs error for an invalid connection")
 	}
-	worker := &SingletonWorker{}
+	worker := &SingletonWorker{metadataByUUID: map[string]domainMetadataSnapshot{
+		"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
+	}, diskByUUID: map[string]domainDiskSnapshot{
+		"cached-domain": {UsedGB: 1, TotalGB: 2},
+	}}
+	worker.setVMs([]VMInfo{{Name: "cached-vm", Owner: "alice"}})
 	if err := worker.doWork(&libvirt.Connect{}); err == nil {
 		t.Fatal("expected doWork error for an invalid connection")
+	}
+	if len(worker.metadataByUUID) != 1 {
+		t.Fatalf("failed libvirt listing cleared metadata cache: %+v", worker.metadataByUUID)
+	}
+	if len(worker.diskByUUID) != 1 {
+		t.Fatalf("failed libvirt listing cleared disk cache: %+v", worker.diskByUUID)
+	}
+	if vms := worker.GetVMs(""); len(vms) != 1 || vms[0].Name != "cached-vm" {
+		t.Fatalf("failed libvirt listing replaced last successful VM snapshot: %+v", vms)
 	}
 }
 
@@ -139,6 +153,29 @@ func TestViocovListVMsFiltersByOwnerMetadata(t *testing.T) {
 	assertListExcludesVM(t, otherVMs, name)
 }
 
+func TestViocovListVMsExcludesTransientDomains(t *testing.T) {
+	conn := newTestLibvirtConn(t)
+	persistentName := viocovUniqueName("persistent-list")
+	transientName := viocovUniqueName("transient-list")
+	viocovDefineDomain(t, conn, persistentName, "")
+
+	transient, err := conn.DomainCreateXML(viocovDomainXML(transientName, ""), 0)
+	if err != nil {
+		t.Fatalf("create transient domain %s: %v", transientName, err)
+	}
+	t.Cleanup(func() {
+		_ = transient.Destroy()
+		_ = transient.Free()
+	})
+
+	vms, err := ListVMs("", conn)
+	if err != nil {
+		t.Fatalf("ListVMs: %v", err)
+	}
+	requireListedVM(t, vms, persistentName)
+	assertListExcludesVM(t, vms, transientName)
+}
+
 func TestViocovDomainVMInfoBranches(t *testing.T) {
 	if _, ok := domainVMInfo(libvirt.Domain{}, ""); ok {
 		t.Fatal("expected invalid domain handle to be skipped")
@@ -162,17 +199,8 @@ func TestViocovDomainVMInfoBranches(t *testing.T) {
 
 func TestViocovVMInfoHelperFallbacks(t *testing.T) {
 	dom := &libvirt.Domain{}
-	if got := domainOwnerForVMInfo("cvio-x", dom); got != "" {
-		t.Fatalf("domainOwnerForVMInfo: expected empty owner, got %q", got)
-	}
-	if got := domainGuestUserForVMInfo("cvio-x", dom); got != "" {
-		t.Fatalf("domainGuestUserForVMInfo: expected empty guest user, got %q", got)
-	}
-	if got := domainBaseImageForVMInfo("cvio-x", dom); got != "" {
-		t.Fatalf("domainBaseImageForVMInfo: expected empty base image, got %q", got)
-	}
-	if got := domainCreatedAtForVMInfo("cvio-x", dom); got != "" {
-		t.Fatalf("domainCreatedAtForVMInfo: expected empty created-at, got %q", got)
+	if got := domainMetadataForVMInfo("cvio-x", dom); got != (domainMetadataSnapshot{}) {
+		t.Fatalf("domainMetadataForVMInfo: expected empty metadata, got %+v", got)
 	}
 	if mem, vcpu := domainResources(libvirt.Domain{}); mem != 0 || vcpu != 0 {
 		t.Fatalf("domainResources: expected 0/0, got %d/%d", mem, vcpu)
@@ -212,6 +240,152 @@ func TestViocovDomainDiskGB(t *testing.T) {
 	if used, total := domainDiskGB(*none); used != 0 || total != 0 {
 		t.Fatalf("no disk: expected 0/0 GiB, got %d/%d", used, total)
 	}
+}
+
+func TestViocovWorkerDiskCacheUsesUUIDLifetimeSnapshot(t *testing.T) {
+	fixture, first, firstUUID := newViocovWorkerDiskCacheFixture(t)
+	fixture.assertInitialSnapshot(firstUUID)
+	fixture.resizeAndAssertSnapshotIsImmutable()
+
+	second, secondUUID := fixture.replaceDomain(first, firstUUID)
+	fixture.assertReplacement(firstUUID, secondUUID)
+	fixture.removeDomain(second, secondUUID)
+}
+
+type viocovWorkerDiskCacheFixture struct {
+	t        *testing.T
+	conn     *libvirt.Connect
+	worker   *SingletonWorker
+	name     string
+	diskPath string
+}
+
+func newViocovWorkerDiskCacheFixture(
+	t *testing.T,
+) (*viocovWorkerDiskCacheFixture, *libvirt.Domain, string) {
+	t.Helper()
+	conn := newTestLibvirtConn(t)
+	dir := newLibvirtAccessibleTempDir(t, "viocov-worker-disk-")
+	diskPath := filepath.Join(dir, "disk.raw")
+	if err := os.WriteFile(diskPath, nil, 0o666); err != nil {
+		t.Fatalf("write empty disk file: %v", err)
+	}
+
+	name := viocovUniqueName("worker-disk-cache")
+	first := viocovDefineDomain(t, conn, name, viocovRawDiskXML(diskPath))
+	firstUUID, err := first.GetUUIDString()
+	if err != nil {
+		t.Fatalf("get first domain UUID: %v", err)
+	}
+	fixture := &viocovWorkerDiskCacheFixture{
+		t:        t,
+		conn:     conn,
+		worker:   &SingletonWorker{},
+		name:     name,
+		diskPath: diskPath,
+	}
+	return fixture, first, firstUUID
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) assertInitialSnapshot(domainUUID string) {
+	fixture.t.Helper()
+	if err := fixture.worker.doWork(fixture.conn); err != nil {
+		fixture.t.Fatalf("inventory initial zero disk: %v", err)
+	}
+	if disk, ok := fixture.cachedDisk(domainUUID); !ok || disk != (domainDiskSnapshot{}) {
+		fixture.t.Fatalf("initial cached disk = %+v (present=%v), want successful 0/0", disk, ok)
+	}
+	fixture.worker.inventoryCacheMu.Lock()
+	_, metadataCachedWithoutCompletion := fixture.worker.metadataByUUID[domainUUID]
+	fixture.worker.inventoryCacheMu.Unlock()
+	if metadataCachedWithoutCompletion {
+		fixture.t.Fatal("incomplete metadata was cached alongside valid block info")
+	}
+	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
+		fixture.t.Fatalf("initial worker disk = %d/%d, want 0/0", vm.VolumeUsedGB, vm.VolumeGB)
+	}
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) resizeAndAssertSnapshotIsImmutable() {
+	fixture.t.Helper()
+	// Change both allocation and capacity without changing the domain UUID.
+	// Direct ListVMs must remain fresh while the worker deliberately keeps its
+	// first successful UUID-lifetime snapshot.
+	if err := os.WriteFile(fixture.diskPath, bytes.Repeat([]byte{0xa5}, 512*1024), 0o666); err != nil {
+		fixture.t.Fatalf("allocate disk file: %v", err)
+	}
+	if err := os.Truncate(fixture.diskPath, 2<<30); err != nil {
+		fixture.t.Fatalf("resize disk file: %v", err)
+	}
+	directVMs, err := ListVMs("", fixture.conn)
+	if err != nil {
+		fixture.t.Fatalf("direct ListVMs after disk change: %v", err)
+	}
+	if vm := requireListedVM(fixture.t, directVMs, fixture.name); vm.VolumeUsedGB != 1 || vm.VolumeGB != 2 {
+		fixture.t.Fatalf("fresh direct disk = %d/%d, want 1/2", vm.VolumeUsedGB, vm.VolumeGB)
+	}
+	if err := fixture.worker.doWork(fixture.conn); err != nil {
+		fixture.t.Fatalf("inventory cached disk after same-UUID change: %v", err)
+	}
+	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
+		fixture.t.Fatalf("same-UUID worker disk changed to %d/%d, want cached 0/0", vm.VolumeUsedGB, vm.VolumeGB)
+	}
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) replaceDomain(
+	first *libvirt.Domain,
+	firstUUID string,
+) (*libvirt.Domain, string) {
+	fixture.t.Helper()
+	if err := first.Undefine(); err != nil {
+		fixture.t.Fatalf("undefine first same-name domain: %v", err)
+	}
+	second := viocovDefineDomain(fixture.t, fixture.conn, fixture.name, viocovRawDiskXML(fixture.diskPath))
+	secondUUID, err := second.GetUUIDString()
+	if err != nil {
+		fixture.t.Fatalf("get replacement domain UUID: %v", err)
+	}
+	if secondUUID == firstUUID {
+		fixture.t.Fatalf("replacement UUID = old UUID %q", firstUUID)
+	}
+	if err := fixture.worker.doWork(fixture.conn); err != nil {
+		fixture.t.Fatalf("inventory same-name disk replacement: %v", err)
+	}
+	return second, secondUUID
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) assertReplacement(firstUUID string, secondUUID string) {
+	fixture.t.Helper()
+	if _, ok := fixture.cachedDisk(firstUUID); ok {
+		fixture.t.Fatalf("old disk UUID %q survived replacement sweep", firstUUID)
+	}
+	if disk, ok := fixture.cachedDisk(secondUUID); !ok || disk != (domainDiskSnapshot{UsedGB: 1, TotalGB: 2}) {
+		fixture.t.Fatalf("replacement cached disk = %+v (present=%v), want 1/2", disk, ok)
+	}
+	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 1 || vm.VolumeGB != 2 {
+		fixture.t.Fatalf("replacement worker disk = %d/%d, want 1/2", vm.VolumeUsedGB, vm.VolumeGB)
+	}
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) removeDomain(domain *libvirt.Domain, domainUUID string) {
+	fixture.t.Helper()
+	if err := domain.Undefine(); err != nil {
+		fixture.t.Fatalf("undefine replacement domain: %v", err)
+	}
+	if err := fixture.worker.doWork(fixture.conn); err != nil {
+		fixture.t.Fatalf("inventory after disk-domain removal: %v", err)
+	}
+	if _, ok := fixture.cachedDisk(domainUUID); ok {
+		fixture.t.Fatalf("removed disk UUID %q survived pruning sweep", domainUUID)
+	}
+}
+
+func (fixture *viocovWorkerDiskCacheFixture) cachedDisk(domainUUID string) (domainDiskSnapshot, bool) {
+	fixture.t.Helper()
+	fixture.worker.inventoryCacheMu.Lock()
+	defer fixture.worker.inventoryCacheMu.Unlock()
+	disk, ok := fixture.worker.diskByUUID[domainUUID]
+	return disk, ok
 }
 
 func TestViocovBytesToGiBCeil(t *testing.T) {
@@ -281,7 +455,17 @@ func TestViocovWorkerRunSurvivesConnectFailure(t *testing.T) {
 	t.Setenv(libvirtURIEnv, viocovBadLibvirtURI)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &SingletonWorker{ticker: time.NewTicker(20 * time.Millisecond), ctx: ctx, cancel: cancel}
+	worker := &SingletonWorker{
+		ticker: time.NewTicker(20 * time.Millisecond),
+		ctx:    ctx,
+		cancel: cancel,
+		metadataByUUID: map[string]domainMetadataSnapshot{
+			"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
+		},
+		diskByUUID: map[string]domainDiskSnapshot{
+			"cached-domain": {UsedGB: 1, TotalGB: 2},
+		},
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -296,6 +480,12 @@ func TestViocovWorkerRunSurvivesConnectFailure(t *testing.T) {
 
 	if names := worker.GetVMnames(); names != nil {
 		t.Fatalf("expected no cached VMs after connect failures, got %v", names)
+	}
+	if len(worker.metadataByUUID) != 1 {
+		t.Fatalf("connect failures cleared metadata cache: %+v", worker.metadataByUUID)
+	}
+	if len(worker.diskByUUID) != 1 {
+		t.Fatalf("connect failures cleared disk cache: %+v", worker.diskByUUID)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"devboxgateway/internal/hash"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"slices"
 	"strings"
@@ -50,9 +51,36 @@ type VMInfo struct {
 	rdpObservation uint64
 }
 
-// ListVMs returns VMs visible to the given user from the provided libvirt connection.
+type (
+	inventoryMetadataResolver func(string, *libvirt.Domain) (domainMetadataSnapshot, string)
+	inventoryDiskResolver     func(string, *libvirt.Domain) domainDiskSnapshot
+)
+
+// ListVMs returns persistent VMs visible to the given user from the provided
+// libvirt connection. Gateway-managed VDIs are persistent, and limiting the
+// inventory here keeps its inactive-XML metadata semantics aligned with the
+// config-only direct metadata helpers without an IsPersistent call per domain.
 func ListVMs(user string, conn *libvirt.Connect) ([]VMInfo, error) {
-	doms, err := conn.ListAllDomains(0)
+	return listVMsWithInventoryResolvers(
+		user,
+		conn,
+		func(name string, d *libvirt.Domain) (domainMetadataSnapshot, string) {
+			return domainMetadataForVMInfo(name, d), ""
+		},
+		func(_ string, d *libvirt.Domain) domainDiskSnapshot {
+			usedGB, totalGB := domainDiskGB(*d)
+			return domainDiskSnapshot{UsedGB: usedGB, TotalGB: totalGB}
+		},
+	)
+}
+
+func listVMsWithInventoryResolvers(
+	user string,
+	conn *libvirt.Connect,
+	resolveMetadata inventoryMetadataResolver,
+	resolveDisk inventoryDiskResolver,
+) ([]VMInfo, error) {
+	doms, err := conn.ListAllDomains(libvirt.CONNECT_LIST_DOMAINS_PERSISTENT)
 	if err != nil {
 		log.Printf("list domains: %v", err)
 		return nil, err
@@ -61,7 +89,7 @@ func ListVMs(user string, conn *libvirt.Connect) ([]VMInfo, error) {
 
 	var result []VMInfo
 	for _, d := range doms {
-		info, ok := domainVMInfo(d, user)
+		info, ok := domainVMInfoWithInventoryResolvers(d, user, resolveMetadata, resolveDisk)
 		if ok {
 			result = append(result, info)
 		}
@@ -76,14 +104,33 @@ func freeDomains(doms []libvirt.Domain) {
 }
 
 func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
+	return domainVMInfoWithInventoryResolvers(
+		d,
+		user,
+		func(name string, d *libvirt.Domain) (domainMetadataSnapshot, string) {
+			return domainMetadataForVMInfo(name, d), ""
+		},
+		func(_ string, d *libvirt.Domain) domainDiskSnapshot {
+			usedGB, totalGB := domainDiskGB(*d)
+			return domainDiskSnapshot{UsedGB: usedGB, TotalGB: totalGB}
+		},
+	)
+}
+
+func domainVMInfoWithInventoryResolvers(
+	d libvirt.Domain,
+	user string,
+	resolveMetadata inventoryMetadataResolver,
+	resolveDisk inventoryDiskResolver,
+) (VMInfo, bool) {
 	name, err := d.GetName()
 	if err != nil {
 		log.Printf("domain name: %v", err)
 		return VMInfo{}, false
 	}
 
-	owner := domainOwnerForVMInfo(name, &d)
-	if user != "" && owner != user {
+	metadata, domainUUID := resolveMetadata(name, &d)
+	if user != "" && metadata.Owner != user {
 		return VMInfo{}, false
 	}
 
@@ -95,69 +142,32 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 
 	mem, vcpu := domainResources(d)
 	ip, primaryIP := domainDisplayIPs(d, state)
-	diskUsedGB, diskTotalGB := domainDiskGB(d)
+	disk := resolveDisk(domainUUID, &d)
 	return VMInfo{
 		Name:         name,
-		Owner:        owner,
-		GuestUser:    domainGuestUserForVMInfo(name, &d),
-		BaseImage:    domainBaseImageForVMInfo(name, &d),
-		CreatedAt:    domainCreatedAtForVMInfo(name, &d),
+		Owner:        metadata.Owner,
+		GuestUser:    metadata.GuestUser,
+		BaseImage:    metadata.BaseImage,
+		CreatedAt:    metadata.CreatedAt,
 		State:        formatState(state),
 		MemoryMiB:    mem,
 		VCPU:         vcpu,
-		VolumeGB:     diskTotalGB,
-		VolumeUsedGB: diskUsedGB,
+		VolumeGB:     disk.TotalGB,
+		VolumeUsedGB: disk.UsedGB,
 		IP:           ip,
 		PrimaryIP:    primaryIP,
 	}, true
 }
 
-func domainOwnerForVMInfo(name string, d *libvirt.Domain) string {
-	owner, hasOwner, err := domainOwner(d)
+// domainUUIDForInventoryCache reads UUID state from the local libvirt domain
+// handle; virDomainGetUUIDString does not add a daemon RPC to the inventory.
+func domainUUIDForInventoryCache(name string, d *libvirt.Domain) string {
+	domainUUID, err := d.GetUUIDString()
 	if err != nil {
-		log.Printf("domain owner %s: %v", name, err)
+		log.Printf("domain UUID %s: %v", name, err)
 		return ""
 	}
-	if !hasOwner {
-		return ""
-	}
-	return owner
-}
-
-func domainGuestUserForVMInfo(name string, d *libvirt.Domain) string {
-	guestUser, hasGuestUser, err := domainGuestUser(d)
-	if err != nil {
-		log.Printf("domain guest user %s: %v", name, err)
-		return ""
-	}
-	if !hasGuestUser {
-		return ""
-	}
-	return guestUser
-}
-
-func domainBaseImageForVMInfo(name string, d *libvirt.Domain) string {
-	baseImage, hasBaseImage, err := domainBaseImage(d)
-	if err != nil {
-		log.Printf("domain base image %s: %v", name, err)
-		return ""
-	}
-	if !hasBaseImage {
-		return ""
-	}
-	return baseImage
-}
-
-func domainCreatedAtForVMInfo(name string, d *libvirt.Domain) string {
-	createdAt, hasCreatedAt, err := domainCreatedAt(d)
-	if err != nil {
-		log.Printf("domain created-at %s: %v", name, err)
-		return ""
-	}
-	if !hasCreatedAt {
-		return ""
-	}
-	return createdAt
+	return strings.TrimSpace(domainUUID)
 }
 
 // domainDisplayIPs returns (display, routing). The display string aggregates
@@ -251,25 +261,11 @@ func domainResources(d libvirt.Domain) (int, int) {
 // the bytes the thin-provisioned qcow2 actually occupies on the host. Either is
 // 0 when libvirt cannot report it.
 func domainDiskGB(d libvirt.Domain) (used int, total int) {
-	info, err := d.GetBlockInfo("vda", 0)
+	disk, err := loadDomainDiskSnapshot(d.GetBlockInfo)
 	if err != nil {
 		return 0, 0
 	}
-
-	capacity := info.Capacity
-	if capacity == 0 {
-		capacity = info.Physical
-	}
-	if capacity == 0 {
-		capacity = info.Allocation
-	}
-
-	allocation := info.Allocation
-	if allocation == 0 {
-		allocation = info.Physical
-	}
-
-	return bytesToGiBCeil(allocation), bytesToGiBCeil(capacity)
+	return disk.UsedGB, disk.TotalGB
 }
 
 func bytesToGiBCeil(b uint64) int {
@@ -348,15 +344,74 @@ func formatState(state libvirt.DomainState) string {
 
 // SingletonWorker caches VM metadata in the background for fast read access.
 type SingletonWorker struct {
-	ticker             *time.Ticker
-	ctx                context.Context
-	cancel             context.CancelFunc
-	mu                 sync.RWMutex
-	vms                []VMInfo
-	nextRDPGeneration  uint64
-	nextRDPObservation atomic.Uint64
-	nextSubscriberID   uint64
-	subscribers        map[uint64]chan struct{}
+	ticker                *time.Ticker
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	inventoryCacheMu      sync.Mutex
+	inventoryHostIdentity inventoryHostIdentity
+	metadataByUUID        map[string]domainMetadataSnapshot
+	diskByUUID            map[string]domainDiskSnapshot
+	mu                    sync.RWMutex
+	vms                   []VMInfo
+	snapshotSweptAt       time.Time
+	nextRDPGeneration     uint64
+	nextRDPObservation    atomic.Uint64
+	nextSubscriberID      uint64
+	subscribers           map[uint64]chan struct{}
+}
+
+// vmQuotaSnapshotMaxAge bounds how old the worker's VM snapshot may be when it
+// substitutes for a live per-owner domain count in the creation quota check.
+// The worker sweeps every 2 seconds, so a healthy snapshot is well inside this
+// bound; a sweep stalled longer than this (for example on hung guest-agent
+// calls) makes CountVMsOwnedBy report not-authoritative and the quota check
+// falls back to counting live libvirt state.
+const vmQuotaSnapshotMaxAge = 10 * time.Second
+
+// CountVMsOwnedBy returns the number of cached VMs owned by user, and whether
+// that count is authoritative enough for quota decisions: an inventory sweep
+// must have completed recently (vmQuotaSnapshotMaxAge) and not been invalidated
+// by a libvirt host change. Callers must treat a false result as "count
+// unavailable", never as zero.
+func (s *SingletonWorker) CountVMsOwnedBy(user string) (int, bool) {
+	if strings.TrimSpace(user) == "" {
+		return 0, false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.snapshotSweptAt.IsZero() || time.Since(s.snapshotSweptAt) > vmQuotaSnapshotMaxAge {
+		return 0, false
+	}
+
+	count := 0
+	for _, vm := range s.vms {
+		if vm.Owner == user {
+			count++
+		}
+	}
+	return count, true
+}
+
+// markVMSnapshotSwept records that the visible VM snapshot was just produced by
+// a completed inventory sweep, making it eligible for quota decisions.
+func (s *SingletonWorker) markVMSnapshotSwept() {
+	s.mu.Lock()
+	s.snapshotSweptAt = time.Now()
+	s.mu.Unlock()
+}
+
+// invalidateVMSnapshot drops the visible VM snapshot and marks it unswept so
+// quota decisions stop trusting it until a sweep against the (possibly new)
+// libvirt host succeeds. The sweep timestamp is zeroed before the snapshot is
+// cleared so a concurrent CountVMsOwnedBy can never judge soon-to-be-dropped
+// data as fresh.
+func (s *SingletonWorker) invalidateVMSnapshot() {
+	s.mu.Lock()
+	s.snapshotSweptAt = time.Time{}
+	s.mu.Unlock()
+	s.setVMs(nil)
 }
 
 // GetVMs returns the cached VMs, optionally filtered by owner.
@@ -506,8 +561,8 @@ func (s *SingletonWorker) notifySubscribersLocked() {
 }
 
 var (
-	instance *SingletonWorker //nolint:gochecknoglobals // package-level singleton needed for one-time registration
-	once     sync.Once        //nolint:gochecknoglobals // package-level singleton needed for one-time registration
+	instance atomic.Pointer[SingletonWorker] //nolint:gochecknoglobals // package-level singleton needed for one-time registration
+	once     sync.Once                       //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 )
 
 // GetInstance returns the process-wide VM cache worker.
@@ -515,15 +570,26 @@ func GetInstance() *SingletonWorker {
 	once.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		instance = &SingletonWorker{
+		worker := &SingletonWorker{
 			ticker: time.NewTicker(2 * time.Second),
 			ctx:    ctx,
 			cancel: cancel,
 		}
-		go instance.run()
+		instance.Store(worker)
+		go worker.run()
 	})
 
-	return instance
+	return instance.Load()
+}
+
+// peekInstance returns the process-wide VM cache worker only when GetInstance
+// has already started it, and nil otherwise. Callers with a correct non-cache
+// path (such as the VM creation quota check) use this so consulting the cache
+// never starts the background worker as a side effect; in-package tests rely on
+// the worker staying unstarted so their libvirt fixtures remain the only
+// observer of domain state.
+func peekInstance() *SingletonWorker {
+	return instance.Load()
 }
 
 func (s *SingletonWorker) run() {
@@ -540,10 +606,8 @@ func (s *SingletonWorker) run() {
 		select {
 		case <-s.ticker.C:
 			if conn == nil {
-				var err error
-				conn, err = libvirt.NewConnect(LibvirtURI())
-				if err != nil {
-					log.Printf("list vms connect: %v", err)
+				conn = s.connectInventory()
+				if conn == nil {
 					continue
 				}
 			}
@@ -560,17 +624,81 @@ func (s *SingletonWorker) run() {
 	}
 }
 
+func (s *SingletonWorker) connectInventory() *libvirt.Connect {
+	conn, err := libvirt.NewConnect(LibvirtURI())
+	if err != nil {
+		log.Printf("list vms connect: %v", err)
+		return nil
+	}
+	if err := s.observeInventoryHost(conn); err != nil {
+		// Do not use snapshots until the new connection's host can be
+		// identified. Retain them and retry the connection next tick so a
+		// transient identity lookup cannot trigger a cold inventory read or mix
+		// snapshots from different hosts.
+		log.Printf("libvirt inventory host identity unavailable; retaining inventory caches and retrying: %v", err)
+		_, _ = conn.Close()
+		return nil
+	}
+	return conn
+}
+
 func (s *SingletonWorker) doWork(conn *libvirt.Connect) error {
 	if conn == nil {
 		return fmt.Errorf("libvirt connection is nil")
 	}
 
-	vms, err := ListVMs("", conn)
+	vms, err := s.listVMsWithInventoryCaches(conn)
 	if err != nil {
 		return err
 	}
 	s.setVMs(vms)
+	s.markVMSnapshotSwept()
 	return nil
+}
+
+func (s *SingletonWorker) listVMsWithInventoryCaches(conn *libvirt.Connect) ([]VMInfo, error) {
+	// The production worker runs one inventory sweep at a time. Copy under the
+	// cache lock so libvirt calls never block unrelated cache maintenance; the
+	// retained map is swapped back only after a successful full-domain listing.
+	s.inventoryCacheMu.Lock()
+	previousMetadata := maps.Clone(s.metadataByUUID)
+	previousDisks := maps.Clone(s.diskByUUID)
+	s.inventoryCacheMu.Unlock()
+	metadataSweep := newDomainMetadataCacheSweep(previousMetadata)
+	diskSweep := newDomainDiskCacheSweep(previousDisks)
+	vms, err := listVMsWithInventoryResolvers(
+		"",
+		conn,
+		func(name string, d *libvirt.Domain) (domainMetadataSnapshot, string) {
+			domainUUID := domainUUIDForInventoryCache(name, d)
+			metadata, loadErr := metadataSweep.load(domainUUID, func() (domainMetadataSnapshot, error) {
+				return loadDomainMetadataSnapshot(d.GetXMLDesc)
+			})
+			if loadErr != nil {
+				log.Printf("domain metadata %s: %v", name, loadErr)
+				return domainMetadataSnapshot{}, domainUUID
+			}
+			return metadata, domainUUID
+		},
+		func(domainUUID string, d *libvirt.Domain) domainDiskSnapshot {
+			disk, loadErr := diskSweep.load(domainUUID, func() (domainDiskSnapshot, error) {
+				return loadDomainDiskSnapshot(d.GetBlockInfo)
+			})
+			if loadErr != nil {
+				return domainDiskSnapshot{}
+			}
+			return disk
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.inventoryCacheMu.Lock()
+	s.metadataByUUID = metadataSweep.retainedEntries()
+	s.diskByUUID = diskSweep.retainedEntries()
+	s.inventoryCacheMu.Unlock()
+	return vms, nil
 }
 
 // Stop stops the background worker ticker and cancels its context.
