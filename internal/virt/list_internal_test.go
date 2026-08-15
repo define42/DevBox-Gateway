@@ -30,6 +30,7 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < loops; i++ {
+			worker.SetAutoShutdownHours(i % 24)
 			worker.setVMs([]VMInfo{
 				{
 					Name:      fmt.Sprintf("alice-vm-%d", i),
@@ -48,6 +49,7 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < loops; i++ {
+			_ = worker.autoShutdownDuration()
 			_ = worker.GetVMs("alice")
 			_ = worker.GetVMnames()
 			_, _ = worker.GetIPOfVM(fmt.Sprintf("alice-vm-%d", i))

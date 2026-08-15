@@ -460,6 +460,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 	if !hasOwner || owner != user.GetName() {
 		t.Fatalf("expected owner %q, got owner=%q hasOwner=%v", user.GetName(), owner, hasOwner)
 	}
+	assertInitialLastUsedMetadata(t, conn, vmName)
 
 	owned, err := UserOwnsVM(vmName, user.GetName())
 	if err != nil {
@@ -488,6 +489,27 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("ListVMs(prefix): %v", err)
 	}
 	assertListExcludesVM(t, prefixVMs, vmName)
+}
+
+func assertInitialLastUsedMetadata(t *testing.T, conn *libvirt.Connect, vmName string) {
+	t.Helper()
+
+	dom, err := conn.LookupDomainByName(vmName)
+	if err != nil {
+		t.Fatalf("lookup VM for last-used metadata: %v", err)
+	}
+	defer func() { _ = dom.Free() }()
+
+	lastUsed, hasLastUsed, err := domainLastUsed(dom)
+	if err != nil {
+		t.Fatalf("read initial last-used metadata: %v", err)
+	}
+	if !hasLastUsed {
+		t.Fatal("expected a new VM to have initial last-used metadata")
+	}
+	if _, err := time.Parse(time.RFC3339, lastUsed); err != nil {
+		t.Fatalf("initial last-used metadata %q is not RFC3339: %v", lastUsed, err)
+	}
 }
 
 func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {

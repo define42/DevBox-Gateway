@@ -37,6 +37,7 @@ type VMInfo struct {
 	GuestUser    string
 	BaseImage    string
 	CreatedAt    string
+	LastUsed     string
 	State        string
 	MemoryMiB    int
 	VCPU         int
@@ -101,6 +102,7 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		GuestUser:    domainGuestUserForVMInfo(name, &d),
 		BaseImage:    domainBaseImageForVMInfo(name, &d),
 		CreatedAt:    domainCreatedAtForVMInfo(name, &d),
+		LastUsed:     domainLastUsedForVMInfo(name, &d),
 		State:        formatState(state),
 		MemoryMiB:    mem,
 		VCPU:         vcpu,
@@ -160,6 +162,18 @@ func domainCreatedAtForVMInfo(name string, d *libvirt.Domain) string {
 		return ""
 	}
 	return createdAt
+}
+
+func domainLastUsedForVMInfo(name string, d *libvirt.Domain) string {
+	lastUsed, hasLastUsed, err := domainLastUsed(d)
+	if err != nil {
+		log.Printf("domain last-used %s: %v", name, err)
+		return ""
+	}
+	if !hasLastUsed {
+		return ""
+	}
+	return lastUsed
 }
 
 // domainDisplayIPs returns (display, routing). The display string aggregates
@@ -375,13 +389,34 @@ func formatState(state libvirt.DomainState) string {
 
 // SingletonWorker caches VM metadata in the background for fast read access.
 type SingletonWorker struct {
-	ticker           *time.Ticker
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.RWMutex
-	vms              []VMInfo
-	nextSubscriberID uint64
-	subscribers      map[uint64]chan struct{}
+	ticker            *time.Ticker
+	ctx               context.Context
+	cancel            context.CancelFunc
+	mu                sync.RWMutex
+	autoShutdownAfter time.Duration
+	vms               []VMInfo
+	nextSubscriberID  uint64
+	subscribers       map[uint64]chan struct{}
+}
+
+// SetAutoShutdownHours configures how long an active, gateway-managed VM may
+// remain unused before the worker force-stops it. Non-positive values disable
+// idle auto-shutdown.
+func (s *SingletonWorker) SetAutoShutdownHours(hours int) {
+	after := time.Duration(0)
+	if hours > 0 {
+		after = time.Duration(hours) * time.Hour
+	}
+
+	s.mu.Lock()
+	s.autoShutdownAfter = after
+	s.mu.Unlock()
+}
+
+func (s *SingletonWorker) autoShutdownDuration() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.autoShutdownAfter
 }
 
 // GetVMs returns the cached VMs, optionally filtered by owner.
@@ -551,6 +586,9 @@ func (s *SingletonWorker) run() {
 func (s *SingletonWorker) doWork(conn *libvirt.Connect) error {
 	if conn == nil {
 		return fmt.Errorf("libvirt connection is nil")
+	}
+	if err := enforceIdleAutoShutdown(conn, s.autoShutdownDuration(), time.Now().UTC()); err != nil {
+		return err
 	}
 
 	vms, err := ListVMs("", conn)

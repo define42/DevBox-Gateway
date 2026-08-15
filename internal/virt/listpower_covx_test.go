@@ -31,6 +31,9 @@ func TestViocovConnectErrorsSurfaceFromHelpers(t *testing.T) {
 	if _, err := UserOwnsVM("cvio-any", "cvio-user"); err == nil {
 		t.Fatal("UserOwnsVM: expected connect error")
 	}
+	if err := MarkVMLastUsed("cvio-any"); err == nil {
+		t.Fatal("MarkVMLastUsed: expected connect error")
+	}
 	if _, err := OpenSerialConsole("cvio-any"); err == nil {
 		t.Fatal("OpenSerialConsole: expected connect error")
 	}
@@ -75,6 +78,10 @@ func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	name := viocovUniqueName("power")
 	dom := viocovStartDomain(t, conn, name, "")
+	const oldLastUsed = "2000-01-02T03:04:05Z"
+	if err := setDomainLastUsedMetadata(dom, oldLastUsed); err != nil {
+		t.Fatalf("set old last-used metadata: %v", err)
+	}
 
 	if err := StartExistingVM(name); err != nil {
 		t.Fatalf("StartExistingVM on active domain: %v", err)
@@ -89,6 +96,7 @@ func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 	if !active {
 		t.Fatal("expected domain to stay active after reboot request")
 	}
+	assertLastUsedWasRefreshed(t, dom, oldLastUsed)
 	if err := ShutdownVM(name); err != nil {
 		t.Fatalf("ShutdownVM: %v", err)
 	}
@@ -98,6 +106,31 @@ func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 	}
 	if active {
 		t.Fatal("expected domain to be shut off after force shutdown")
+	}
+
+	if err := setDomainLastUsedMetadata(dom, oldLastUsed); err != nil {
+		t.Fatalf("reset old last-used metadata: %v", err)
+	}
+	if err := StartExistingVM(name); err != nil {
+		t.Fatalf("StartExistingVM on inactive domain: %v", err)
+	}
+	assertLastUsedWasRefreshed(t, dom, oldLastUsed)
+	if err := ShutdownVM(name); err != nil {
+		t.Fatalf("final ShutdownVM: %v", err)
+	}
+}
+
+func assertLastUsedWasRefreshed(t *testing.T, dom *libvirt.Domain, old string) {
+	t.Helper()
+	lastUsed, hasLastUsed, err := domainLastUsed(dom)
+	if err != nil {
+		t.Fatalf("read last-used metadata: %v", err)
+	}
+	if !hasLastUsed || lastUsed == old {
+		t.Fatalf("expected refreshed last-used metadata, got %q (present=%v)", lastUsed, hasLastUsed)
+	}
+	if _, err := time.Parse(time.RFC3339, lastUsed); err != nil {
+		t.Fatalf("last-used metadata %q is not RFC3339: %v", lastUsed, err)
 	}
 }
 
@@ -119,6 +152,10 @@ func TestViocovListVMsFiltersByOwnerMetadata(t *testing.T) {
 	if err := setDomainOwnerMetadata(dom, owner); err != nil {
 		t.Fatalf("setting owner metadata: %v", err)
 	}
+	const lastUsed = "2026-08-15T10:00:00Z"
+	if err := setDomainLastUsedMetadata(dom, lastUsed); err != nil {
+		t.Fatalf("setting last-used metadata: %v", err)
+	}
 
 	vms, err := ListVMs(owner, conn)
 	if err != nil {
@@ -127,6 +164,9 @@ func TestViocovListVMsFiltersByOwnerMetadata(t *testing.T) {
 	vm := requireListedVM(t, vms, name)
 	if vm.Owner != owner {
 		t.Fatalf("expected owner %q, got %q", owner, vm.Owner)
+	}
+	if vm.LastUsed != lastUsed {
+		t.Fatalf("expected last-used %q, got %q", lastUsed, vm.LastUsed)
 	}
 	if vm.State != "shut off" {
 		t.Fatalf("expected state 'shut off', got %q", vm.State)

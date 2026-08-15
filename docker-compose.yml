@@ -14,6 +14,7 @@ services:
       - DATA_ROOT_DIR=/data
       - BASE_IMAGE_DIR=/data/baseimages
       - LDAP_SKIP_TLS_VERIFY=true
+      - VM_AUTO_SHUTDOWN_HOURS=${VM_AUTO_SHUTDOWN_HOURS:-1}
     ports:
       - "443:443"
     volumes:

@@ -9,6 +9,7 @@ const RTT_GREEN_MAX_MS = 30;
 const RTT_YELLOW_MAX_MS = 50;
 const JITTER_GREEN_MAX_MS = 20;
 const JITTER_YELLOW_MAX_MS = 50;
+const AUTO_SHUTDOWN_COUNTDOWN_REFRESH_MS = 60_000;
 const LOGIN_PATH = "/login";
 
 type Disposable = {
@@ -51,6 +52,7 @@ type DashboardVM = {
     user?: string;
     baseImage?: string;
     createdAt?: string;
+    lastUsed?: string;
     rdpFilename?: string;
     ip: string;
     state: string;
@@ -67,6 +69,7 @@ type DashboardDataResponse = {
     username?: string;
     vms?: DashboardVM[];
     baseImages?: string[];
+    autoShutdownHours?: number;
     error?: string;
 };
 
@@ -133,6 +136,7 @@ type DashboardState = {
     actionError: string;
     loading: boolean;
     busy: boolean;
+    autoShutdownHours: number;
     terminal: DashboardTerminalState;
     vnc: DashboardVNCState;
     create: DashboardCreateState;
@@ -153,6 +157,7 @@ const state: DashboardState = {
     actionError: "",
     loading: true,
     busy: false,
+    autoShutdownHours: 0,
     terminal: {
         open: false,
         vmName: "",
@@ -190,6 +195,39 @@ let dashboardInitialLoadComplete = false;
 function isActiveState(vmState: string): boolean {
     const normalized = vmState.trim().toLowerCase();
     return normalized === "running" || normalized === "paused" || normalized === "suspended";
+}
+
+function isAutoShutdownState(vmState: string): boolean {
+    const normalized = vmState.trim().toLowerCase();
+    return normalized === "running" ||
+        normalized === "blocked" ||
+        normalized === "paused" ||
+        normalized === "suspended";
+}
+
+// autoShutdownHoursRemaining returns a whole-hour countdown for VMs subject to
+// the idle policy. We round up so any partial hour is displayed as one hour.
+// Missing metadata is due immediately. A negative result means the timestamp is
+// malformed, which the server treats as unsafe to act on automatically.
+function autoShutdownHoursRemaining(vm: DashboardVM, nowMs: number = Date.now()): number | null {
+    if (state.autoShutdownHours <= 0 || !isAutoShutdownState(vm.state || "")) {
+        return null;
+    }
+
+    const lastUsed = (vm.lastUsed || "").trim();
+    if (lastUsed === "") {
+        return 0;
+    }
+    const lastUsedMs = new Date(lastUsed).getTime();
+    if (!Number.isFinite(lastUsedMs)) {
+        return -1;
+    }
+
+    const deadlineMs = lastUsedMs + (state.autoShutdownHours * 60 * 60 * 1000);
+    if (!Number.isFinite(deadlineMs)) {
+        return -1;
+    }
+    return Math.max(0, Math.ceil((deadlineMs - nowMs) / (60 * 60 * 1000)));
 }
 
 function formatMemoryGB(memoryMiB?: number | string | null): string {
@@ -281,6 +319,7 @@ function bootstrap(): void {
               </form>
             </div>
           </div>
+          <div id="auto-shutdown-policy" class="alert alert-info py-2 mt-3 mb-0 d-none" role="status" hidden></div>
           <div id="action-area" class="mt-3" aria-live="polite"></div>
           <div id="vm-list" class="mt-3"></div>
         </div>
@@ -407,6 +446,7 @@ function bootstrap(): void {
     const rttIndicator = root.querySelector<HTMLSpanElement>("#rtt-indicator");
     const jitterIndicator = root.querySelector<HTMLSpanElement>("#jitter-indicator");
     const actionArea = root.querySelector<HTMLDivElement>("#action-area");
+    const autoShutdownPolicy = root.querySelector<HTMLDivElement>("#auto-shutdown-policy");
     const listArea = root.querySelector<HTMLDivElement>("#vm-list");
     const terminalModal = root.querySelector<HTMLDivElement>("#terminal-modal");
     const terminalBackdrop = root.querySelector<HTMLDivElement>("#terminal-backdrop");
@@ -452,6 +492,7 @@ function bootstrap(): void {
         !rttIndicator ||
         !jitterIndicator ||
         !actionArea ||
+        !autoShutdownPolicy ||
         !listArea ||
         !terminalModal ||
         !terminalBackdrop ||
@@ -499,6 +540,7 @@ function bootstrap(): void {
     const rttIndicatorEl = rttIndicator;
     const jitterIndicatorEl = jitterIndicator;
     const actionAreaEl = actionArea;
+    const autoShutdownPolicyEl = autoShutdownPolicy;
     const listAreaEl = listArea;
     const terminalModalEl = terminalModal;
     const terminalBackdropEl = terminalBackdrop;
@@ -645,6 +687,7 @@ function bootstrap(): void {
 
     let dashboardSocket: WebSocket | null = null;
     let rttPingHandle = 0;
+    let autoShutdownCountdownHandle = 0;
     let dashboardReconnectHandle = 0;
     let dashboardSocketClosing = false;
     let dashboardSocketErrorChecked = false;
@@ -704,6 +747,11 @@ function bootstrap(): void {
     function applyDashboardData(data: DashboardDataResponse): void {
         state.vms = data.vms || [];
         baseImages = data.baseImages || [];
+        const configuredHours = Number(data.autoShutdownHours);
+        state.autoShutdownHours = Number.isFinite(configuredHours) && configuredHours > 0
+            ? Math.floor(configuredHours)
+            : 0;
+        renderAutoShutdownPolicy();
         renderBaseImageOptions();
         if (data.filename) {
             state.filename = data.filename;
@@ -854,6 +902,16 @@ function bootstrap(): void {
             message.textContent = state.actionMessage;
             actionAreaEl.appendChild(message);
         }
+    }
+
+    function renderAutoShutdownPolicy(): void {
+        const hours = state.autoShutdownHours;
+        const enabled = hours > 0;
+        autoShutdownPolicyEl.hidden = !enabled;
+        autoShutdownPolicyEl.classList.toggle("d-none", !enabled);
+        autoShutdownPolicyEl.textContent = enabled
+            ? `Active DevBoxes are automatically shut down after ${hours} ${hours === 1 ? "hour" : "hours"} without RDP use.`
+            : "";
     }
 
     function renderTerminal(): void {
@@ -1273,11 +1331,11 @@ function bootstrap(): void {
             "Name",
             "Connect",
             "State",
-            "Memory (GB)",
-            "vCPU",
-            "Disk",
-            "Actions",
         ];
+        if (state.autoShutdownHours > 0) {
+            columns.push("Auto-shutdown");
+        }
+        columns.push("Memory (GB)", "vCPU", "Disk", "Actions");
         for (const label of columns) {
             const th = document.createElement("th");
             th.scope = "col";
@@ -1409,6 +1467,24 @@ function bootstrap(): void {
             stateBadge.textContent = stateText;
             stateCell.appendChild(stateBadge);
             row.appendChild(stateCell);
+
+            if (state.autoShutdownHours > 0) {
+                const autoShutdownCell = document.createElement("td");
+                const remainingHours = autoShutdownHoursRemaining(vm);
+                if (remainingHours === null) {
+                    autoShutdownCell.className = "text-body-secondary";
+                    autoShutdownCell.textContent = "Not running";
+                } else if (remainingHours < 0) {
+                    autoShutdownCell.className = "text-body-secondary";
+                    autoShutdownCell.textContent = "Unknown";
+                } else if (remainingHours === 0) {
+                    autoShutdownCell.className = "text-warning";
+                    autoShutdownCell.textContent = "Due now";
+                } else {
+                    autoShutdownCell.textContent = `In ${remainingHours} ${remainingHours === 1 ? "hour" : "hours"}`;
+                }
+                row.appendChild(autoShutdownCell);
+            }
 
             const memoryCell = document.createElement("td");
             memoryCell.textContent = formatMemoryGB(vm.memoryMiB);
@@ -2079,6 +2155,11 @@ function bootstrap(): void {
     renderCreate();
     updateCreateAvailability();
     renderRTT(null, null);
+    autoShutdownCountdownHandle = window.setInterval(() => {
+        if (!document.hidden && state.autoShutdownHours > 0) {
+            renderVMList();
+        }
+    }, AUTO_SHUTDOWN_COUNTDOWN_REFRESH_MS);
     void loadVMs().then(() => {
         dashboardInitialLoadComplete = true;
         connectDashboardSocket();
@@ -2089,6 +2170,9 @@ function bootstrap(): void {
             // Re-probe immediately on return; reconnect if the socket dropped.
             if (dashboardInitialLoadComplete) {
                 connectDashboardSocket();
+            }
+            if (state.autoShutdownHours > 0) {
+                renderVMList();
             }
             sendRTTProbe();
         }
@@ -2101,6 +2185,10 @@ function bootstrap(): void {
     });
 
     window.addEventListener("beforeunload", () => {
+        if (autoShutdownCountdownHandle) {
+            window.clearInterval(autoShutdownCountdownHandle);
+            autoShutdownCountdownHandle = 0;
+        }
         teardownDashboardSocket();
         terminalResizeObserver.disconnect();
         teardownTerminalRuntime();

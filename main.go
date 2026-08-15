@@ -103,8 +103,6 @@ func (g *gatewayRuntime) Close() error {
 }
 
 func bootGateway() (*gatewayRuntime, error) {
-	virt.GetInstance()
-
 	rdp.InitLogging()
 
 	settings, err := loadBootSettings()
@@ -123,6 +121,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	if err := virt.InitVirt(settings); err != nil {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
 	}
+	virt.GetInstance().SetAutoShutdownHours(config.VMAutoShutdownHours(settings))
 
 	if err := config.EnsureSNIHashSecret(settings); err != nil {
 		return nil, fmt.Errorf("failed to resolve SNI hash secret: %w", err)

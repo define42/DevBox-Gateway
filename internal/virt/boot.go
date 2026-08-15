@@ -57,7 +57,7 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		_ = dom.Free()
 	}()
 
-	// Owner metadata (and the guest-user, base-image, and created-at metadata
+	// Owner metadata (and the guest-user, base-image, created-at, and last-used metadata
 	// below) is attached AFTER the domain is defined, and dom.Create() runs later
 	// still. A failure at any of those steps would otherwise leave the domain
 	// defined but half-created; without owner metadata it is orphaned — the
@@ -92,11 +92,8 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		}
 	}
 
-	// Record creation time once, when the domain is first defined. Starting or
-	// restarting an existing VM goes through dom.Create() elsewhere and never
-	// redefines the domain, so this timestamp is stable for the VM's lifetime.
-	if err = setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
-		return fmt.Errorf("set created-at metadata for %s: %w", name, err)
+	if err = setInitialDomainTimestamps(dom, name); err != nil {
+		return err
 	}
 
 	if err = dom.Create(); err != nil {
@@ -106,8 +103,25 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 	return nil
 }
 
+func setInitialDomainTimestamps(dom *libvirt.Domain, name string) error {
+	// Record creation time once, when the domain is first defined. Starting or
+	// restarting an existing VM goes through dom.Create() elsewhere and never
+	// redefines the domain, so this timestamp is stable for the VM's lifetime.
+	initialTimestamp := nowCreatedAtTimestamp()
+	if err := setDomainCreatedAtMetadata(dom, initialTimestamp); err != nil {
+		return fmt.Errorf("set created-at metadata for %s: %w", name, err)
+	}
+	// A newly created VM receives a full idle-policy grace period. Legacy or
+	// externally defined gateway VMs without this metadata are shut down as soon
+	// as idle auto-shutdown is enabled.
+	if err := setDomainLastUsedMetadata(dom, initialTimestamp); err != nil {
+		return fmt.Errorf("set last-used metadata for %s: %w", name, err)
+	}
+	return nil
+}
+
 // undefinePartialDomain rolls back a domain that DomainDefineXML created but
-// whose remaining setup (owner/guest-user/base-image/created-at metadata, then
+// whose remaining setup (owner/guest-user/base-image/created-at/last-used metadata, then
 // dom.Create) did not complete. Without this rollback a failed boot leaves the
 // domain defined but without owner metadata, which orphans it: the dashboard
 // filters its VM listing by owner, so the creating user can neither see the VM
@@ -296,21 +310,22 @@ var (
 	inflightVMCreations = make(map[string]int) //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
 )
 
-// vmNameLocks serializes create and remove operations per VDI name. BootNewVM
+// vmNameLocks serializes lifecycle and metadata operations per VDI name. BootNewVM
 // checks the name is free (ensureVMNameAvailable) and only defines the domain
 // much later (StartVMWithOwner); between those two steps it destroys any
 // leftover artifacts and writes a fresh disk and cloud-init seed (guest user +
 // password hash). Without a per-name lock, two concurrent BootNewVM calls for
 // the same name could both pass the availability check and then race through
 // that region, each clobbering the other's disk and seed — so a domain could
-// end up booting one request's disk with another request's credentials. RemoveVM
-// takes the same lock so a delete cannot interleave with a create of the same
-// name. It is held as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
+// end up booting one request's disk with another request's credentials. Remove,
+// power, last-used, and idle-shutdown operations take the same lock so none can
+// interleave with creation or with each other for the same VM. It is held as
+// the outer lock: reserveUserVMSlot/releaseUserVMSlot take
 // vmCreationMu strictly inside this region, so the lock order is always
 // vmNameLocks then vmCreationMu, and a goroutine never holds two VDI-name locks
 // at once — so neither lock can deadlock. This is process-wide because the
 // gateway is the single writer of libvirt state.
-var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM create/remove
+var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM lifecycle and metadata writes
 
 // reserveUserVMSlot refuses creation when the owner already has as many VDIs as
 // MAX_VDI_PER_USER allows, counting both existing domains and creations still

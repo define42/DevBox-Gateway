@@ -296,6 +296,13 @@ time** — a standing dashboard login no longer implicitly authorizes RDP — so
 **any reconnect, or even a first attempt that fails before the session is up,
 requires clicking RDP again** to re-authorize and download a fresh file.
 
+When `VM_AUTO_SHUTDOWN_HOURS` is positive, each authorized **RDP** click
+refreshes the VM's persistent last-used timestamp and the dashboard shows the
+remaining whole-hour countdown. New and manually started VMs receive a full
+grace period; active gateway-owned VMs with no last-used timestamp are shut
+down on the next VM-worker poll. The timer measures time since the latest RDP
+click, not keyboard or mouse activity inside an already open session.
+
 You cannot build the connection by hand because the **server name** in the
 `.rdp` file is an opaque routing label of the form `<label>.<FRONT_DOMAIN>`
 (for example `a1b2c3d4….desktop.local.gd`). The label is
@@ -341,6 +348,7 @@ file**, which keeps container and development overrides working.
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable base VDI images (`.img`, `.qcow2`, `.raw`). Users pick one per VM in the dashboard. The gateway refuses to start if it is empty. |
 | `MAX_VDI_PER_USER`        | `10`                                                                                                             | Maximum number of VDIs (VMs) each user may own at once. Creating another VM is refused once the user owns this many. Set `<=0` to disable the per-user limit. |
+| `VM_AUTO_SHUTDOWN_HOURS`  | `0`                                                                                                              | Shut down VMs that have not been used for this many hours. Set `0` to disable idle auto-shutdown; invalid or negative values resolve to `0`. |
 | `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `VM_MEMORY_MIB`           | `4096`                                                                                                           | Memory in MiB assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | LDAP server URL.                                                                                  |

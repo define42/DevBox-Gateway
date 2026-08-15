@@ -586,11 +586,12 @@ func dashboardCreateResult(name, vmName string, err error, settings *config.Sett
 }
 
 // registerDashboardRDPRoute serves the per-VM "Connect" action. It verifies the
-// caller owns the VM, opens a short-lived RDP authorization window for the
-// caller's client IP (so the RDP front handler's authorizeRDPAccess will admit
-// the connection), and returns the .rdp connection file as a download. Making
-// the download an explicit, authenticated, same-origin POST is what narrows RDP
-// authorization to a deliberate action instead of any standing dashboard session.
+// caller owns the VM, records the authorized click as last-used metadata, opens
+// a short-lived RDP authorization window for the caller's client IP (so the RDP
+// front handler's authorizeRDPAccess will admit the connection), and returns
+// the .rdp connection file as a download. Making the download an explicit,
+// authenticated, same-origin POST narrows RDP authorization to a deliberate
+// action instead of any standing dashboard session.
 func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
 	registerHiddenPost(group, "/dashboard/rdp", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
@@ -603,6 +604,14 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 			dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
 				OK:    false,
 				Error: "Login required.",
+			})
+			return
+		}
+		if err := virt.MarkVMLastUsed(name); err != nil {
+			log.Printf("record last-used timestamp for vm %q failed: %v", name, err)
+			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
+				OK:    false,
+				Error: "Failed to record VM usage.",
 			})
 			return
 		}

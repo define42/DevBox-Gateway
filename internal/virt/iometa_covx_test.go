@@ -9,7 +9,7 @@ import (
 )
 
 // viocovMetadataAccess bundles one domain-metadata kind (owner, guest user,
-// created-at, base image) so every branch can be exercised uniformly.
+// created-at, last-used, base image) so every branch can be exercised uniformly.
 type viocovMetadataAccess struct {
 	kind      string
 	namespace string
@@ -32,6 +32,10 @@ func viocovMetadataAccessors() []viocovMetadataAccess {
 		{
 			kind: "createdat", namespace: domainCreatedAtMetadataNamespace, prefix: domainCreatedAtMetadataPrefix,
 			build: domainCreatedAtMetadataXML, set: setDomainCreatedAtMetadata, get: domainCreatedAt,
+		},
+		{
+			kind: "lastused", namespace: domainLastUsedMetadataNamespace, prefix: domainLastUsedMetadataPrefix,
+			build: domainLastUsedMetadataXML, set: setDomainLastUsedMetadata, get: domainLastUsed,
 		},
 		{
 			kind: "baseimage", namespace: domainBaseImageMetadataNamespace, prefix: domainBaseImageMetadataPrefix,

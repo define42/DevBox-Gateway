@@ -39,6 +39,9 @@ func TestNewSettingTypeDefaults(t *testing.T) {
 	if got := s.GetInt(MAX_VDI_PER_USER); got != DefaultMaxVDIPerUser {
 		t.Fatalf("expected default MAX_VDI_PER_USER=%d, got %d", DefaultMaxVDIPerUser, got)
 	}
+	if got := VMAutoShutdownHours(s); got != DefaultVMAutoShutdownHours {
+		t.Fatalf("expected default VM_AUTO_SHUTDOWN_HOURS=%d, got %d", DefaultVMAutoShutdownHours, got)
+	}
 }
 
 func TestMaxVDIPerUserDefault(t *testing.T) {
@@ -77,6 +80,44 @@ func TestMaxVDIPerUserDisabled(t *testing.T) {
 func TestMaxVDIPerUserNilSettings(t *testing.T) {
 	if got := MaxVDIPerUser(nil); got != DefaultMaxVDIPerUser {
 		t.Fatalf("expected default limit %d for nil settings, got %d", DefaultMaxVDIPerUser, got)
+	}
+}
+
+func TestVMAutoShutdownHours(t *testing.T) {
+	t.Run("nil settings", func(t *testing.T) {
+		if got := VMAutoShutdownHours(nil); got != 0 {
+			t.Fatalf("expected nil settings to disable auto-shutdown, got %d", got)
+		}
+	})
+
+	t.Run("configured", func(t *testing.T) {
+		t.Setenv(VM_AUTO_SHUTDOWN_HOURS, "24")
+		if got := VMAutoShutdownHours(NewSettingType(false)); got != 24 {
+			t.Fatalf("expected configured auto-shutdown threshold 24, got %d", got)
+		}
+	})
+
+	t.Run("excessive value is capped", func(t *testing.T) {
+		settings := NewSettingType(false)
+		if err := settings.OverwriteForTestInt(VM_AUTO_SHUTDOWN_HOURS, maxVMAutoShutdownHours+1); err != nil {
+			t.Fatalf("overwrite VM_AUTO_SHUTDOWN_HOURS: %v", err)
+		}
+		if got := VMAutoShutdownHours(settings); got != maxVMAutoShutdownHours {
+			t.Fatalf("expected cap %d, got %d", maxVMAutoShutdownHours, got)
+		}
+	})
+
+	for name, value := range map[string]string{
+		"zero":        "0",
+		"negative":    "-2",
+		"non-integer": "tomorrow",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(VM_AUTO_SHUTDOWN_HOURS, value)
+			if got := VMAutoShutdownHours(NewSettingType(false)); got != 0 {
+				t.Fatalf("expected %q to disable auto-shutdown, got %d", value, got)
+			}
+		})
 	}
 }
 

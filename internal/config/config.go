@@ -69,6 +69,9 @@ const (
 	// DefaultMaxVDIPerUser is the default maximum number of VDIs (VMs) each user
 	// may own at once. Override with MAX_VDI_PER_USER.
 	DefaultMaxVDIPerUser = 10
+	// DefaultVMAutoShutdownHours disables idle VM auto-shutdown by default.
+	DefaultVMAutoShutdownHours = 0
+	maxVMAutoShutdownHours     = int((1<<63 - 1) / int64(time.Hour))
 )
 
 const (
@@ -91,6 +94,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetInt(VM_VCPU_COUNT, "Number of virtual CPUs assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMVCPUCount)
 	s.SetInt(VM_MEMORY_MIB, "Memory in MiB assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMMemoryMiB)
 	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
+	s.SetInt(VM_AUTO_SHUTDOWN_HOURS, "Hours without RDP use before a VM is shut down automatically; 0 disables idle auto-shutdown. Invalid or negative values resolve to 0", DefaultVMAutoShutdownHours)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously accepted front connections (RDP + HTTPS); Accept blocks once this many are open and resumes as connections close, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", 1024)
@@ -211,6 +215,23 @@ func MaxVDIPerUser(settings *SettingsType) int {
 		return 0
 	}
 	return limit
+}
+
+// VMAutoShutdownHours resolves the number of hours a VM may remain unused
+// before it is shut down automatically. Zero disables idle auto-shutdown.
+// Missing, invalid, and negative values resolve to zero.
+func VMAutoShutdownHours(settings *SettingsType) int {
+	if settings == nil {
+		return DefaultVMAutoShutdownHours
+	}
+	hours := settings.GetInt(VM_AUTO_SHUTDOWN_HOURS)
+	if hours < 0 {
+		return DefaultVMAutoShutdownHours
+	}
+	if hours > maxVMAutoShutdownHours {
+		return maxVMAutoShutdownHours
+	}
+	return hours
 }
 
 // VMDiskCapacityBytes resolves the virtual disk capacity, in bytes, for newly
@@ -471,6 +492,7 @@ const (
 	VM_DISK_SIZE_GB                  = "VM_DISK_SIZE_GB"
 	VM_VCPU_COUNT                    = "VM_VCPU_COUNT"
 	VM_MEMORY_MIB                    = "VM_MEMORY_MIB"
+	VM_AUTO_SHUTDOWN_HOURS           = "VM_AUTO_SHUTDOWN_HOURS"
 	TIMEOUT                          = "TIMEOUT"
 	DEBUG_CONNECTIONS                = "DEBUG_CONNECTIONS"
 )

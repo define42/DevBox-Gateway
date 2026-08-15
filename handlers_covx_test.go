@@ -11,6 +11,7 @@ import (
 	"devboxgateway/internal/vmname"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
@@ -32,7 +33,14 @@ import (
 
 // hcovOwnerMetadataNamespace mirrors the namespace virt uses for domain owner
 // metadata so tests can mark a bare test domain as owned by a user.
-const hcovOwnerMetadataNamespace = "urn:devboxgateway:domain:owner"
+const (
+	hcovOwnerMetadataNamespace    = "urn:devboxgateway:domain:owner"
+	hcovLastUsedMetadataNamespace = "urn:devboxgateway:domain:lastused"
+)
+
+type hcovLastUsedMetadata struct {
+	Value string `xml:",chardata"`
+}
 
 func hcovUniqueName(prefix string) string {
 	return prefix + strconv.FormatInt(time.Now().UnixNano(), 10)
@@ -65,6 +73,40 @@ func hcovDefineOwnedDomain(t *testing.T, name, owner string) {
 	if err != nil {
 		t.Fatalf("set owner metadata for %s: %v", name, err)
 	}
+}
+
+func hcovReadLastUsed(t *testing.T, name string) (string, bool) {
+	t.Helper()
+
+	conn, err := libvirt.NewConnect(virt.LibvirtURI())
+	if err != nil {
+		t.Fatalf("connect libvirt: %v", err)
+	}
+	defer func() { _, _ = conn.Close() }()
+
+	dom, err := conn.LookupDomainByName(name)
+	if err != nil {
+		t.Fatalf("lookup test domain %s: %v", name, err)
+	}
+	defer func() { _ = dom.Free() }()
+
+	payload, err := dom.GetMetadata(
+		libvirt.DOMAIN_METADATA_ELEMENT,
+		hcovLastUsedMetadataNamespace,
+		libvirt.DOMAIN_AFFECT_CONFIG,
+	)
+	if errors.Is(err, libvirt.ERR_NO_DOMAIN_METADATA) {
+		return "", false
+	}
+	if err != nil {
+		t.Fatalf("read last-used metadata for %s: %v", name, err)
+	}
+
+	var metadata hcovLastUsedMetadata
+	if err := xml.Unmarshal([]byte(payload), &metadata); err != nil {
+		t.Fatalf("parse last-used metadata for %s: %v", name, err)
+	}
+	return strings.TrimSpace(metadata.Value), true
 }
 
 func hcovCleanupDomain(name string) {
@@ -586,13 +628,23 @@ func TestHcovDashboardRoutesRequireLoginWithoutSessionMiddleware(t *testing.T) {
 func TestHcovDashboardRDPRejectsBadAndUnownedNames(t *testing.T) {
 	sessionManager := session.NewManager()
 	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
-	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovnoown"))
+	user := hcovUniqueName("hcovnoown")
+	cookie := issueSessionCookie(t, sessionManager, user)
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {""}})
 	hcovAssertAction(t, rec, http.StatusBadRequest, "vm name is required")
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {"hcovghostvm"}})
 	hcovAssertAction(t, rec, http.StatusForbidden, "You do not have permission to connect to this VM.")
+
+	otherUser := hcovUniqueName("hcovother")
+	unownedDomain := otherUser + vmname.Separator + "desk"
+	hcovDefineOwnedDomain(t, unownedDomain, otherUser)
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {unownedDomain}})
+	hcovAssertAction(t, rec, http.StatusForbidden, "You do not have permission to connect to this VM.")
+	if lastUsed, has := hcovReadLastUsed(t, unownedDomain); has {
+		t.Fatalf("unowned RDP request unexpectedly recorded last-used metadata %q", lastUsed)
+	}
 }
 
 func hcovAssertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, user string) {
@@ -613,6 +665,23 @@ func hcovAssertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, user st
 	}
 }
 
+func hcovAssertRecentLastUsed(t *testing.T, domainName string, notBefore time.Time) {
+	t.Helper()
+
+	lastUsed, has := hcovReadLastUsed(t, domainName)
+	if !has {
+		t.Fatal("expected an authorized RDP request to record last-used metadata")
+	}
+	markedAt, err := time.Parse(time.RFC3339, lastUsed)
+	if err != nil {
+		t.Fatalf("last-used metadata %q is not RFC3339: %v", lastUsed, err)
+	}
+	notAfter := time.Now().UTC().Add(time.Second)
+	if markedAt.Before(notBefore) || markedAt.After(notAfter) {
+		t.Fatalf("last-used timestamp %q is outside expected range %s to %s", lastUsed, notBefore, notAfter)
+	}
+}
+
 // TestHcovDashboardRDPDownloadsFileForOwnedVM drives the full authorized RDP
 // download: an owned (TCG, never-booted) domain, the ownership check, the RDP
 // connect grant, and the .rdp attachment. The dashboard VM cache refreshes
@@ -629,12 +698,14 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
 	form := url.Values{"vm_name": {domainName}}
+	before := time.Now().UTC().Add(-time.Second)
 
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		rec := hcovPostForm(t, router, cookie, "/api/dashboard/rdp", form)
 		if rec.Code == http.StatusOK {
 			hcovAssertRDPDownload(t, rec, user)
+			hcovAssertRecentLastUsed(t, domainName, before)
 			return
 		}
 		if rec.Code != http.StatusNotFound {

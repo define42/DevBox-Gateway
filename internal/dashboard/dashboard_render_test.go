@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"devboxgateway/internal/config"
 	"devboxgateway/internal/virt"
 	"embed"
 	"encoding/json"
@@ -139,6 +140,7 @@ func TestBuildDashboardRows(t *testing.T) {
 			Name:      "alice.vm",
 			Owner:     "alice",
 			GuestUser: "guest",
+			LastUsed:  "2026-08-15T10:00:00Z",
 			IP:        "192.0.2.10",
 			State:     "running",
 			MemoryMiB: 4096,
@@ -163,11 +165,29 @@ func TestBuildDashboardRows(t *testing.T) {
 	if row.Name != "alice.vm" || row.IP != "192.0.2.10" || row.State != "running" {
 		t.Fatalf("unexpected row data: %+v", row)
 	}
+	if row.LastUsed != "2026-08-15T10:00:00Z" {
+		t.Fatalf("expected last-used timestamp to be copied, got %q", row.LastUsed)
+	}
 	if !row.RDPReady {
 		t.Fatal("expected RDP readiness to be copied to the dashboard row")
 	}
 	if row.RDPFilename != "alice.vm.rdp" {
 		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)
+	}
+}
+
+func TestDataForUserIncludesAutoShutdownPolicy(t *testing.T) {
+	settings := config.NewSettingType(false)
+	if err := settings.OverwriteForTestInt(config.VM_AUTO_SHUTDOWN_HOURS, 12); err != nil {
+		t.Fatalf("set auto-shutdown hours: %v", err)
+	}
+
+	response, err := DataForUser(settings, "dashboard-policy-user")
+	if err != nil {
+		t.Fatalf("build dashboard data: %v", err)
+	}
+	if response.AutoShutdownHours != 12 {
+		t.Fatalf("expected auto-shutdown policy of 12 hours, got %d", response.AutoShutdownHours)
 	}
 }
 

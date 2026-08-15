@@ -115,6 +115,34 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 	}
 }
 
+func TestDashboardJavaScriptShowsIdleShutdownPolicy(t *testing.T) {
+	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	for description, fragment := range map[string]string{
+		"hidden policy banner":       `id="auto-shutdown-policy" class="alert alert-info py-2 mt-3 mb-0 d-none" role="status" hidden`,
+		"disabled-policy guard":      `if (state.autoShutdownHours > 0)`,
+		"auto-shutdown table column": `columns.push("Auto-shutdown")`,
+		"missing timestamp fallback": `autoShutdownCell.textContent = "Due now"`,
+		"invalid timestamp fallback": `autoShutdownCell.textContent = "Unknown"`,
+		"blocked VM state":           `normalized === "blocked"`,
+		"safe policy rendering":      `autoShutdownPolicyEl.textContent = enabled`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected dashboard JavaScript to include %s", description)
+		}
+	}
+	if strings.Contains(body, "autoShutdownCell.innerHTML") || strings.Contains(body, "autoShutdownPolicyEl.innerHTML") {
+		t.Fatal("auto-shutdown UI must render server-derived values with textContent")
+	}
+}
+
 func TestDashboardJavaScriptStreamsCreationProgress(t *testing.T) {
 	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)

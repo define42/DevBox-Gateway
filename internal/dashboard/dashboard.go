@@ -35,6 +35,7 @@ type VM struct {
 	User         string `json:"user"`
 	BaseImage    string `json:"baseImage,omitempty"`
 	CreatedAt    string `json:"createdAt,omitempty"`
+	LastUsed     string `json:"lastUsed,omitempty"`
 	RDPFilename  string `json:"rdpFilename"`
 	IP           string `json:"ip"`
 	State        string `json:"state"`
@@ -49,11 +50,12 @@ type VM struct {
 
 // DataResponse is the API response for /api/dashboard/data.
 type DataResponse struct {
-	Filename   string   `json:"filename"`
-	Username   string   `json:"username,omitempty"`
-	VMs        []VM     `json:"vms"`
-	BaseImages []string `json:"baseImages,omitempty"`
-	Error      string   `json:"error,omitempty"`
+	Filename          string   `json:"filename"`
+	Username          string   `json:"username,omitempty"`
+	VMs               []VM     `json:"vms"`
+	BaseImages        []string `json:"baseImages,omitempty"`
+	AutoShutdownHours int      `json:"autoShutdownHours"`
+	Error             string   `json:"error,omitempty"`
 }
 
 // ActionResponse is the API response envelope used by dashboard actions.
@@ -183,8 +185,9 @@ func ListDashboardVMs(user string) ([]VM, error) {
 // response and subsequent WebSocket updates.
 func DataForUser(settings *config.SettingsType, user string) (DataResponse, error) {
 	response := DataResponse{
-		Filename: DefaultRDPFilename,
-		Username: user,
+		Filename:          DefaultRDPFilename,
+		Username:          user,
+		AutoShutdownHours: config.VMAutoShutdownHours(settings),
 	}
 
 	vmRows, err := ListDashboardVMs(user)
@@ -224,6 +227,7 @@ func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 			User:         rdpUser,
 			BaseImage:    strings.TrimSpace(vm.BaseImage),
 			CreatedAt:    strings.TrimSpace(vm.CreatedAt),
+			LastUsed:     strings.TrimSpace(vm.LastUsed),
 			RDPFilename:  rdpDownloadFilename(vm.Name),
 			IP:           vm.IP,
 			State:        vm.State,
