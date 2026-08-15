@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"libvirt.org/go/libvirt"
 )
@@ -73,10 +74,25 @@ func domainSerialSocketPath(dom *libvirt.Domain) (path string, configured bool, 
 // goroutine. Interrupt unblocks any in-flight Recv/Send; Close must be called
 // only after both goroutines have returned (so it never frees the stream while a
 // C call is still using it).
+//
+// Interrupt may also be called out-of-band (e.g. from a logout callback that
+// races the bridge's own teardown), so it can arrive concurrently with — or
+// after — Close. mu serializes Interrupt (virStreamAbort) against Close
+// (virStreamFree) and gates both on freed, so an Interrupt can never abort a
+// stream that Close has already freed. That pairing is a cgo use-after-free
+// which Go's panic recovery cannot catch: it faults in C and takes down the
+// whole process. mu is deliberately NOT held across Recv/Send: those block in C
+// until Interrupt aborts them, so holding mu there would deadlock Interrupt
+// against the very call it must unblock. The Close-after-Recv/Send ordering is
+// instead guaranteed structurally by the caller (it waits for both goroutines
+// before calling Close).
 type SerialConsole struct {
 	conn   *libvirt.Connect
 	dom    *libvirt.Domain
 	stream *libvirt.Stream
+
+	mu    sync.Mutex
+	freed bool
 }
 
 // OpenSerialConsole opens the default serial console of a running domain.
@@ -151,12 +167,27 @@ func (s *SerialConsole) Recv(p []byte) (int, error) { return s.stream.Recv(p) }
 func (s *SerialConsole) Send(p []byte) (int, error) { return s.stream.Send(p) }
 
 // Interrupt aborts the stream, unblocking any in-flight Recv/Send so the
-// reader/writer goroutines can exit before Close.
-func (s *SerialConsole) Interrupt() error { return s.stream.Abort() }
+// reader/writer goroutines can exit before Close. It is a no-op once Close has
+// freed the stream, so it is safe to call concurrently with, or after, Close.
+func (s *SerialConsole) Interrupt() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.freed {
+		return nil
+	}
+	return s.stream.Abort()
+}
 
 // Close releases the stream, domain, and libvirt connection. Call it only after
-// every Recv/Send has returned.
+// every Recv/Send has returned. It is idempotent and, together with Interrupt's
+// guard, ensures the stream is never aborted after it has been freed.
 func (s *SerialConsole) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.freed {
+		return nil
+	}
+	s.freed = true
 	_ = s.stream.Free()
 	_ = s.dom.Free()
 	_, _ = s.conn.Close()

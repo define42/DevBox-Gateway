@@ -3,8 +3,43 @@ package virt
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// TestSerialConsoleInterruptAfterCloseIsNoop pins the use-after-free guard: once
+// Close has freed the libvirt stream, Interrupt (virStreamAbort) must not touch
+// it. A logout callback can call Interrupt after — or concurrently with — the
+// bridge's own Close, and aborting a freed stream is a cgo use-after-free that
+// crashes the whole process. The libvirt handles are left nil here so the test
+// fails loudly (nil dereference) if either method ever reaches the stream after
+// freed is set, instead of only crashing against a real libvirt build.
+func TestSerialConsoleInterruptAfterCloseIsNoop(t *testing.T) {
+	sc := &SerialConsole{freed: true}
+
+	if err := sc.Interrupt(); err != nil {
+		t.Fatalf("Interrupt after Close: got %v, want nil no-op", err)
+	}
+	if err := sc.Close(); err != nil {
+		t.Fatalf("second Close: got %v, want nil no-op", err)
+	}
+}
+
+// TestSerialConsoleInterruptCloseRaceSafe exercises the mutex that serializes
+// Interrupt against Close under the race detector. It runs on an already-freed
+// console so no real libvirt call is made; it guards against a future change
+// that drops the lock and reintroduces the abort/free data race.
+func TestSerialConsoleInterruptCloseRaceSafe(t *testing.T) {
+	sc := &SerialConsole{freed: true}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = sc.Interrupt() }()
+		go func() { defer wg.Done(); _ = sc.Close() }()
+	}
+	wg.Wait()
+}
 
 func TestUbuntuDomainUsesManagedSerialPTY(t *testing.T) {
 	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
