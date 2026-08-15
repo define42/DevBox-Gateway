@@ -62,7 +62,12 @@ func TestSubscribeVMChangesNotifiesOnlyForChangedSnapshots(t *testing.T) {
 	updates, unsubscribe := worker.SubscribeVMChanges()
 	defer unsubscribe()
 
-	first := []VMInfo{{Name: "alice-desktop", Owner: "alice", State: "running"}}
+	first := []VMInfo{{
+		Name:      "alice-desktop",
+		Owner:     "alice",
+		State:     "running",
+		PrimaryIP: "192.168.122.10",
+	}}
 	worker.setVMs(first)
 	select {
 	case <-updates:
@@ -77,7 +82,11 @@ func TestSubscribeVMChangesNotifiesOnlyForChangedSnapshots(t *testing.T) {
 	case <-time.After(25 * time.Millisecond):
 	}
 
-	worker.setVMs([]VMInfo{{Name: "alice-desktop", Owner: "alice", State: "running", RDPReady: true}})
+	jobs := worker.rdpReadinessJobs("alice")
+	if len(jobs) != 1 {
+		t.Fatalf("expected one RDP readiness job, got %d", len(jobs))
+	}
+	worker.applyRDPReadinessResults([]rdpReadinessResult{{job: jobs[0], ready: true}})
 	select {
 	case <-updates:
 	case <-time.After(time.Second):
@@ -160,9 +169,6 @@ func TestTCPEndpointNotReady(t *testing.T) {
 
 	if tcpEndpointReady(address, 100*time.Millisecond) {
 		t.Fatal("expected closed TCP endpoint to be unavailable")
-	}
-	if domainRDPReady("") {
-		t.Fatal("expected a VM without a trusted routing IP to be unavailable")
 	}
 }
 

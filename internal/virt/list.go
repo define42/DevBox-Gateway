@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"libvirt.org/go/libvirt"
@@ -32,21 +33,23 @@ const (
 
 // VMInfo describes a VM entry shown in the dashboard and worker cache.
 type VMInfo struct {
-	Name         string
-	Owner        string
-	GuestUser    string
-	BaseImage    string
-	CreatedAt    string
-	State        string
-	MemoryMiB    int
-	VCPU         int
-	VolumeGB     int
-	VolumeUsedGB int
-	IP           string
-	PrimaryIP    string
-	RDPReady     bool
-	TTYReady     bool
-	VNCReady     bool
+	Name           string
+	Owner          string
+	GuestUser      string
+	BaseImage      string
+	CreatedAt      string
+	State          string
+	MemoryMiB      int
+	VCPU           int
+	VolumeGB       int
+	VolumeUsedGB   int
+	IP             string
+	PrimaryIP      string
+	RDPReady       bool
+	TTYReady       bool
+	VNCReady       bool
+	rdpGeneration  uint64
+	rdpObservation uint64
 }
 
 // ListVMs returns VMs visible to the given user from the provided libvirt connection.
@@ -108,7 +111,6 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		VolumeUsedGB: diskUsedGB,
 		IP:           ip,
 		PrimaryIP:    primaryIP,
-		RDPReady:     domainRDPReady(primaryIP),
 		TTYReady:     domainTTYReady(&d),
 		VNCReady:     domainVNCReady(&d),
 	}, true
@@ -242,20 +244,13 @@ func domainVNCReady(d *libvirt.Domain) bool {
 	return ok
 }
 
-// domainRDPReady reports whether the guest's RDP service is accepting TCP
-// connections. primaryIP comes from the trusted DHCP lease constrained to the
-// gateway's own VM subnet, so this probe cannot be redirected by guest-reported
-// interface data. A short timeout keeps the background VM refresh responsive
-// while a guest is still booting or its firewall is dropping connections.
-func domainRDPReady(primaryIP string) bool {
-	if primaryIP == "" {
-		return false
-	}
-	return tcpEndpointReady(net.JoinHostPort(primaryIP, rdpPort), rdpReadinessProbeTimeout)
+func tcpEndpointReady(address string, timeout time.Duration) bool {
+	return tcpEndpointReadyContext(context.Background(), address, timeout)
 }
 
-func tcpEndpointReady(address string, timeout time.Duration) bool {
-	conn, err := net.DialTimeout("tcp", address, timeout)
+func tcpEndpointReadyContext(ctx context.Context, address string, timeout time.Duration) bool {
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return false
 	}
@@ -375,13 +370,15 @@ func formatState(state libvirt.DomainState) string {
 
 // SingletonWorker caches VM metadata in the background for fast read access.
 type SingletonWorker struct {
-	ticker           *time.Ticker
-	ctx              context.Context
-	cancel           context.CancelFunc
-	mu               sync.RWMutex
-	vms              []VMInfo
-	nextSubscriberID uint64
-	subscribers      map[uint64]chan struct{}
+	ticker             *time.Ticker
+	ctx                context.Context
+	cancel             context.CancelFunc
+	mu                 sync.RWMutex
+	vms                []VMInfo
+	nextRDPGeneration  uint64
+	nextRDPObservation atomic.Uint64
+	nextSubscriberID   uint64
+	subscribers        map[uint64]chan struct{}
 }
 
 // GetVMs returns the cached VMs, optionally filtered by owner.
@@ -444,8 +441,8 @@ func (s *SingletonWorker) snapshotVMs() []VMInfo {
 	return snapshot
 }
 
-// SubscribeVMChanges returns a coalescing notification channel for successful
-// libvirt refreshes whose VM snapshot differs from the cached snapshot. The
+// SubscribeVMChanges returns a coalescing notification channel for changes to
+// the cached VM snapshot, including asynchronously refreshed RDP readiness. The
 // caller must invoke unsubscribe when it no longer needs updates. Notifications
 // carry no VM data: subscribers take a fresh, user-filtered snapshot after each
 // signal, which prevents one user's VM metadata from being broadcast to another.
@@ -474,14 +471,52 @@ func (s *SingletonWorker) SubscribeVMChanges() (<-chan struct{}, func()) {
 
 func (s *SingletonWorker) setVMs(vms []VMInfo) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	next := slices.Clone(vms)
+	s.mergeRDPReadinessLocked(next)
 	if slices.Equal(s.vms, next) {
+		s.mu.Unlock()
 		return
 	}
 	s.vms = next
+	s.notifySubscribersLocked()
+	s.mu.Unlock()
+}
 
+func (s *SingletonWorker) mergeRDPReadinessLocked(next []VMInfo) {
+	previous := make(map[string]VMInfo, len(s.vms))
+	for _, vm := range s.vms {
+		previous[vm.Name] = vm
+	}
+
+	for i := range next {
+		old, ok := previous[next[i].Name]
+		if ok && sameRDPReadinessTarget(old, next[i]) {
+			if next[i].State == "running" {
+				next[i].RDPReady = old.RDPReady
+			} else {
+				next[i].RDPReady = false
+			}
+			next[i].rdpGeneration = old.rdpGeneration
+			next[i].rdpObservation = old.rdpObservation
+			continue
+		}
+
+		s.nextRDPGeneration++
+		next[i].RDPReady = false
+		next[i].rdpGeneration = s.nextRDPGeneration
+		next[i].rdpObservation = 0
+	}
+}
+
+func sameRDPReadinessTarget(old, next VMInfo) bool {
+	return old.Name == next.Name &&
+		old.Owner == next.Owner &&
+		old.PrimaryIP == next.PrimaryIP &&
+		old.CreatedAt == next.CreatedAt &&
+		old.State == next.State
+}
+
+func (s *SingletonWorker) notifySubscribersLocked() {
 	for _, updates := range s.subscribers {
 		select {
 		case updates <- struct{}{}:
@@ -507,7 +542,6 @@ func GetInstance() *SingletonWorker {
 			ctx:    ctx,
 			cancel: cancel,
 		}
-
 		go instance.run()
 	})
 

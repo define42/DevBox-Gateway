@@ -450,6 +450,12 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 			dashboard.WriteJSON(w, http.StatusInternalServerError, response)
 			return
 		}
+		// RDP readiness is owned by the dashboard WebSocket. Do not let the HTTP
+		// bootstrap replay a positive result cached by a previous connection;
+		// the socket performs a fresh probe before sending its first snapshot.
+		for i := range response.VMs {
+			response.VMs[i].RDPReady = false
+		}
 		dashboard.WriteJSON(w, http.StatusOK, response)
 	})
 }

@@ -246,6 +246,7 @@ const (
 	// browser only sends a tiny typed RTT probe, so 1 KiB is ample.
 	dashboardControlReadLimit = 1024
 	dashboardOutboundQueue    = 16
+	dashboardRDPReadinessPoll = 2 * time.Second
 )
 
 type dashboardClientMessage struct {
@@ -380,18 +381,31 @@ func publishDashboardVMUpdates(
 	done chan<- struct{},
 ) {
 	defer close(done)
-	updates, unsubscribe := virt.GetInstance().SubscribeVMChanges()
+	worker := virt.GetInstance()
+
+	// Readiness belongs to this authenticated dashboard connection. Probe before
+	// the initial WebSocket snapshot, then repeat until its context is cancelled.
+	// Separate tabs intentionally run separate probe rounds.
+	worker.RefreshRDPReadiness(ctx, username)
+
+	updates, unsubscribe := worker.SubscribeVMChanges()
 	defer unsubscribe()
 
 	if !queueDashboardDataUpdate(ctx, username, settings, outbound) {
 		return
 	}
+
+	readinessTicker := time.NewTicker(dashboardRDPReadinessPoll)
+	defer readinessTicker.Stop()
+
 	for {
 		select {
 		case _, ok := <-updates:
 			if !ok || !queueDashboardDataUpdate(ctx, username, settings, outbound) {
 				return
 			}
+		case <-readinessTicker.C:
+			worker.RefreshRDPReadiness(ctx, username)
 		case <-ctx.Done():
 			return
 		}
