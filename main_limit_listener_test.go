@@ -3,6 +3,7 @@ package main
 import (
 	"devboxgateway/internal/config"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
@@ -35,9 +36,23 @@ func TestLimitListenerConnectionsDisabled(t *testing.T) {
 	}
 }
 
-// TestLimitListenerConnectionsCapsConcurrency verifies that Accept blocks once
-// the cap is reached and resumes once an accepted connection is closed.
-func TestLimitListenerConnectionsCapsConcurrency(t *testing.T) {
+// dialLimitTestConn dials the limited listener under test and registers
+// cleanup for the client side of the connection.
+func dialLimitTestConn(t *testing.T, addr string) net.Conn {
+	t.Helper()
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("dial %s: %v", addr, err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+// TestLimitListenerConnectionsFailFastAtCap verifies that connections over the
+// cap are accepted and immediately closed — clients fail fast instead of
+// hanging unserved in the accept backlog — and that closing an accepted
+// connection frees its slot for the next client.
+func TestLimitListenerConnectionsFailFastAtCap(t *testing.T) {
 	base, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -49,50 +64,51 @@ func TestLimitListenerConnectionsCapsConcurrency(t *testing.T) {
 
 	addr := base.Addr().String()
 
-	// First connection takes the only slot.
-	dial1, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial 1: %v", err)
-	}
-	defer func() { _ = dial1.Close() }()
-	accepted1, err := limited.Accept()
-	if err != nil {
-		t.Fatalf("accept 1: %v", err)
-	}
-
-	// Second connection cannot be accepted until the first is closed.
-	dial2, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatalf("dial 2: %v", err)
-	}
-	defer func() { _ = dial2.Close() }()
-
-	accept2 := make(chan net.Conn, 1)
+	// Accept runs in the background for the whole test, as in serveListener.
+	accepted := make(chan net.Conn, 2)
 	go func() {
-		c, acceptErr := limited.Accept()
-		if acceptErr != nil {
-			accept2 <- nil
-			return
+		for {
+			c, acceptErr := limited.Accept()
+			if acceptErr != nil {
+				close(accepted)
+				return
+			}
+			accepted <- c
 		}
-		accept2 <- c
 	}()
 
+	// First connection takes the only slot.
+	dialLimitTestConn(t, addr)
+	var first net.Conn
 	select {
-	case <-accept2:
-		t.Fatal("second Accept returned while the connection cap was reached")
-	case <-time.After(200 * time.Millisecond):
+	case first = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first connection was not accepted")
 	}
 
-	// Releasing the slot lets the blocked Accept proceed.
-	_ = accepted1.Close()
-
+	// Over the cap: the listener closes the connection instead of delivering
+	// it to Accept, so the client's read fails fast rather than timing out.
+	dial2 := dialLimitTestConn(t, addr)
+	if err := dial2.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	buf := make([]byte, 1)
+	if _, err := dial2.Read(buf); err == nil || os.IsTimeout(err) {
+		t.Fatalf("expected the over-cap connection to be closed promptly, got %v", err)
+	}
 	select {
-	case c := <-accept2:
-		if c == nil {
-			t.Fatal("second Accept failed after slot freed")
-		}
+	case c := <-accepted:
+		t.Fatalf("over-cap connection was delivered to Accept: %v", c.RemoteAddr())
+	default:
+	}
+
+	// Closing the accepted connection frees the slot for the next client.
+	_ = first.Close()
+	dialLimitTestConn(t, addr)
+	select {
+	case c := <-accepted:
 		_ = c.Close()
 	case <-time.After(2 * time.Second):
-		t.Fatal("second Accept did not return after the slot was freed")
+		t.Fatal("connection was not accepted after the slot was freed")
 	}
 }

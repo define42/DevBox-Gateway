@@ -345,7 +345,7 @@ func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
 	m := NewManager()
 	closed := 0
 
-	unregister := m.RegisterUserConnection("alice", func() { closed++ })
+	unregister, _ := m.RegisterUserConnection("alice", func() { closed++ })
 	unregister()
 	unregister()
 
@@ -356,9 +356,10 @@ func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
 		t.Fatalf("expected close function not to run after unregister, got %d", closed)
 	}
 
-	noOpUnregister := m.RegisterUserConnection("   ", func() { closed++ })
+	noOpUnregister, _ := m.RegisterUserConnection("   ", func() { closed++ })
 	noOpUnregister()
-	m.RegisterUserConnection("alice", nil)()
+	nilCloseUnregister, _ := m.RegisterUserConnection("alice", nil)
+	nilCloseUnregister()
 	if got := m.CloseUserConnections("   "); got != 0 {
 		t.Fatalf("expected blank username close to be a no-op, got %d", got)
 	}
@@ -814,5 +815,61 @@ func TestConsumeRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
 	}
 	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
 		t.Fatal("expected the grant to be single-use")
+	}
+}
+
+func TestRegisterUserConnectionEnforcesPerUserLimit(t *testing.T) {
+	m := NewManager()
+	m.SetUserConnectionLimit(2)
+
+	closed := 0
+	if _, ok := m.RegisterUserConnection("alice", func() { closed++ }); !ok {
+		t.Fatal("first registration should be allowed")
+	}
+	unregisterSecond, ok := m.RegisterUserConnection("alice", func() { closed++ })
+	if !ok {
+		t.Fatal("second registration should be allowed")
+	}
+
+	rejectedUnregister, ok := m.RegisterUserConnection("alice", func() { closed++ })
+	if ok {
+		t.Fatal("third registration should be refused at limit 2")
+	}
+	// The refused registration's unregister is a no-op and must not disturb
+	// the registry.
+	rejectedUnregister()
+
+	// Other users are unaffected by alice being at her limit.
+	if _, ok := m.RegisterUserConnection("bob", func() {}); !ok {
+		t.Fatal("another user's registration should be allowed")
+	}
+
+	// Freeing a slot lets alice register again.
+	unregisterSecond()
+	if _, ok := m.RegisterUserConnection("alice", func() { closed++ }); !ok {
+		t.Fatal("registration should be allowed again after unregister")
+	}
+
+	if got := m.CloseUserConnections("alice"); got != 2 {
+		t.Fatalf("expected 2 live alice connections, got %d", got)
+	}
+	if closed != 2 {
+		t.Fatalf("expected 2 close functions to run, got %d", closed)
+	}
+	if got := m.CloseUserConnections("bob"); got != 1 {
+		t.Fatalf("expected 1 live bob connection, got %d", got)
+	}
+}
+
+func TestRegisterUserConnectionLimitDisabledByDefault(t *testing.T) {
+	m := NewManager()
+
+	for i := 0; i < 100; i++ {
+		if _, ok := m.RegisterUserConnection("alice", func() {}); !ok {
+			t.Fatalf("registration %d refused while the cap is disabled", i)
+		}
+	}
+	if got := m.CloseUserConnections("alice"); got != 100 {
+		t.Fatalf("expected 100 live connections, got %d", got)
 	}
 }

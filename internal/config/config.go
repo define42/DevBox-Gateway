@@ -69,6 +69,21 @@ const (
 	// DefaultMaxVDIPerUser is the default maximum number of VDIs (VMs) each user
 	// may own at once. Override with MAX_VDI_PER_USER.
 	DefaultMaxVDIPerUser = 10
+	// DefaultMaxConcurrentConnections is the default cap on simultaneously open
+	// front connections. Sized for ~100 active users: browsers hold up to 6
+	// HTTP/1.1 keep-alive connections each, and every dashboard, console, and
+	// VNC websocket plus every proxied RDP session holds one slot for its whole
+	// lifetime, so organic bursts (a mass reconnect after a gateway restart)
+	// need several times the steady-state count. Override with
+	// MAX_CONCURRENT_CONNECTIONS.
+	DefaultMaxConcurrentConnections = 4096
+	// DefaultMaxConnectionsPerUser is the default cap on concurrently open
+	// authenticated long-lived connections (dashboard control, serial console,
+	// and VNC websockets, plus proxied RDP sessions) per user. Generous for
+	// humans with many tabs, while keeping one scripted user from occupying a
+	// meaningful share of the front-connection budget. Override with
+	// MAX_CONNECTIONS_PER_USER.
+	DefaultMaxConnectionsPerUser = 32
 )
 
 const (
@@ -93,7 +108,8 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
-	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously accepted front connections (RDP + HTTPS); Accept blocks once this many are open and resumes as connections close, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", 1024)
+	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously open front connections (RDP + HTTPS); connections beyond the cap are accepted and immediately closed (fail fast, logged) so clients see an error instead of hanging, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", DefaultMaxConcurrentConnections)
+	s.SetInt(MAX_CONNECTIONS_PER_USER, "Maximum number of concurrently open authenticated long-lived connections (dashboard/serial/VNC websockets and proxied RDP sessions) per user; connections beyond the cap are closed immediately so one scripted user cannot exhaust the shared front-connection budget. Values <=0 disable the cap", DefaultMaxConnectionsPerUser)
 	s.SetString(CERT_FILE, "TLS certificate PEM for clients (front side)", "")
 	s.SetString(KEY_FILE, "TLS private key PEM for clients (front side, unencrypted)", "")
 
@@ -463,6 +479,7 @@ const (
 	LISTEN_ADDR                      = "LISTEN_ADDR"
 	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
 	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
+	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
 	RDP_DISABLE_CLIPBOARD            = "RDP_DISABLE_CLIPBOARD"
 	RDP_DISABLE_DRIVES               = "RDP_DISABLE_DRIVES"
 	SNI_HASH_SECRET                  = "SNI_HASH_SECRET"

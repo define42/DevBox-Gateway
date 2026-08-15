@@ -18,7 +18,6 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/tomatome/grdp v0.1.0
 	github.com/tredoe/osutil v1.5.0
-	golang.org/x/net v0.58.0
 	libvirt.org/go/libvirt v1.12006.0
 )
 
@@ -98,6 +97,7 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/mod v0.40.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect

@@ -68,6 +68,18 @@ type Manager struct {
 	connectionsMu    sync.Mutex
 	nextConnectionID uint64
 	userConnections  map[string]map[uint64]func()
+	// userConnectionLimit caps concurrently registered connections per user;
+	// values <=0 disable the cap. Set once at boot via SetUserConnectionLimit.
+	userConnectionLimit int
+}
+
+// SetUserConnectionLimit sets how many live connections (dashboard, serial,
+// and VNC websockets) each user may hold at once before
+// RegisterUserConnection refuses new ones. Values <=0 disable the cap.
+func (m *Manager) SetUserConnectionLimit(limit int) {
+	m.connectionsMu.Lock()
+	m.userConnectionLimit = limit
+	m.connectionsMu.Unlock()
 }
 
 // NewManager constructs the gateway session manager.
@@ -394,15 +406,23 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 
 // RegisterUserConnection records a live, long-running connection for username
 // and returns an idempotent unregister function. closeFn is called by
-// CloseUserConnections when the user logs out everywhere.
-func (m *Manager) RegisterUserConnection(username string, closeFn func()) func() {
+// CloseUserConnections when the user logs out everywhere. When the per-user
+// connection limit is reached the registration is refused: ok is false, the
+// returned unregister is a no-op, and the caller must close the connection —
+// this is what keeps one scripted user from exhausting the gateway-wide
+// front-connection budget with websockets.
+func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unregister func(), ok bool) {
 	username = strings.TrimSpace(username)
 	if username == "" || closeFn == nil {
-		return func() {}
+		return func() {}, true
 	}
 
 	m.connectionsMu.Lock()
 	defer m.connectionsMu.Unlock()
+
+	if m.userConnectionLimit > 0 && len(m.userConnections[username]) >= m.userConnectionLimit {
+		return func() {}, false
+	}
 
 	if m.userConnections == nil {
 		m.userConnections = make(map[string]map[uint64]func())
@@ -426,7 +446,7 @@ func (m *Manager) RegisterUserConnection(username string, closeFn func()) func()
 				delete(m.userConnections, username)
 			}
 		})
-	}
+	}, true
 }
 
 // CloseUserConnections closes and unregisters every tracked live connection for

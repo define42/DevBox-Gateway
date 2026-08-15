@@ -109,6 +109,19 @@ func pingWebsocketUntil(ws *websocket.Conn, done <-chan struct{}) {
 	}
 }
 
+// rejectOverUserConnectionLimit closes a just-upgraded websocket whose user
+// already holds the maximum number of registered live connections
+// (MAX_CONNECTIONS_PER_USER), telling the browser why via a policy-violation
+// close frame. Refusing here bounds how much of the gateway-wide
+// front-connection budget one authenticated user can occupy.
+func rejectOverUserConnectionLimit(kind, username string, ws *websocket.Conn) {
+	log.Printf("reject %s websocket for user %q: per-user connection limit reached", kind, username)
+	deadline := time.Now().Add(wsWriteWait)
+	_ = ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Too many open connections for this user."), deadline)
+	_ = ws.Close()
+}
+
 // HandleDashboardConsoleWS serves the serial console websocket endpoint.
 func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -158,10 +171,15 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			return
 		}
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
 			_ = ws.Close()
 			_ = console.Interrupt()
 		})
+		if !ok {
+			rejectOverUserConnectionLimit("serial", user.GetName(), ws)
+			_ = console.Close()
+			return
+		}
 		defer unregisterConnection()
 
 		bridgeSerialConsole(name, ws, console)
@@ -231,10 +249,15 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			return
 		}
 		debugf("vnc: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
 			_ = ws.Close()
 			_ = vncConn.Close()
 		})
+		if !ok {
+			rejectOverUserConnectionLimit("vnc", user.GetName(), ws)
+			_ = vncConn.Close()
+			return
+		}
 		defer unregisterConnection()
 
 		bridgeDashboardSocket("vnc", name, ws, vncConn)
@@ -285,9 +308,13 @@ func HandleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 			log.Printf("upgrade dashboard websocket failed: %v", err)
 			return
 		}
-		unregisterConnection := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
 			_ = ws.Close()
 		})
+		if !ok {
+			rejectOverUserConnectionLimit("dashboard", user.GetName(), ws)
+			return
+		}
 		defer unregisterConnection()
 
 		bridgeDashboardControlSocket(ws, user.GetName(), settings, sessionDeadline)

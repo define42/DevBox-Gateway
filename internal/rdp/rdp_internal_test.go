@@ -203,7 +203,7 @@ func TestProxyBidirectionalClosesOnUserRevocation(t *testing.T) {
 	}()
 
 	sessionManager := session.NewManager()
-	unregister := sessionManager.RegisterUserConnection("alice", func() {
+	unregister, _ := sessionManager.RegisterUserConnection("alice", func() {
 		_ = serverA.Close()
 		_ = serverB.Close()
 	})

@@ -42,8 +42,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/net/netutil"
 )
 
 func main() {
@@ -113,6 +111,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	}
 
 	sessionManager := session.NewManager()
+	sessionManager.SetUserConnectionLimit(settings.GetInt(config.MAX_CONNECTIONS_PER_USER))
 
 	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
 	debugConns := settings.GetBool(config.DEBUG_CONNECTIONS)
@@ -204,20 +203,21 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, error) {
 	return limitListenerConnections(ln, settings), nil
 }
 
-// limitListenerConnections caps the number of simultaneously accepted front
+// limitListenerConnections caps the number of simultaneously open front
 // connections so a flood of connections — or slow clients that stall before the
 // TLS handshake — cannot spawn an unbounded number of per-connection goroutines
-// and exhaust the gateway's memory and file descriptors. Accept blocks once
-// MAX_CONCURRENT_CONNECTIONS connections are open and resumes as they close; a
-// blocked Accept is released by Close during shutdown. A value <=0 disables the
-// cap and restores the previous unbounded behavior.
+// and exhaust the gateway's memory and file descriptors. Connections over the
+// cap are accepted and immediately closed (see failFastLimitListener) so
+// clients fail fast instead of hanging unserved in the accept backlog, and
+// saturation shows up in the logs. A value <=0 disables the cap and restores
+// the previous unbounded behavior.
 func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
 	maxConns := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
 	if maxConns <= 0 {
 		return ln
 	}
 	log.Printf("limiting to %d concurrent front connections", maxConns)
-	return netutil.LimitListener(ln, maxConns)
+	return newFailFastLimitListener(ln, maxConns)
 }
 
 func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {

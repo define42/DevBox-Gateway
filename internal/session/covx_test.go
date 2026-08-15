@@ -200,7 +200,7 @@ func TestCovxGrantRDPConnectPrunesExpiredGrants(t *testing.T) {
 func TestCovxRegisterUserConnectionInitializesNilMap(t *testing.T) {
 	m := &Manager{}
 
-	unregister := m.RegisterUserConnection("alice", func() {})
+	unregister, _ := m.RegisterUserConnection("alice", func() {})
 	if m.userConnections == nil {
 		t.Fatal("expected the connection registry map to be initialized lazily")
 	}

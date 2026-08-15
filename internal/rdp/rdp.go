@@ -106,10 +106,16 @@ func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.
 		_ = clientConn.tlsConn.Close()
 		return
 	}
-	unregisterConnection := sessionManager.RegisterUserConnection(owner, func() {
+	unregisterConnection, allowed := sessionManager.RegisterUserConnection(owner, func() {
 		_ = clientConn.tlsConn.Close()
 		_ = backendTLS.Close()
 	})
+	if !allowed {
+		log.Printf("reject RDP session for user %q from %s: per-user connection limit reached", owner, raw.RemoteAddr())
+		_ = clientConn.tlsConn.Close()
+		_ = backendTLS.Close()
+		return
+	}
 	defer unregisterConnection()
 
 	_ = clientConn.tlsConn.SetDeadline(time.Time{})

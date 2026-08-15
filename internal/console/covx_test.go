@@ -487,3 +487,42 @@ func TestCovxDashboardHandlersRejectInvalidVMName(t *testing.T) {
 		}
 	}
 }
+
+// TestCovxDashboardWSEnforcesPerUserConnectionLimit verifies that a user at
+// the per-user connection limit has the connection over the limit refused with
+// a policy-violation close frame instead of being registered.
+func TestCovxDashboardWSEnforcesPerUserConnectionLimit(t *testing.T) {
+	manager := session.NewManager()
+	manager.SetUserConnectionLimit(1)
+	server := covxDashboardServer(t, manager)
+	cookie := covxSessionCookie(t, manager, "covxconnlimit")
+
+	first := covxDialWebsocket(t, server, "/api/dashboard/ws", cookie)
+	second := covxDialWebsocket(t, server, "/api/dashboard/ws", cookie)
+
+	// Both upgrades succeed at the HTTP layer; exactly one registration is
+	// refused and its websocket closed with a policy violation. Which of the
+	// two loses depends on handler scheduling, so watch both and require the
+	// first error to be the rejection.
+	results := make(chan error, 2)
+	for _, conn := range []*websocket.Conn{first, second} {
+		go func(c *websocket.Conn) {
+			_ = c.SetReadDeadline(time.Now().Add(websocketTestTimeout))
+			for {
+				if _, _, err := c.ReadMessage(); err != nil {
+					results <- err
+					return
+				}
+			}
+		}(conn)
+	}
+
+	select {
+	case err := <-results:
+		if !websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
+			t.Fatalf("expected a policy-violation close for the connection over the limit, got %v", err)
+		}
+	case <-time.After(websocketTestTimeout):
+		t.Fatal("no connection was refused at the per-user limit")
+	}
+}
