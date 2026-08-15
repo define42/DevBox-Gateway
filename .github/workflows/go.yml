@@ -100,6 +100,10 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           release_branches: main
 
+      - name: Stamp version into HTML titles
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        run: sed -i "s/DEVBOX_GATEWAY_VERSION/${{ steps.tag.outputs.new_version }}/g" html.go static/dashboard.html
+
       # -------------------------------
       # RPM package (main only, when a new tag is cut). The RPM version uses the
       # same numeric version the container release is tagged with (new_version is

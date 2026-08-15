@@ -5,7 +5,7 @@ const loginHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DevBox Gateway</title>
+  <title>DevBox Gateway - DEVBOX_GATEWAY_VERSION</title>
   <link rel="stylesheet" href="/static/vendor/bootstrap/5.3.2/bootstrap.min.css">
   <link rel="stylesheet" href="/static/vendor/bootstrap-icons/1.11.3/bootstrap-icons.min.css">
   <link rel="stylesheet" href="/static/theme.css">
