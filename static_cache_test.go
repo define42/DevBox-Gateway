@@ -115,6 +115,27 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 	}
 }
 
+func TestDashboardJavaScriptOpensVNCOnDemand(t *testing.T) {
+	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "vm.vncReady") {
+		t.Fatal("dashboard JavaScript must not depend on inventory-time VNC readiness")
+	}
+	if !strings.Contains(body, "vncButton.disabled = state.busy || !isActive") {
+		t.Fatal("expected NoVNC button availability to depend on active VM state")
+	}
+	if !strings.Contains(body, "state.vnc.src = vncFrameURL(vm.name)") {
+		t.Fatal("expected NoVNC to resolve its websocket only when the viewer opens")
+	}
+}
+
 func TestDashboardJavaScriptStreamsCreationProgress(t *testing.T) {
 	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)

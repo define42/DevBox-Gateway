@@ -47,7 +47,6 @@ type VMInfo struct {
 	PrimaryIP      string
 	RDPReady       bool
 	TTYReady       bool
-	VNCReady       bool
 	rdpGeneration  uint64
 	rdpObservation uint64
 }
@@ -112,7 +111,6 @@ func domainVMInfo(d libvirt.Domain, user string) (VMInfo, bool) {
 		IP:           ip,
 		PrimaryIP:    primaryIP,
 		TTYReady:     domainTTYReady(&d),
-		VNCReady:     domainVNCReady(&d),
 	}, true
 }
 
@@ -230,15 +228,6 @@ func domainTTYReady(d *libvirt.Domain) bool {
 	_, ok, err := domainSerialSocketPath(d)
 	if err != nil {
 		log.Printf("domain tty readiness: %v", err)
-		return false
-	}
-	return ok
-}
-
-func domainVNCReady(d *libvirt.Domain) bool {
-	_, ok, err := domainVNCSocketPath(d)
-	if err != nil {
-		log.Printf("domain vnc readiness: %v", err)
 		return false
 	}
 	return ok

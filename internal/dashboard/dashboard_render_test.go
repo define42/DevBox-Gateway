@@ -146,7 +146,6 @@ func TestBuildDashboardRows(t *testing.T) {
 			VolumeGB:  40,
 			RDPReady:  true,
 			TTYReady:  true,
-			VNCReady:  false,
 		},
 	}, "alice")
 

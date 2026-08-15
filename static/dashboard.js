@@ -1095,7 +1095,6 @@ function bootstrap() {
             const normalizedState = (vm.state || "").trim().toLowerCase();
             const rdpReady = Boolean(vm.rdpReady);
             const ttyReady = Boolean(vm.ttyReady);
-            const vncReady = Boolean(vm.vncReady);
             const hasName = rawName.trim() !== "";
             const isActive = isActiveState(normalizedState);
             const isBooting = normalizedState === "running" && !rdpReady;
@@ -1149,7 +1148,7 @@ function bootstrap() {
                 vncButton.type = "button";
                 vncButton.className = "btn btn-sm btn-outline-primary";
                 setIconLabel(vncButton, "bi-window-desktop", "NoVNC");
-                vncButton.disabled = state.busy || !vncReady || !isActive;
+                vncButton.disabled = state.busy || !isActive;
                 vncButton.addEventListener("click", () => {
                     openVNC(vm);
                 });
@@ -1167,12 +1166,6 @@ function bootstrap() {
                     const note = document.createElement("div");
                     note.className = "text-body-secondary small";
                     note.textContent = "Start VM to open terminal.";
-                    connectStack.appendChild(note);
-                }
-                if (vncReady && !isActive) {
-                    const note = document.createElement("div");
-                    note.className = "text-body-secondary small";
-                    note.textContent = "Start VM to open NoVNC.";
                     connectStack.appendChild(note);
                 }
                 connectCell.appendChild(connectStack);

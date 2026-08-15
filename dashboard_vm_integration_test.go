@@ -25,7 +25,7 @@ func waitForDashboardVM(t *testing.T, user, name string, timeout time.Duration) 
 			t.Fatalf("dashboard.ListDashboardVMs(%q): %v", user, err)
 		}
 		for _, row := range rows {
-			if row.Name == name && row.State == "running" && row.TTYReady && row.VNCReady {
+			if row.Name == name && row.State == "running" && row.TTYReady {
 				return row
 			}
 		}
@@ -100,9 +100,6 @@ func assertDashboardVMRow(t *testing.T, settings *config.SettingsType, row dashb
 	}
 	if !row.TTYReady {
 		t.Fatal("expected TTYReady=true")
-	}
-	if !row.VNCReady {
-		t.Fatal("expected VNCReady=true")
 	}
 }
 

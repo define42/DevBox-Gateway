@@ -155,7 +155,7 @@ func TestViocovDomainVMInfoBranches(t *testing.T) {
 	if info.Name != name || info.Owner != "" || info.State != "shut off" {
 		t.Fatalf("unexpected VM info: %+v", info)
 	}
-	if info.TTYReady || info.VNCReady || info.IP != "" || info.PrimaryIP != "" {
+	if info.TTYReady || info.IP != "" || info.PrimaryIP != "" {
 		t.Fatalf("expected stopped domain to report no console/IPs, got %+v", info)
 	}
 }
@@ -179,9 +179,6 @@ func TestViocovVMInfoHelperFallbacks(t *testing.T) {
 	}
 	if domainTTYReady(dom) {
 		t.Fatal("domainTTYReady: expected false for invalid domain handle")
-	}
-	if domainVNCReady(dom) {
-		t.Fatal("domainVNCReady: expected false for invalid domain handle")
 	}
 	seen := map[string]struct{}{}
 	if got := appendDomainIPsFromSource(nil, seen, libvirt.Domain{}, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE); got != nil {

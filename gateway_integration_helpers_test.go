@@ -3,6 +3,7 @@ package main
 import (
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/dashboard"
+	"devboxgateway/internal/virt"
 	"devboxgateway/internal/vmname"
 	"net/http"
 	"net/url"
@@ -104,9 +105,22 @@ func waitForGatewayVMState(t *testing.T, server gatewayTestServer, vmName, state
 func waitForGatewayVMReady(t *testing.T, server gatewayTestServer, vmName string) dashboard.VM {
 	t.Helper()
 
-	return waitForDashboardVMRow(t, server.client, server.baseURL, vmName, func(vm dashboard.VM) bool {
-		return vm.State == "running" && vm.TTYReady && vm.VNCReady
+	row := waitForDashboardVMRow(t, server.client, server.baseURL, vmName, func(vm dashboard.VM) bool {
+		return vm.State == "running" && vm.TTYReady
 	})
+
+	deadline := time.Now().Add(gatewayTestTimeout)
+	for time.Now().Before(deadline) {
+		vncConn, err := virt.OpenVNCConn(vmName)
+		if err == nil {
+			_ = vncConn.Close()
+			return row
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("VM %s did not accept an on-demand VNC connection in time", vmName)
+	return dashboard.VM{}
 }
 
 func waitForGatewayVMResources(t *testing.T, server gatewayTestServer, vmName string, vcpu, memoryMiB int) dashboard.VM {

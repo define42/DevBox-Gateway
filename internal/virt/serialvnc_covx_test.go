@@ -149,12 +149,8 @@ func TestViocovOpenVNCConnOnRunningDomain(t *testing.T) {
 	dir := newLibvirtAccessibleTempDir(t, "viocov-vnc-")
 	socketPath := filepath.Join(dir, "vnc.sock")
 	name := viocovUniqueName("vnc")
-	dom := viocovStartDomain(t, conn, name, fmt.Sprintf("<graphics type='vnc' socket='%s'/>", socketPath))
+	viocovStartDomain(t, conn, name, fmt.Sprintf("<graphics type='vnc' socket='%s'/>", socketPath))
 	viocovWaitForFile(t, socketPath)
-
-	if !domainVNCReady(dom) {
-		t.Fatal("expected running VNC domain to report VNC ready")
-	}
 
 	vncConn, err := OpenVNCConn(name)
 	if err != nil {
