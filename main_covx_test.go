@@ -297,16 +297,19 @@ func TestMcovSingleConnListenerCloseWithConnAccepted(t *testing.T) {
 
 func TestMcovServeListenerStopsOnPermanentAcceptError(t *testing.T) {
 	settings := config.NewSettingType(false)
-	ln := &mcovListener{acceptErr: errors.New("mcov accept failure")}
+	acceptErr := errors.New("mcov accept failure")
+	ln := &mcovListener{acceptErr: acceptErr}
 
-	done := make(chan struct{})
+	errCh := make(chan error, 1)
 	go func() {
-		serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, session.NewManager(), settings)
-		close(done)
+		errCh <- serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, session.NewManager(), settings)
 	}()
 
 	select {
-	case <-done:
+	case err := <-errCh:
+		if !errors.Is(err, acceptErr) {
+			t.Fatalf("expected the permanent accept error to be returned, got %v", err)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serveListener did not stop on a permanent accept error")
 	}

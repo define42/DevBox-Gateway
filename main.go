@@ -64,14 +64,31 @@ func run() int {
 		}
 	}()
 
-	<-ctx.Done()
-	return 0
+	select {
+	case <-ctx.Done():
+		return 0
+	case <-gateway.done:
+		// The accept loop exited without a shutdown signal, i.e. Accept failed
+		// permanently. Exit non-zero so systemd's Restart=on-failure replaces
+		// the process instead of leaving it alive but unable to serve anything
+		// (including /api/health, which is answered through this listener).
+		if gateway.serveErr != nil {
+			log.Printf("gateway stopped serving: %v", gateway.serveErr)
+		}
+		return 1
+	}
 }
 
 type gatewayRuntime struct {
 	listener net.Listener
 	frontTLS *cert.TLSManager
+
+	// done is closed when the accept loop exits; serveErr is written exactly
+	// once before that close, so it may be read only after done is observed
+	// closed. A non-nil serveErr means the loop died on a permanent Accept
+	// failure rather than a listener close.
 	done     <-chan struct{}
+	serveErr error
 }
 
 func (g *gatewayRuntime) Close() error {
@@ -141,8 +158,13 @@ func bootGateway() (*gatewayRuntime, error) {
 	}
 
 	done := make(chan struct{})
+	runtime := &gatewayRuntime{
+		listener: ln,
+		frontTLS: frontTLS,
+		done:     done,
+	}
 	go func() {
-		serveListener(ln, mux, frontTLS, sessionManager, settings)
+		runtime.serveErr = serveListener(ln, mux, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -155,11 +177,7 @@ func bootGateway() (*gatewayRuntime, error) {
 		log.Printf("%v; continuing with the fallback certificate", err)
 	}
 
-	return &gatewayRuntime{
-		listener: ln,
-		frontTLS: frontTLS,
-		done:     done,
-	}, nil
+	return runtime, nil
 }
 
 // loadBootSettings resolves the process configuration for boot. Configuration
@@ -220,21 +238,58 @@ func limitListenerConnections(ln net.Listener, settings *config.SettingsType) ne
 	return newFailFastLimitListener(ln, maxConns)
 }
 
-func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {
+// acceptRetryDelayMax caps the exponential backoff between retries of
+// transient Accept errors.
+const acceptRetryDelayMax = 1 * time.Second
+
+// nextAcceptRetryDelay classifies an Accept error: for transient failures —
+// fd exhaustion (EMFILE/ENFILE) and deadline timeouts — it returns the next
+// backoff delay (5ms doubling up to acceptRetryDelayMax) and true; for
+// permanent failures it returns false. net.Error.Temporary is deprecated but
+// is exactly how the net package reports EMFILE/ENFILE from accept;
+// net/http.Server.Serve relies on the same signal for its retry loop.
+func nextAcceptRetryDelay(err error, current time.Duration) (time.Duration, bool) {
+	var ne net.Error
+	if !errors.As(err, &ne) || (!ne.Timeout() && !ne.Temporary()) {
+		return 0, false
+	}
+	if current == 0 {
+		return 5 * time.Millisecond, true
+	}
+	current *= 2
+	if current > acceptRetryDelayMax {
+		current = acceptRetryDelayMax
+	}
+	return current, true
+}
+
+// serveListener runs the front accept loop until the listener is closed.
+// Transient Accept errors are retried with exponential backoff, mirroring
+// net/http.Server.Serve, so a temporary resource squeeze cannot silently kill
+// the loop while the process lives on looking healthy. It returns nil once
+// the listener is closed (normal shutdown) and the error on any other
+// permanent Accept failure, so the caller can take the process down and let
+// systemd restart it instead of leaving a zombie holding a dead listener.
+func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) error {
+	var retryDelay time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				log.Printf("listener stopped: %v", err)
-				return
+				return nil
 			}
-			if os.IsTimeout(err) {
-				log.Printf("accept: %v", err)
-				continue
+			next, transient := nextAcceptRetryDelay(err, retryDelay)
+			if !transient {
+				log.Printf("accept failed permanently: %v", err)
+				return err
 			}
-			log.Printf("listener stopped: %v", err)
-			return
+			retryDelay = next
+			log.Printf("accept: %v; retrying in %v", err, retryDelay)
+			time.Sleep(retryDelay)
+			continue
 		}
+		retryDelay = 0
 		go handleSharedConn(c, frontTLS, mux, sessionManager, settings)
 	}
 }

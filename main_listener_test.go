@@ -180,6 +180,60 @@ func TestServeListenerRetriesTimeoutAccept(t *testing.T) {
 	}
 }
 
+// tempAcceptError simulates the net.Error the listener surfaces on fd
+// exhaustion (EMFILE/ENFILE): Temporary() is true, Timeout() is false.
+type tempAcceptError struct{}
+
+func (tempAcceptError) Error() string   { return "accept: too many open files" }
+func (tempAcceptError) Timeout() bool   { return false }
+func (tempAcceptError) Temporary() bool { return true }
+
+// flakyAcceptListener fails Accept with a temporary error a fixed number of
+// times, then reports the listener as closed.
+type flakyAcceptListener struct {
+	failures int
+}
+
+func (l *flakyAcceptListener) Accept() (net.Conn, error) {
+	if l.failures > 0 {
+		l.failures--
+		return nil, tempAcceptError{}
+	}
+	return nil, net.ErrClosed
+}
+
+func (l *flakyAcceptListener) Close() error { return nil }
+func (l *flakyAcceptListener) Addr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
+}
+
+// TestServeListenerSurvivesTemporaryAcceptError guards the accept loop against
+// the fd-exhaustion regression: a temporary Accept error (EMFILE/ENFILE) must
+// be retried with backoff, not treated as fatal, and the loop must still
+// return nil once the listener closes.
+func TestServeListenerSurvivesTemporaryAcceptError(t *testing.T) {
+	settings := config.NewSettingType(false)
+	ln := &flakyAcceptListener{failures: 3}
+
+	errCh := make(chan error, 1)
+	sessionManager := session.NewManager()
+	go func() {
+		errCh <- serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, sessionManager, settings)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("expected nil after retries and listener close, got %v", err)
+		}
+		if ln.failures != 0 {
+			t.Fatalf("expected all temporary failures to be retried, %d left", ln.failures)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveListener did not survive temporary accept errors")
+	}
+}
+
 func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 	settings := config.NewSettingType(false)
 	frontTLS, err := cert.NewTLSManager(settings)
