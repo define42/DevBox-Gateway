@@ -171,29 +171,25 @@ func domainUUIDForInventoryCache(name string, d *libvirt.Domain) string {
 }
 
 // domainDisplayIPs returns (display, routing). The display string aggregates
-// every address libvirt knows (agent/lease/ARP) for the dashboard, while the
-// routing address — the one the RDP proxy actually dials — is restricted to the
-// authoritative DHCP lease inside the default NAT subnet so untrusted
-// guest-reported addresses can never become a dial target. See domainRoutingIP.
+// the lease- and ARP-reported addresses for the dashboard, while the routing
+// address — the one the RDP proxy actually dials — comes only from the
+// authoritative DHCP lease: it reflects what the gateway's own dnsmasq
+// assigned, which a guest cannot forge, and it must fall inside the default
+// NAT subnet or routing fails closed (empty result) rather than dialing an
+// off-network host. The qemu-guest-agent source is deliberately not queried:
+// agent commands run with an unbounded response timeout by default, so a guest
+// whose agent stops answering would wedge the inventory sweep that calls this
+// for every running domain.
 func domainDisplayIPs(d libvirt.Domain, state libvirt.DomainState) (string, string) {
 	if !domainCanReportIPs(state) {
 		return "", ""
 	}
 
-	return strings.Join(domainIPs(d), ", "), domainRoutingIP(d)
-}
-
-// domainRoutingIP returns the address the proxy may dial for the VM. Only the
-// DHCP lease source is consulted: it reflects what the gateway's own dnsmasq
-// actually assigned, which a guest cannot forge, unlike the agent- and
-// ARP-reported addresses used for display. The lease must also fall inside the
-// default NAT subnet; otherwise routing fails closed (empty result) rather than
-// dialing an off-network host.
-func domainRoutingIP(d libvirt.Domain) string {
-	var ips []string
 	seen := make(map[string]struct{})
-	ips = appendDomainIPsFromSource(ips, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE)
-	return firstRoutableVMIP(ips)
+	leaseIPs := appendDomainIPsFromSource(nil, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE)
+	routingIP := firstRoutableVMIP(leaseIPs)
+	ips := appendDomainIPsFromSource(leaseIPs, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP)
+	return strings.Join(ips, ", "), routingIP
 }
 
 // firstRoutableVMIP returns the first address in ips that is an IPv4 address
@@ -275,22 +271,6 @@ func bytesToGiBCeil(b uint64) int {
 	return int((b + (1 << 30) - 1) >> 30)
 }
 
-func domainIPs(d libvirt.Domain) []string {
-	sources := []libvirt.DomainInterfaceAddressesSource{
-		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_AGENT,
-		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE,
-		libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP,
-	}
-
-	var ips []string
-	seen := make(map[string]struct{})
-
-	for _, src := range sources {
-		ips = appendDomainIPsFromSource(ips, seen, d, src)
-	}
-	return ips
-}
-
 func appendDomainIPsFromSource(ips []string, seen map[string]struct{}, d libvirt.Domain, src libvirt.DomainInterfaceAddressesSource) []string {
 	ifaces, err := d.ListAllInterfaceAddresses(src)
 	if err != nil {
@@ -363,9 +343,9 @@ type SingletonWorker struct {
 // vmQuotaSnapshotMaxAge bounds how old the worker's VM snapshot may be when it
 // substitutes for a live per-owner domain count in the creation quota check.
 // The worker sweeps every 2 seconds, so a healthy snapshot is well inside this
-// bound; a sweep stalled longer than this (for example on hung guest-agent
-// calls) makes CountVMsOwnedBy report not-authoritative and the quota check
-// falls back to counting live libvirt state.
+// bound; a sweep stalled longer than this (for example on a slow or
+// unresponsive libvirtd) makes CountVMsOwnedBy report not-authoritative and
+// the quota check falls back to counting live libvirt state.
 const vmQuotaSnapshotMaxAge = 10 * time.Second
 
 // CountVMsOwnedBy returns the number of cached VMs owned by user, and whether
