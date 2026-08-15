@@ -89,7 +89,7 @@ func VMOwner(name string) (string, bool, error) {
 		return "", false, nil
 	}
 
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return "", false, fmt.Errorf("connect libvirt: %w", err)
 	}

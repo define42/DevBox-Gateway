@@ -97,7 +97,7 @@ type SerialConsole struct {
 
 // OpenSerialConsole opens the default serial console of a running domain.
 func OpenSerialConsole(name string) (*SerialConsole, error) {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return nil, fmt.Errorf("connect libvirt: %w", err)
 	}

@@ -39,7 +39,7 @@ func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser, baseImag
 }
 
 func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) (err error) {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return err
 	}
@@ -284,13 +284,14 @@ var ErrVMAlreadyExists = errors.New("vm with this name already exists")
 // user deletes one.
 var ErrVMLimitReached = errors.New("vm limit reached")
 
-// vmCreationMu serializes the MAX_VDI_PER_USER count-and-reserve step, and
-// inflightVMCreations tracks creations that have passed the check but not yet
-// persisted owner metadata (which only happens inside StartVMWithOwner, late in
-// BootNewVM). Counting existing domains alone would let two concurrent creates
-// for the same user both pass the check before either domain exists; reserving
-// a slot under the mutex and holding it until BootNewVM returns closes that
-// race.
+// vmCreationMu guards inflightVMCreations, which tracks creations that have
+// reserved a MAX_VDI_PER_USER slot but not yet persisted owner metadata (which
+// only happens inside StartVMWithOwner, late in BootNewVM). Counting existing
+// domains alone would let two concurrent creates for the same user both pass
+// the check before either domain exists; reserving a slot under the mutex and
+// holding it until BootNewVM returns closes that race. The mutex is only ever
+// held for map access — never across a libvirt call — so a wedged libvirtd
+// cannot turn it into a gateway-wide creation stall (see reserveUserVMSlot).
 var (
 	vmCreationMu        sync.Mutex             //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
 	inflightVMCreations = make(map[string]int) //nolint:gochecknoglobals // process-wide reservation state for the per-user VM limit
@@ -332,6 +333,14 @@ var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-
 // transiently refused until the next sweep. Both windows are bounded by
 // vmQuotaSnapshotMaxAge and self-heal; the in-flight reservations still make
 // concurrent creates race-free.
+//
+// The reservation is taken BEFORE counting, and vmCreationMu is never held
+// across the count: the live fallback issues libvirt RPCs, and it runs
+// precisely when the worker snapshot is stale — that is, when libvirtd is
+// already slow or wedged. Holding the process-wide mutex across one hung RPC
+// there would stall VM creation for every user until restart; with the mutex
+// released, a wedged fallback fails only its own request once keepalive kills
+// the connection (see connectLibvirt).
 func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, owner string) (release func(), err error) {
 	return reserveUserVMSlotWithCounter(conn, settings, owner, cachedVMCountForQuota)
 }
@@ -359,22 +368,37 @@ func reserveUserVMSlotWithCounter(
 		return func() {}, nil
 	}
 
+	// Reserve first, count after. The increment is atomic with reading the
+	// in-flight total, but the mutex is released before counting so a hung
+	// libvirt RPC in the live fallback can never block other users' creates
+	// (see the reserveUserVMSlot doc). The reservation is refunded on refusal
+	// or count failure.
 	vmCreationMu.Lock()
-	defer vmCreationMu.Unlock()
+	inflightVMCreations[owner]++
+	inflightIncludingThis := inflightVMCreations[owner]
+	vmCreationMu.Unlock()
+	release = func() { releaseUserVMSlot(owner) }
 
 	count, counted := cachedCount(owner)
 	if !counted {
 		count, err = countDomainsOwnedBy(conn, owner)
 		if err != nil {
+			release()
 			return nil, fmt.Errorf("count VMs owned by %s: %w", owner, err)
 		}
 	}
-	if have := count + inflightVMCreations[owner]; have >= limit {
+	// Reservations concurrently live for one owner observe strictly increasing
+	// in-flight totals (each increment happens under vmCreationMu after the
+	// earlier ones), so of k racing creates at most limit-count pass — the same
+	// guarantee the fully locked check-and-reserve gave. A reservation released
+	// after refusal or a failed create can transiently refuse a racing create
+	// that would have fit; that is the same bounded, self-healing edge as the
+	// snapshot staleness documented on reserveUserVMSlot.
+	if have := count + inflightIncludingThis - 1; have >= limit {
+		release()
 		return nil, fmt.Errorf("%w: user %s already has %d of %d allowed VMs (including creations in progress)", ErrVMLimitReached, owner, have, limit)
 	}
-
-	inflightVMCreations[owner]++
-	return func() { releaseUserVMSlot(owner) }, nil
+	return release, nil
 }
 
 func releaseUserVMSlot(owner string) {
@@ -478,7 +502,7 @@ func InitVirt(settings *config.SettingsType) error {
 		return err
 	}
 
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
@@ -581,7 +605,7 @@ func BootNewVMWithProgress(name string, user *types.User, guestUsername, guestPa
 	seedIso := vmName + "_seed.iso"
 	poolName, poolPath := storagePoolConfig(settings)
 
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return vmName, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
@@ -630,7 +654,7 @@ func RemoveVM(name string, settings *config.SettingsType) error {
 	unlockName := vmNameLocks.Lock(name)
 	defer unlockName()
 
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return err
 	}

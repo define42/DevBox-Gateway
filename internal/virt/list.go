@@ -678,7 +678,7 @@ func (s *SingletonWorker) sweep(outcome chan<- sweepOutcome) {
 	s.outstandingSweeps.Add(1)
 	defer s.outstandingSweeps.Add(-1)
 
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		outcome <- sweepOutcome{err: fmt.Errorf("list vms connect: %w", err)}
 		return

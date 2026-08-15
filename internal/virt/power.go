@@ -2,13 +2,11 @@ package virt
 
 import (
 	"fmt"
-
-	"libvirt.org/go/libvirt"
 )
 
 // StartExistingVM starts an existing domain when it is currently shut off.
 func StartExistingVM(name string) error {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)
 	}
@@ -41,7 +39,7 @@ func StartExistingVM(name string) error {
 
 // ShutdownVM force-stops a running domain.
 func ShutdownVM(name string) error {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)
 	}
@@ -72,7 +70,7 @@ func ShutdownVM(name string) error {
 
 // RestartVM reboots a running domain or starts it when it is shut off.
 func RestartVM(name string) error {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)
 	}

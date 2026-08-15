@@ -103,7 +103,7 @@ func domainVNCSocketPath(dom *libvirt.Domain) (string, bool, error) {
 // been observed to hand back an fd that yields no RFB stream on some hosts, so
 // the direct dial is preferred whenever the path is reachable.
 func OpenVNCConn(name string) (net.Conn, error) {
-	conn, err := libvirt.NewConnect(LibvirtURI())
+	conn, err := connectLibvirt()
 	if err != nil {
 		return nil, fmt.Errorf("connect libvirt: %w", err)
 	}

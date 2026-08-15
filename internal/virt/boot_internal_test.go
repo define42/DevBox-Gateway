@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"libvirt.org/go/libvirt"
 )
@@ -72,6 +73,93 @@ func TestReserveUserVMSlotFallsBackToLiveCountWhenCacheUnavailable(t *testing.T)
 	)
 	if err == nil || !strings.Contains(err.Error(), "count VMs owned by") {
 		t.Fatalf("reserve without cache on invalid connection = %v, want live-count error", err)
+	}
+}
+
+func inflightReservationsForTest(owner string) int {
+	vmCreationMu.Lock()
+	defer vmCreationMu.Unlock()
+	return inflightVMCreations[owner]
+}
+
+// TestReserveUserVMSlotDoesNotHoldMutexWhileCounting pins the property that
+// vmCreationMu is released while the VM count runs: the live-count fallback
+// can wedge in an uncancellable libvirt RPC exactly when libvirtd is
+// unhealthy, and holding the process-wide mutex there would brick VM creation
+// for every user until restart. The blocking counter stands in for that
+// wedged RPC; a reservation for another owner must still complete.
+func TestReserveUserVMSlotDoesNotHoldMutexWhileCounting(t *testing.T) {
+	settings := bootLimitSettings(t, 1)
+
+	counterEntered := make(chan struct{})
+	unblockCounter := make(chan struct{})
+	wedgedDone := make(chan error, 1)
+	go func() {
+		release, err := reserveUserVMSlotWithCounter(&libvirt.Connect{}, settings, "wedged-count-user", func(string) (int, bool) {
+			close(counterEntered)
+			<-unblockCounter
+			return 0, true
+		})
+		if err == nil {
+			release()
+		}
+		wedgedDone <- err
+	}()
+	<-counterEntered
+
+	otherDone := make(chan error, 1)
+	go func() {
+		release, err := reserveUserVMSlotWithCounter(&libvirt.Connect{}, settings, "unblocked-user", func(string) (int, bool) { return 0, true })
+		if err == nil {
+			release()
+		}
+		otherDone <- err
+	}()
+	select {
+	case err := <-otherDone:
+		if err != nil {
+			t.Fatalf("reserve for other user while a count is wedged: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reservation for another user blocked behind a wedged count")
+	}
+
+	close(unblockCounter)
+	if err := <-wedgedDone; err != nil {
+		t.Fatalf("wedged reservation after unblocking: %v", err)
+	}
+}
+
+// TestReserveUserVMSlotRefundsReservation proves the pre-count reservation is
+// refunded when the check refuses or the count fails; a leaked reservation
+// would consume the owner's quota forever.
+func TestReserveUserVMSlotRefundsReservation(t *testing.T) {
+	settings := bootLimitSettings(t, 1)
+
+	owner := "refund-refused-user"
+	if _, err := reserveUserVMSlotWithCounter(
+		&libvirt.Connect{},
+		settings,
+		owner,
+		func(string) (int, bool) { return 1, true },
+	); !errors.Is(err, ErrVMLimitReached) {
+		t.Fatalf("reserve at limit = %v, want ErrVMLimitReached", err)
+	}
+	if got := inflightReservationsForTest(owner); got != 0 {
+		t.Fatalf("in-flight reservations after refusal = %d, want 0", got)
+	}
+
+	owner = "refund-error-user"
+	if _, err := reserveUserVMSlotWithCounter(
+		&libvirt.Connect{},
+		settings,
+		owner,
+		func(string) (int, bool) { return 0, false },
+	); err == nil {
+		t.Fatal("reserve with failing live count should error")
+	}
+	if got := inflightReservationsForTest(owner); got != 0 {
+		t.Fatalf("in-flight reservations after count error = %d, want 0", got)
 	}
 }
 
