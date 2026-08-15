@@ -3,11 +3,9 @@ package virt
 import (
 	"encoding/xml"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
-	"libvirt.org/go/libvirt"
 )
 
 type inventoryHostIdentity struct {
@@ -84,24 +82,10 @@ func loadInventoryHostIdentity(
 	return inventoryHostIdentity{URI: canonicalURI, Hostname: hostname}, nil
 }
 
-func (s *SingletonWorker) observeInventoryHost(conn *libvirt.Connect) error {
-	identity, err := loadInventoryHostIdentity(conn.GetURI, conn.GetCapabilities, conn.GetHostname)
-	if err != nil {
-		return err
-	}
-
-	previous, invalidated := s.setInventoryHostIdentity(identity)
-	if invalidated && previous == (inventoryHostIdentity{}) {
-		log.Printf("libvirt inventory host identity established as %s; clearing unverified inventory caches", identity)
-	} else if invalidated {
-		// UUID-keyed domain snapshots are valid only for the host from which they
-		// were read. A positively identified host change is the one reconnect
-		// boundary that invalidates both caches.
-		log.Printf("libvirt inventory host changed from %s to %s; clearing inventory caches", previous, identity)
-	}
-	return nil
-}
-
+// setInventoryHostIdentity records the identity of the host a sweep collected
+// from. UUID-keyed domain snapshots are valid only for the host from which
+// they were read, so a positively identified host change is the one boundary
+// that invalidates both caches (and the visible VM snapshot with them).
 func (s *SingletonWorker) setInventoryHostIdentity(identity inventoryHostIdentity) (
 	previous inventoryHostIdentity,
 	invalidated bool,

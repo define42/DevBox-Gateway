@@ -324,9 +324,17 @@ func formatState(state libvirt.DomainState) string {
 
 // SingletonWorker caches VM metadata in the background for fast read access.
 type SingletonWorker struct {
-	ticker                *time.Ticker
-	ctx                   context.Context
-	cancel                context.CancelFunc
+	ticker *time.Ticker
+	ctx    context.Context
+	cancel context.CancelFunc
+	// outstandingSweeps counts sweep goroutines that are still running,
+	// including abandoned ones blocked in uncancellable libvirt RPCs; it
+	// bounds how many the worker may accumulate (maxOutstandingSweeps).
+	outstandingSweeps atomic.Int32
+	// spawnSweep overrides how startSweepIfDue launches a sweep goroutine;
+	// nil means s.sweep. Tests inject a fake so tick handling can be driven
+	// without a live libvirt connection.
+	spawnSweep            func(chan<- sweepOutcome)
 	inventoryCacheMu      sync.Mutex
 	inventoryHostIdentity inventoryHostIdentity
 	metadataByUUID        map[string]domainMetadataSnapshot
@@ -572,74 +580,205 @@ func peekInstance() *SingletonWorker {
 	return instance.Load()
 }
 
+// sweepTimeout bounds one inventory sweep. A healthy sweep finishes in well
+// under one tick even with hundreds of domains; one that exceeds this bound is
+// abandoned — an in-flight cgo RPC cannot be cancelled, so the worker walks
+// away from the sweep goroutine and its connection and starts fresh — rather
+// than blocking every future sweep behind it.
+const sweepTimeout = 30 * time.Second
+
+// maxOutstandingSweeps caps concurrently running sweep goroutines: the current
+// one plus abandoned ones still blocked in libvirt. At the cap the worker
+// stops starting sweeps instead of accumulating unbounded goroutines and
+// connections against an unresponsive libvirtd; capacity frees as soon as any
+// blocked sweep returns.
+const maxOutstandingSweeps = 4
+
+// sweepOutcome carries everything one inventory sweep produced. The sweep
+// goroutine mutates no shared worker state itself; the worker loop applies an
+// outcome only when the sweep that produced it has not been abandoned.
+type sweepOutcome struct {
+	identity inventoryHostIdentity
+	vms      []VMInfo
+	metadata map[string]domainMetadataSnapshot
+	disks    map[string]domainDiskSnapshot
+	err      error
+}
+
+// inflightSweep tracks the one sweep the worker loop currently waits on.
+type inflightSweep struct {
+	outcome chan sweepOutcome
+	started time.Time
+}
+
+// done returns the channel delivering the in-flight sweep's outcome, or a nil
+// channel — blocking forever in a select — when no sweep is in flight.
+func (f *inflightSweep) done() <-chan sweepOutcome {
+	if f == nil {
+		return nil
+	}
+	return f.outcome
+}
+
 func (s *SingletonWorker) run() {
 	log.Println("singleton worker started")
 
-	var conn *libvirt.Connect
-	defer func() {
-		if conn != nil {
-			_, _ = conn.Close()
-		}
-	}()
-
+	var inflight *inflightSweep
 	for {
 		select {
+		case res := <-inflight.done():
+			inflight = nil
+			s.applySweep(res)
 		case <-s.ticker.C:
-			if conn == nil {
-				conn = s.connectInventory()
-				if conn == nil {
-					continue
-				}
-			}
-
-			if err := s.doWork(conn); err != nil {
-				log.Printf("singleton worker list vms: %v", err)
-				_, _ = conn.Close()
-				conn = nil
-			}
+			inflight = s.startSweepIfDue(inflight)
 		case <-s.ctx.Done():
+			// An in-flight sweep finishes on its own: its outcome channel is
+			// buffered and it closes its own connection.
 			log.Println("singleton worker stopped")
 			return
 		}
 	}
 }
 
-func (s *SingletonWorker) connectInventory() *libvirt.Connect {
-	conn, err := libvirt.NewConnect(LibvirtURI())
-	if err != nil {
-		log.Printf("list vms connect: %v", err)
+// startSweepIfDue decides what one ticker tick does: keep waiting on a healthy
+// in-flight sweep, abandon one that exceeded sweepTimeout, and start the next
+// sweep unless too many earlier ones are still blocked in libvirt. Dropping an
+// abandoned sweep's inflightSweep is what guarantees its stale outcome is
+// never applied: the worker no longer holds the only reference to the channel
+// it will report on.
+func (s *SingletonWorker) startSweepIfDue(current *inflightSweep) *inflightSweep {
+	if current != nil {
+		if time.Since(current.started) < sweepTimeout {
+			return current
+		}
+		log.Printf("inventory sweep still running after %v; abandoning it and starting fresh", sweepTimeout)
+	}
+
+	if outstanding := s.outstandingSweeps.Load(); outstanding >= maxOutstandingSweeps {
+		log.Printf("%d inventory sweeps still blocked in libvirt; not starting another", outstanding)
 		return nil
 	}
-	if err := s.observeInventoryHost(conn); err != nil {
-		// Do not use snapshots until the new connection's host can be
-		// identified. Retain them and retry the connection next tick so a
-		// transient identity lookup cannot trigger a cold inventory read or mix
-		// snapshots from different hosts.
-		log.Printf("libvirt inventory host identity unavailable; retaining inventory caches and retrying: %v", err)
-		_, _ = conn.Close()
-		return nil
+
+	next := &inflightSweep{outcome: make(chan sweepOutcome, 1), started: time.Now()}
+	spawn := s.spawnSweep
+	if spawn == nil {
+		spawn = s.sweep
 	}
-	return conn
+	go spawn(next.outcome)
+	return next
 }
 
+// sweep runs one full inventory collection against its own libvirt connection
+// and reports the outcome without touching shared worker state. Owning the
+// connection matters: when the worker abandons a sweep stuck in an
+// uncancellable RPC, nothing else holds the same socket, so the next sweep
+// starts on a fresh connection immediately while this goroutine keeps
+// blocking until libvirt gives up.
+func (s *SingletonWorker) sweep(outcome chan<- sweepOutcome) {
+	s.outstandingSweeps.Add(1)
+	defer s.outstandingSweeps.Add(-1)
+
+	conn, err := libvirt.NewConnect(LibvirtURI())
+	if err != nil {
+		outcome <- sweepOutcome{err: fmt.Errorf("list vms connect: %w", err)}
+		return
+	}
+	defer func() {
+		_, _ = conn.Close()
+	}()
+
+	// Identify the host before trusting anything collected from it. On
+	// failure, retain the existing snapshots and retry next tick so a
+	// transient identity lookup cannot trigger a cold inventory read or mix
+	// snapshots from different hosts.
+	identity, err := loadInventoryHostIdentity(conn.GetURI, conn.GetCapabilities, conn.GetHostname)
+	if err != nil {
+		outcome <- sweepOutcome{err: fmt.Errorf("libvirt inventory host identity unavailable; retaining inventory caches and retrying: %w", err)}
+		return
+	}
+
+	vms, metadata, disks, err := s.collectInventory(conn)
+	if err != nil {
+		outcome <- sweepOutcome{err: err}
+		return
+	}
+	outcome <- sweepOutcome{identity: identity, vms: vms, metadata: metadata, disks: disks}
+}
+
+// applySweep publishes a completed sweep's results. Outcomes of abandoned
+// sweeps never reach here — the worker dropped their channel — so data that
+// is minutes stale, or was collected against a previous libvirt host, is
+// discarded unread.
+func (s *SingletonWorker) applySweep(res sweepOutcome) {
+	if res.err != nil {
+		log.Printf("singleton worker list vms: %v", res.err)
+		return
+	}
+
+	previous, invalidated := s.setInventoryHostIdentity(res.identity)
+	if invalidated {
+		// The sweep collected against cache state from the previous identity,
+		// so its results cannot be attributed to the new host. The identity
+		// change has already cleared the caches and the visible snapshot; the
+		// next tick sweeps the new host from scratch.
+		if previous == (inventoryHostIdentity{}) {
+			log.Printf("libvirt inventory host identity established as %s; clearing unverified inventory caches and discarding the sweep collected before it", res.identity)
+		} else {
+			log.Printf("libvirt inventory host changed from %s to %s; clearing inventory caches and discarding the sweep collected across the change", previous, res.identity)
+		}
+		return
+	}
+
+	s.publishInventory(res.vms, res.metadata, res.disks)
+}
+
+// publishInventory installs a sweep's results: the UUID-keyed inventory
+// caches, the visible VM snapshot, and the quota freshness stamp.
+func (s *SingletonWorker) publishInventory(
+	vms []VMInfo,
+	metadata map[string]domainMetadataSnapshot,
+	disks map[string]domainDiskSnapshot,
+) {
+	s.inventoryCacheMu.Lock()
+	s.metadataByUUID = metadata
+	s.diskByUUID = disks
+	s.inventoryCacheMu.Unlock()
+	s.setVMs(vms)
+	s.markVMSnapshotSwept()
+}
+
+// doWork runs one synchronous inventory sweep on conn and publishes the
+// result unconditionally. The background worker goes through
+// startSweepIfDue/sweep/applySweep instead so a stalled sweep can be
+// abandoned; this synchronous form is the seam tests use to drive the worker
+// against fixture connections.
 func (s *SingletonWorker) doWork(conn *libvirt.Connect) error {
 	if conn == nil {
 		return fmt.Errorf("libvirt connection is nil")
 	}
 
-	vms, err := s.listVMsWithInventoryCaches(conn)
+	vms, metadata, disks, err := s.collectInventory(conn)
 	if err != nil {
 		return err
 	}
-	s.setVMs(vms)
-	s.markVMSnapshotSwept()
+	s.publishInventory(vms, metadata, disks)
 	return nil
 }
 
-func (s *SingletonWorker) listVMsWithInventoryCaches(conn *libvirt.Connect) ([]VMInfo, error) {
-	// The production worker runs one inventory sweep at a time. Copy under the
-	// cache lock so libvirt calls never block unrelated cache maintenance; the
-	// retained map is swapped back only after a successful full-domain listing.
+// collectInventory lists all domains on conn, reusing the UUID-keyed metadata
+// and disk caches, and returns the fresh VM snapshot plus the cache entries to
+// retain. It mutates no worker state: abandoned sweeps may still be running
+// one of these concurrently with the current one, so installing the results
+// is the caller's decision (applySweep for the worker, doWork for tests).
+func (s *SingletonWorker) collectInventory(conn *libvirt.Connect) (
+	[]VMInfo,
+	map[string]domainMetadataSnapshot,
+	map[string]domainDiskSnapshot,
+	error,
+) {
+	// Copy under the cache lock so libvirt calls never block unrelated cache
+	// maintenance; the retained maps are installed only after a successful
+	// full-domain listing, and only if the sweep is still current.
 	s.inventoryCacheMu.Lock()
 	previousMetadata := maps.Clone(s.metadataByUUID)
 	previousDisks := maps.Clone(s.diskByUUID)
@@ -671,14 +810,10 @@ func (s *SingletonWorker) listVMsWithInventoryCaches(conn *libvirt.Connect) ([]V
 		},
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
-	s.inventoryCacheMu.Lock()
-	s.metadataByUUID = metadataSweep.retainedEntries()
-	s.diskByUUID = diskSweep.retainedEntries()
-	s.inventoryCacheMu.Unlock()
-	return vms, nil
+	return vms, metadataSweep.retainedEntries(), diskSweep.retainedEntries(), nil
 }
 
 // Stop stops the background worker ticker and cancels its context.
