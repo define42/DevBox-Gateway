@@ -2,6 +2,7 @@
 
 const DEFAULT_VM_ERROR = "Unable to load virtual machines right now.";
 const SESSION_CHECK_ERROR = "Unable to verify your session. Reload and sign in again.";
+const CREATION_STATUS_UNKNOWN_ERROR = "The progress connection was interrupted. The DevBox may still be being created; check the dashboard before trying again.";
 const RTT_PING_INTERVAL_MS = 2000;
 const RTT_RECONNECT_DELAY_MS = 2000;
 const RTT_GREEN_MAX_MS = 30;
@@ -82,6 +83,15 @@ type DashboardActionResponse = {
     error?: string;
 };
 
+type DashboardCreationStreamEvent = {
+    type?: unknown;
+    copiedBytes?: unknown;
+    totalBytes?: unknown;
+    ok?: unknown;
+    message?: unknown;
+    error?: unknown;
+};
+
 type DashboardTerminalState = {
     open: boolean;
     vmName: string;
@@ -100,6 +110,9 @@ type DashboardVNCState = {
 type DashboardCreateState = {
     open: boolean;
     error: string;
+    active: boolean;
+    phase: "idle" | "preparing" | "copying" | "finalizing";
+    percent: number;
 };
 
 type DashboardInfoState = {
@@ -156,6 +169,9 @@ const state: DashboardState = {
     create: {
         open: false,
         error: "",
+        active: false,
+        phase: "idle",
+        percent: 0,
     },
     info: {
         open: false,
@@ -198,6 +214,13 @@ function formatCreatedAt(createdAt?: string): string {
         return raw;
     }
     return parsed.toLocaleString();
+}
+
+function clampCreationPercent(value: number): number | null {
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+    return Math.min(100, Math.max(0, value));
 }
 
 // setIconLabel renders a Bootstrap Icon followed by a text label inside a button
@@ -337,6 +360,18 @@ function bootstrap(): void {
             <button class="btn btn-outline-secondary btn-sm" id="create-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
           </div>
           <div class="alert alert-danger mb-3 d-none" id="create-error" role="alert"></div>
+          <div class="mb-3 d-none" id="create-progress">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+              <span class="d-inline-flex align-items-center gap-2">
+                <span class="spinner-border spinner-border-sm" id="create-progress-spinner" aria-hidden="true"></span>
+                <span id="create-progress-label" role="status" aria-live="polite" aria-atomic="true">Preparing DevBox...</span>
+              </span>
+              <span class="text-body-secondary" id="create-progress-value" aria-hidden="true"></span>
+            </div>
+            <div class="progress d-none" id="create-progress-track">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" id="create-progress-bar" role="progressbar" aria-labelledby="create-progress-label" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Preparing DevBox..." style="width: 0%"></div>
+            </div>
+          </div>
           <form class="row g-3 align-items-end" id="create-form">
             <div class="col-12 col-md-6 col-lg-4">
               <label class="form-label" for="vm-name">New DevBox Name</label>
@@ -393,6 +428,12 @@ function bootstrap(): void {
     const createBackdrop = root.querySelector<HTMLDivElement>("#create-backdrop");
     const createClose = root.querySelector<HTMLButtonElement>("#create-close");
     const createError = root.querySelector<HTMLDivElement>("#create-error");
+    const createProgress = root.querySelector<HTMLDivElement>("#create-progress");
+    const createProgressSpinner = root.querySelector<HTMLSpanElement>("#create-progress-spinner");
+    const createProgressLabel = root.querySelector<HTMLSpanElement>("#create-progress-label");
+    const createProgressValue = root.querySelector<HTMLSpanElement>("#create-progress-value");
+    const createProgressTrack = root.querySelector<HTMLDivElement>("#create-progress-track");
+    const createProgressBar = root.querySelector<HTMLDivElement>("#create-progress-bar");
     const infoModal = root.querySelector<HTMLDivElement>("#info-modal");
     const infoBackdrop = root.querySelector<HTMLDivElement>("#info-backdrop");
     const infoSubtitle = root.querySelector<HTMLParagraphElement>("#info-subtitle");
@@ -432,6 +473,12 @@ function bootstrap(): void {
         !createBackdrop ||
         !createClose ||
         !createError ||
+        !createProgress ||
+        !createProgressSpinner ||
+        !createProgressLabel ||
+        !createProgressValue ||
+        !createProgressTrack ||
+        !createProgressBar ||
         !infoModal ||
         !infoBackdrop ||
         !infoSubtitle ||
@@ -473,6 +520,12 @@ function bootstrap(): void {
     const createBackdropEl = createBackdrop;
     const createCloseEl = createClose;
     const createErrorEl = createError;
+    const createProgressEl = createProgress;
+    const createProgressSpinnerEl = createProgressSpinner;
+    const createProgressLabelEl = createProgressLabel;
+    const createProgressValueEl = createProgressValue;
+    const createProgressTrackEl = createProgressTrack;
+    const createProgressBarEl = createProgressBar;
     const infoModalEl = infoModal;
     const infoBackdropEl = infoBackdrop;
     const infoSubtitleEl = infoSubtitle;
@@ -841,6 +894,48 @@ function bootstrap(): void {
     function renderCreate(): void {
         createModalEl.hidden = !state.create.open;
         createModalEl.setAttribute("aria-hidden", state.create.open ? "false" : "true");
+        formEl.setAttribute("aria-busy", state.create.active ? "true" : "false");
+        createProgressEl.classList.toggle("d-none", !state.create.active);
+        const isPreparing = state.create.active && state.create.phase === "preparing";
+        createProgressSpinnerEl.classList.toggle("d-none", !isPreparing);
+        createProgressTrackEl.classList.toggle("d-none", !state.create.active || isPreparing);
+        if (state.create.active) {
+            const isCopying = state.create.phase === "copying";
+            createProgressBarEl.classList.toggle("progress-bar-animated", !isCopying);
+            if (isCopying) {
+                const percent = clampCreationPercent(state.create.percent) || 0;
+                const roundedPercent = Math.round(percent);
+                if (createProgressLabelEl.textContent !== "Creating qcow2 disk image...") {
+                    createProgressLabelEl.textContent = "Creating qcow2 disk image...";
+                }
+                createProgressValueEl.textContent = `${roundedPercent}%`;
+                createProgressBarEl.style.width = `${percent}%`;
+                createProgressBarEl.setAttribute("aria-valuenow", `${percent}`);
+                createProgressBarEl.removeAttribute("aria-valuetext");
+            } else if (state.create.phase === "finalizing") {
+                const progressMessage = "Disk image copied; finalizing DevBox...";
+                if (createProgressLabelEl.textContent !== progressMessage) {
+                    createProgressLabelEl.textContent = progressMessage;
+                }
+                createProgressValueEl.textContent = "100%";
+                createProgressBarEl.style.width = "100%";
+                createProgressBarEl.setAttribute("aria-valuenow", "100");
+                createProgressBarEl.removeAttribute("aria-valuetext");
+            } else {
+                createProgressLabelEl.textContent = "Preparing DevBox...";
+                createProgressValueEl.textContent = "";
+                createProgressBarEl.style.width = "0%";
+                createProgressBarEl.removeAttribute("aria-valuenow");
+                createProgressBarEl.setAttribute("aria-valuetext", "Preparing DevBox...");
+            }
+        } else {
+            createProgressBarEl.classList.add("progress-bar-animated");
+            createProgressLabelEl.textContent = "Preparing DevBox...";
+            createProgressValueEl.textContent = "";
+            createProgressBarEl.style.width = "0%";
+            createProgressBarEl.removeAttribute("aria-valuenow");
+            createProgressBarEl.setAttribute("aria-valuetext", "Preparing DevBox...");
+        }
         if (state.create.error) {
             createErrorEl.textContent = state.create.error;
             createErrorEl.classList.remove("d-none");
@@ -853,21 +948,66 @@ function bootstrap(): void {
     function setCreateError(message: string): void {
         state.create.error = message;
         renderCreate();
+        if (message && state.create.open) {
+            createCloseEl.focus();
+        }
+    }
+
+    function beginCreateProgress(): void {
+        state.create.active = true;
+        state.create.phase = "preparing";
+        state.create.percent = 0;
+        renderCreate();
+        createCloseEl.focus();
+    }
+
+    function updateCreateDiskProgress(copiedBytes: number, totalBytes: number): void {
+        if (
+            !state.create.active ||
+            !Number.isFinite(copiedBytes) ||
+            !Number.isFinite(totalBytes) ||
+            copiedBytes < 0 ||
+            totalBytes <= 0
+        ) {
+            return;
+        }
+        const percent = clampCreationPercent(copiedBytes / totalBytes * 100);
+        if (percent === null) {
+            return;
+        }
+        state.create.percent = Math.max(state.create.percent, percent);
+        state.create.phase = copiedBytes >= totalBytes ? "finalizing" : "copying";
+        renderCreate();
+    }
+
+    function finishCreateProgress(): void {
+        state.create.active = false;
+        state.create.phase = "idle";
+        state.create.percent = 0;
+        renderCreate();
     }
 
     function openCreate(): void {
         closeTerminal();
         closeVNC();
         state.create.open = true;
-        state.create.error = "";
+        if (!state.create.active) {
+            state.create.error = "";
+        }
         renderCreate();
-        inputEl.focus();
+        (state.create.active ? createCloseEl : inputEl).focus();
     }
 
     function closeCreate(): void {
+        const wasOpen = state.create.open;
         state.create.open = false;
-        state.create.error = "";
+        if (!state.create.active) {
+            state.create.error = "";
+        }
         renderCreate();
+        if (wasOpen) {
+            openCreateButtonEl.focus();
+        }
     }
 
     function teardownTerminalRuntime(): void {
@@ -1496,6 +1636,153 @@ function bootstrap(): void {
         return { ok: true, data: payload as T };
     }
 
+    async function readCreationStream(response: Response): Promise<RequestResult<DashboardActionResponse>> {
+        if (!response.body) {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffered = "";
+        const streamState: {
+            result: DashboardActionResponse | null;
+            invalidResponse: boolean;
+        } = {
+            result: null,
+            invalidResponse: false,
+        };
+
+        function consumeLine(rawLine: string): void {
+            const line = rawLine.trim();
+            if (line === "") {
+                return;
+            }
+
+            let event: DashboardCreationStreamEvent;
+            try {
+                const parsed = JSON.parse(line);
+                if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                    streamState.invalidResponse = true;
+                    return;
+                }
+                event = parsed as DashboardCreationStreamEvent;
+            } catch {
+                streamState.invalidResponse = true;
+                return;
+            }
+
+            if (event.type === "progress") {
+                if (typeof event.copiedBytes === "number" && typeof event.totalBytes === "number") {
+                    updateCreateDiskProgress(event.copiedBytes, event.totalBytes);
+                }
+                return;
+            }
+            if (event.type === "result") {
+                streamState.result = {
+                    ok: event.ok === true,
+                    message: typeof event.message === "string" ? event.message : undefined,
+                    error: typeof event.error === "string" ? event.error : undefined,
+                };
+            }
+            // Ignore unknown event types so newer servers can add optional frames.
+        }
+
+        try {
+            streamLoop:
+            while (true) {
+                const { done, value } = await reader.read();
+                if (value) {
+                    buffered += decoder.decode(value, { stream: true });
+                }
+
+                let newline = buffered.indexOf("\n");
+                while (newline >= 0) {
+                    consumeLine(buffered.slice(0, newline));
+                    buffered = buffered.slice(newline + 1);
+                    if (streamState.result) {
+                        break streamLoop;
+                    }
+                    newline = buffered.indexOf("\n");
+                }
+
+                if (done) {
+                    buffered += decoder.decode();
+                    consumeLine(buffered);
+                    break;
+                }
+            }
+        } catch {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+
+        if (streamState.result) {
+            try {
+                await reader.cancel();
+            } catch {
+                // A complete result remains authoritative if stream cleanup fails.
+            }
+        }
+
+        if (streamState.invalidResponse) {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+        const result = streamState.result;
+        if (!result) {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+        if (!response.ok) {
+            return { ok: false, error: result.error || "Failed to create VM." };
+        }
+        return { ok: true, data: result };
+    }
+
+    async function requestVMCreation(body: URLSearchParams): Promise<RequestResult<DashboardActionResponse> | null> {
+        let response: Response;
+        try {
+            response = await fetch("/api/dashboard", {
+                method: "POST",
+                cache: "no-store",
+                credentials: "same-origin",
+                headers: {
+                    "Accept": "application/x-ndjson, application/json",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: body.toString(),
+            });
+        } catch {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+        if (responseRequiresLogin(response)) {
+            return redirectToLogin();
+        }
+
+        const mediaType = (response.headers.get("Content-Type") || "")
+            .split(";", 1)[0]
+            .trim()
+            .toLowerCase();
+        if (mediaType === "application/x-ndjson") {
+            return readCreationStream(response);
+        }
+
+        // Older gateways return one JSON action response after provisioning.
+        let payload: any = null;
+        try {
+            payload = await response.json();
+        } catch {
+            payload = null;
+        }
+        if (!response.ok) {
+            const errorMessage = payload && typeof payload.error === "string"
+                ? payload.error
+                : "Failed to create VM.";
+            return { ok: false, error: errorMessage };
+        }
+        if (!payload || typeof payload !== "object" || Array.isArray(payload) || typeof payload.ok !== "boolean") {
+            return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
+        }
+        return { ok: true, data: payload as DashboardActionResponse };
+    }
+
     async function loadVMs(): Promise<void> {
         if (loadInFlight) {
             return;
@@ -1528,7 +1815,9 @@ function bootstrap(): void {
         }
         clearAction();
         setCreateError("");
+        beginCreateProgress();
         setBusy(true);
+        let closeOnFinish = false;
         try {
             // No password fields: the server provisions the DevBox account with
             // the (hashed) gateway login password held in the session.
@@ -1537,30 +1826,33 @@ function bootstrap(): void {
                 vm_username: username,
                 vm_base_image: baseImage,
             });
-            const result = await requestJSON<DashboardActionResponse>("/api/dashboard", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: body.toString(),
-            });
+            const result = await requestVMCreation(body);
             if (!result) {
                 return;
             }
             if (!result.ok || !result.data) {
+                state.create.open = true;
                 setCreateError(result.error || "Failed to create VM.");
                 return;
             }
             if (!result.data.ok) {
+                state.create.open = true;
                 setCreateError(result.data.error || "Failed to create VM.");
                 return;
             }
-            setActionMessage(result.data.message || "VM creation started.");
+            setActionMessage(result.data.message || "VM created.");
             inputEl.value = "";
             usernameInputEl.value = defaultUsername;
-            closeCreate();
+            closeOnFinish = true;
+        } catch {
+            state.create.open = true;
+            setCreateError(CREATION_STATUS_UNKNOWN_ERROR);
         } finally {
+            finishCreateProgress();
             setBusy(false);
+            if (closeOnFinish) {
+                closeCreate();
+            }
         }
     }
 

@@ -114,3 +114,40 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 		t.Fatal("dashboard JavaScript must not retain timer-based VM polling")
 	}
 }
+
+func TestDashboardJavaScriptStreamsCreationProgress(t *testing.T) {
+	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	for description, fragment := range map[string]string{
+		"accessible progress bar":    `id="create-progress-bar" role="progressbar"`,
+		"indeterminate spinner":      `id="create-progress-spinner" aria-hidden="true"`,
+		"unfilled preparing bar":     `aria-valuetext="Preparing DevBox..." style="width: 0%"`,
+		"NDJSON response request":    `"Accept": "application/x-ndjson, application/json"`,
+		"stream reader":              `response.body.getReader()`,
+		"incremental line buffering": `buffered.indexOf("\n")`,
+		"progress event handling":    `event.type === "progress"`,
+		"result event handling":      `event.type === "result"`,
+		"disk byte progress":         `updateCreateDiskProgress(event.copiedBytes, event.totalBytes)`,
+		"dismissible creation modal": "function closeCreate() {",
+		"modal focus restoration":    `openCreateButtonEl.focus()`,
+		"preparing track hidden":     `createProgressTrackEl.classList.toggle("d-none", !state.create.active || isPreparing)`,
+		"terminal stream handling":   `break streamLoop`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected dashboard JavaScript to include %s", description)
+		}
+	}
+	if strings.Contains(body, "createCloseEl.disabled = state.create.active") {
+		t.Fatal("creation progress must not disable the modal close button")
+	}
+	if strings.Contains(body, "creation_id") {
+		t.Fatal("direct creation progress must not retain tracker correlation IDs")
+	}
+}

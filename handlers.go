@@ -514,7 +514,6 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	if handleDashboardFormError(w, "dashboard create", err) {
 		return createVMInput{}, false
 	}
-
 	return createVMInput{
 		name:              name,
 		user:              user,
@@ -532,35 +531,58 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			return
 		}
 
-		vmName, err := virt.BootNewVM(input.name, input.user, input.guestUsername, input.guestPasswordHash, input.baseImage, settings)
-		if errors.Is(err, virt.ErrVMAlreadyExists) {
-			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
-				OK:    false,
-				Error: fmt.Sprintf("A VM named %q already exists. Delete it before creating a new one.", input.name),
-			})
-			return
-		}
-		if errors.Is(err, virt.ErrVMLimitReached) {
-			dashboard.WriteJSON(w, http.StatusConflict, dashboard.ActionResponse{
-				OK:    false,
-				Error: fmt.Sprintf("VM limit reached: each user can have at most %d VMs. Delete one before creating a new one.", config.MaxVDIPerUser(settings)),
-			})
-			return
-		}
-		if err != nil {
-			log.Printf("boot new vm %q failed: %v", vmName, err)
-			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
-				OK:    false,
-				Error: "Failed to create VM.",
-			})
-			return
+		var creationStream *dashboard.CreationStream
+		var reportProgress virt.DiskCopyProgressFunc
+		if dashboard.AcceptsCreationStream(req) {
+			creationStream = dashboard.NewCreationStream(w)
+			reportProgress = creationStream.ReportDiskCopy
 		}
 
-		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
+		vmName, err := virt.BootNewVMWithProgress(
+			input.name,
+			input.user,
+			input.guestUsername,
+			input.guestPasswordHash,
+			input.baseImage,
+			settings,
+			reportProgress,
+		)
+		status, result := dashboardCreateResult(input.name, vmName, err, settings)
+		if creationStream != nil && creationStream.Started() {
+			if result.OK {
+				result.Message = "VM created."
+			}
+			creationStream.WriteResult(result)
+			return
+		}
+		dashboard.WriteJSON(w, status, result)
+	})
+}
+
+func dashboardCreateResult(name, vmName string, err error, settings *config.SettingsType) (int, dashboard.ActionResponse) {
+	switch {
+	case errors.Is(err, virt.ErrVMAlreadyExists):
+		return http.StatusConflict, dashboard.ActionResponse{
+			OK:    false,
+			Error: fmt.Sprintf("A VM named %q already exists. Delete it before creating a new one.", name),
+		}
+	case errors.Is(err, virt.ErrVMLimitReached):
+		return http.StatusConflict, dashboard.ActionResponse{
+			OK:    false,
+			Error: fmt.Sprintf("VM limit reached: each user can have at most %d VMs. Delete one before creating a new one.", config.MaxVDIPerUser(settings)),
+		}
+	case err != nil:
+		log.Printf("boot new vm %q failed: %v", vmName, err)
+		return http.StatusInternalServerError, dashboard.ActionResponse{
+			OK:    false,
+			Error: "Failed to create VM.",
+		}
+	default:
+		return http.StatusOK, dashboard.ActionResponse{
 			OK:      true,
 			Message: "VM creation started.",
-		})
-	})
+		}
+	}
 }
 
 // registerDashboardRDPRoute serves the per-VM "Connect" action. It verifies the

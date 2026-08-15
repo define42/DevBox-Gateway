@@ -16,6 +16,18 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
+// DiskCopyProgressFunc receives synchronous observations of source-image bytes
+// copied into a new VM's qcow2 volume. Callbacks should return promptly because
+// they run from the libvirt upload stream's reader.
+type DiskCopyProgressFunc func(copiedBytes, totalBytes int64)
+
+func reportDiskCopyProgress(report DiskCopyProgressFunc, copiedBytes, totalBytes int64) {
+	if report == nil {
+		return
+	}
+	report(copiedBytes, totalBytes)
+}
+
 // StartVM defines and starts a VM without attaching owner metadata.
 func StartVM(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) error {
 	return startVM(name, seedIso, storagePoolName, "", "", "", vcpu, memoryMiB)
@@ -148,26 +160,31 @@ func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ..
 }
 
 func streamReaderChunks(src io.Reader) func(*libvirt.Stream, int) ([]byte, error) {
+	return streamReaderChunksWithProgress(src, nil)
+}
+
+func streamReaderChunksWithProgress(src io.Reader, onRead func(int)) func(*libvirt.Stream, int) ([]byte, error) {
 	return func(_ *libvirt.Stream, nbytes int) ([]byte, error) {
-		if nbytes <= 0 {
-			return []byte{}, nil
-		}
-		buf := make([]byte, nbytes)
-		n, err := src.Read(buf)
-		if err != nil {
-			if err == io.EOF {
-				if n == 0 {
-					return []byte{}, nil
-				}
-				return buf[:n], nil
-			}
-			return nil, err
-		}
-		if n == 0 {
-			return []byte{}, nil
-		}
-		return buf[:n], nil
+		return readStreamChunk(src, nbytes, onRead)
 	}
+}
+
+func readStreamChunk(src io.Reader, nbytes int, onRead func(int)) ([]byte, error) {
+	if nbytes <= 0 {
+		return []byte{}, nil
+	}
+	buf := make([]byte, nbytes)
+	n, err := src.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	if n == 0 {
+		return []byte{}, nil
+	}
+	if onRead != nil {
+		onRead(n)
+	}
+	return buf[:n], nil
 }
 
 // CopyAndResizeVolume creates a qcow2 volume from the source image and resizes it when needed.
@@ -189,6 +206,18 @@ func copyAndResizeVolumeWithSettings(
 	sourceImagePath string,
 	capacityBytes uint64,
 ) error {
+	return copyAndResizeVolumeWithSettingsAndProgress(conn, settings, storagePoolName, volumeName, sourceImagePath, capacityBytes, nil)
+}
+
+func copyAndResizeVolumeWithSettingsAndProgress(
+	conn *libvirt.Connect,
+	settings *config.SettingsType,
+	storagePoolName string,
+	volumeName string,
+	sourceImagePath string,
+	capacityBytes uint64,
+	report DiskCopyProgressFunc,
+) error {
 	pool, err := conn.LookupStoragePoolByName(storagePoolName)
 	if err != nil {
 		return fmt.Errorf("lookup pool %s: %w", storagePoolName, err)
@@ -207,7 +236,7 @@ func copyAndResizeVolumeWithSettings(
 		_ = vol.Free()
 	}()
 
-	if err := uploadFileToVolume(conn, vol, sourceImagePath); err != nil {
+	if err := uploadFileToVolumeWithProgress(conn, vol, sourceImagePath, report); err != nil {
 		return err
 	}
 
@@ -477,6 +506,14 @@ func resolveGuestCredentials(user *types.User, guestUsername, guestPasswordHash 
 // CPU and memory are operator-defined only (VM_VCPU_COUNT / VM_MEMORY_MIB):
 // they are resolved from settings here so no caller can pass user-chosen values.
 func BootNewVM(name string, user *types.User, guestUsername, guestPasswordHash, baseImage string, settings *config.SettingsType) (vmName string, err error) {
+	return BootNewVMWithProgress(name, user, guestUsername, guestPasswordHash, baseImage, settings, nil)
+}
+
+// BootNewVMWithProgress behaves like BootNewVM and synchronously reports the
+// selected base image's disk-copy byte progress. A nil callback disables
+// reporting. The callback is observational: callers should return promptly and
+// must not call back into VM create/remove operations.
+func BootNewVMWithProgress(name string, user *types.User, guestUsername, guestPasswordHash, baseImage string, settings *config.SettingsType, report DiskCopyProgressFunc) (vmName string, err error) {
 	if user == nil {
 		return "", fmt.Errorf("vm owner is required")
 	}
@@ -502,7 +539,6 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPasswordHash, 
 	if err != nil {
 		return vmName, err
 	}
-
 	seedIso := vmName + "_seed.iso"
 	poolName, poolPath := storagePoolConfig(settings)
 
@@ -537,7 +573,7 @@ func BootNewVM(name string, user *types.User, guestUsername, guestPasswordHash, 
 	if err := resetExistingVMArtifacts(conn, poolName, vmName, seedIso); err != nil {
 		return vmName, err
 	}
-	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash, baseImagePath); err != nil {
+	if err := provisionBootVolumesWithProgress(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash, baseImagePath, report); err != nil {
 		return vmName, err
 	}
 	if err := StartVMWithOwner(vmName, seedIso, poolName, user.GetName(), guestUsername, baseImage, vcpu, memoryMiB); err != nil {
@@ -591,6 +627,10 @@ func createQCOW2Volume(settings *config.SettingsType, pool *libvirt.StoragePool,
 }
 
 func uploadFileToVolume(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string) error {
+	return uploadFileToVolumeWithProgress(conn, vol, sourceImagePath, nil)
+}
+
+func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string, report DiskCopyProgressFunc) error {
 	src, srcSize, err := openSourceImage(sourceImagePath)
 	if err != nil {
 		return err
@@ -608,13 +648,22 @@ func uploadFileToVolume(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceIm
 	if err := vol.Upload(stream, 0, uint64(srcSize), 0); err != nil {
 		return fmt.Errorf("start upload: %w", err)
 	}
-	if err := stream.SendAll(streamReaderChunks(src)); err != nil {
+	copiedBytes := int64(0)
+	reportDiskCopyProgress(report, copiedBytes, srcSize)
+	chunks := streamReaderChunksWithProgress(src, func(n int) {
+		copiedBytes += int64(n)
+		if copiedBytes < srcSize {
+			reportDiskCopyProgress(report, copiedBytes, srcSize)
+		}
+	})
+	if err := stream.SendAll(chunks); err != nil {
 		_ = stream.Abort()
 		return fmt.Errorf("stream send: %w", err)
 	}
 	if err := stream.Finish(); err != nil {
 		return fmt.Errorf("stream finish: %w", err)
 	}
+	reportDiskCopyProgress(report, copiedBytes, srcSize)
 	return nil
 }
 
@@ -875,7 +924,22 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso s
 }
 
 func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, poolName, vmName, seedIso, hostname, guestUsername, cloudInitPasswordHash, baseImagePath string) error {
-	if err := copyAndResizeVolumeWithSettings(conn, settings, poolName, vmName, baseImagePath, config.VMDiskCapacityBytes(settings)); err != nil {
+	return provisionBootVolumesWithProgress(conn, settings, poolName, vmName, seedIso, hostname, guestUsername, cloudInitPasswordHash, baseImagePath, nil)
+}
+
+func provisionBootVolumesWithProgress(
+	conn *libvirt.Connect,
+	settings *config.SettingsType,
+	poolName string,
+	vmName string,
+	seedIso string,
+	hostname string,
+	guestUsername string,
+	cloudInitPasswordHash string,
+	baseImagePath string,
+	report DiskCopyProgressFunc,
+) error {
+	if err := copyAndResizeVolumeWithSettingsAndProgress(conn, settings, poolName, vmName, baseImagePath, config.VMDiskCapacityBytes(settings), report); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
 	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, poolName, seedIso, guestUsername, cloudInitPasswordHash, hostname); err != nil {
