@@ -50,11 +50,11 @@ DEBUG_CONNECTIONS=true
 	}
 
 	cases := map[string]string{
-		LISTEN_ADDR:           ":8443",
-		FRONT_DOMAIN:          "desktop.example.com",
-		LDAP_USER_FILTER:      "(mail=%s)",
-		ACME_EMAIL:            "ops@example.com",
-		DEBUG_CONNECTIONS:     "true",
+		LISTEN_ADDR:       ":8443",
+		FRONT_DOMAIN:      "desktop.example.com",
+		LDAP_USER_FILTER:  "(mail=%s)",
+		ACME_EMAIL:        "ops@example.com",
+		DEBUG_CONNECTIONS: "true",
 	}
 	for k, want := range cases {
 		if got := os.Getenv(k); got != want {

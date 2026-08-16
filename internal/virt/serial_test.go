@@ -29,7 +29,7 @@ func TestSerialConsoleInterruptAfterCloseIsNoop(t *testing.T) {
 // Interrupt against Close under the race detector. It runs on an already-freed
 // console so no real libvirt call is made; it guards against a future change
 // that drops the lock and reintroduces the abort/free data race.
-func TestSerialConsoleInterruptCloseRaceSafe(t *testing.T) {
+func TestSerialConsoleInterruptCloseRaceSafe(_ *testing.T) {
 	sc := &SerialConsole{freed: true}
 
 	var wg sync.WaitGroup
