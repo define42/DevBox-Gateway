@@ -34,7 +34,6 @@ else is treated as an RDP X.224 Connection Request.
 - [Login flow](#login-flow)
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
-  - [Disabling clipboard and drive redirection](#disabling-clipboard-and-drive-redirection)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
   - [Local users](#local-users)
@@ -58,9 +57,6 @@ else is treated as an RDP X.224 Connection Request.
   verification.
 - **ACME / Let's Encrypt** support for automatic public TLS certificates, with
   a self-signed fallback for local development.
-- **Per-session RDP hardening**: optionally strip the `cliprdr` (clipboard) and
-  `rdpdr` (drive/printer/smart-card redirection) static virtual channels from
-  every proxied session, regardless of client or VM Group Policy.
 - **Libvirt integration** for managing QEMU/KVM virtual machines from a
   configurable storage pool, with base image auto-download.
 - **Single port** (`:443`) for everything: dashboard, websockets, and RDP.
@@ -79,10 +75,10 @@ client ──TLS──►   │  byte-sniff: 0x16 → HTTPS, else → RDP X.224 
                 │  /login, /logout             │  │ → dial backend VM         │
                 │  /api/dashboard/*            │  │ → new RDP TLS handshake   │
                 │  /api/dashboard/console/...  │  │ → bidirectional proxy     │
-                │  /api/dashboard/vnc/...      │  │ (with optional channel    │
-                │  static assets               │  │  stripping for cliprdr /  │
-                └────────────────┬─────────────┘  │  rdpdr in MCS Connect)    │
-                                 │                └─────────┬─────────────────┘
+                │  /api/dashboard/vnc/...      │  └─────────┬─────────────────┘
+                │  static assets               │            │
+                └────────────────┬─────────────┘            │
+                                 │                          │
                        LDAP bind / session                  │
                                  │                          │
                   ┌──────────────▼──────────────────────────▼────────────────┐
@@ -354,29 +350,11 @@ file**, which keeps container and development overrides working.
 | `LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS` | `50`                                                                                                  | Higher password-spray limit across all usernames from one client IP. Set `<=0` to disable only the IP-wide limit. |
 | `LOGIN_RATE_LIMIT_WINDOW` | `5m`                                                                                                             | Rolling window for failed login attempt counting.                                                 |
 | `LOGIN_RATE_LIMIT_LOCKOUT` | `15m`                                                                                                           | How long matching login attempts are rejected after either failure limit is reached.              |
-| `RDP_DISABLE_CLIPBOARD`   | `false`                                                                                                          | When `true`, strip the `cliprdr` virtual channel from every proxied session.                      |
-| `RDP_DISABLE_DRIVES`      | `false`                                                                                                          | When `true`, strip the `rdpdr` virtual channel from every proxied session.                        |
 | `DEBUG_CONNECTIONS`       | `false`                                                                                                          | When `true`, log every accepted front connection (HTTPS vs RDP, with source address) and every HTTP/WebSocket request (type, source address, method, path). Useful for tracing connectivity; noisy, so leave off in normal operation. |
 
 Booleans accept anything `strconv.ParseBool` recognises (`true`, `false`,
 `1`, `0`, `yes`, `no`, …). Durations accept Go's `time.ParseDuration`
 syntax (e.g. `15s`, `2m`, `500ms`).
-
-### Disabling clipboard and drive redirection
-
-The gateway can enforce a "no clipboard" and/or "no local drive mapping"
-policy on every RDP session it proxies, independently of the client
-configuration or the VM-side Group Policy. When enabled, the gateway parses the
-client's MCS Connect Initial PDU after the TLS handshake and renames the
-`cliprdr` and/or `rdpdr` static virtual channel entries in the CS_NET block to
-unused names. The server allocates MCS channel IDs as usual (so the RDP
-connection still establishes) but no clipboard or drive redirection service is
-ever bound to the renamed channels.
-
-| Environment variable     | Default | Effect                                                                                                                                                          |
-|--------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `RDP_DISABLE_CLIPBOARD`  | `false` | When `true`, strip the `cliprdr` virtual channel so clipboard redirection is disabled.                                                                          |
-| `RDP_DISABLE_DRIVES`     | `false` | When `true`, strip the `rdpdr` virtual channel so local drive mapping (and other RDPDR redirections such as printers and smart cards over RDPDR) is disabled.   |
 
 ### TLS certificates
 
@@ -575,7 +553,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── dashboard/   Dashboard HTML / JSON rendering and VM listing.
 │   ├── hash/        Password/credential hashing helpers.
 │   ├── ldap/        LDAP login authentication.
-│   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy, channel stripping.
+│   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── session/     Cookie session manager and middleware.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   └── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).

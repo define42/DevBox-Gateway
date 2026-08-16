@@ -33,14 +33,14 @@ LDAP_USER_FILTER="(mail=%s)"
 ACME_EMAIL='ops@example.com'
 
    # indented comment
-RDP_DISABLE_CLIPBOARD=true
+DEBUG_CONNECTIONS=true
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	// Ensure none of the keys are set in the environment for this test.
-	for _, k := range []string{LISTEN_ADDR, FRONT_DOMAIN, LDAP_USER_FILTER, ACME_EMAIL, RDP_DISABLE_CLIPBOARD} {
+	for _, k := range []string{LISTEN_ADDR, FRONT_DOMAIN, LDAP_USER_FILTER, ACME_EMAIL, DEBUG_CONNECTIONS} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
 	}
@@ -54,7 +54,7 @@ RDP_DISABLE_CLIPBOARD=true
 		FRONT_DOMAIN:          "desktop.example.com",
 		LDAP_USER_FILTER:      "(mail=%s)",
 		ACME_EMAIL:            "ops@example.com",
-		RDP_DISABLE_CLIPBOARD: "true",
+		DEBUG_CONNECTIONS:     "true",
 	}
 	for k, want := range cases {
 		if got := os.Getenv(k); got != want {
@@ -67,8 +67,8 @@ RDP_DISABLE_CLIPBOARD=true
 	if got := settings.Get(LISTEN_ADDR); got != ":8443" {
 		t.Fatalf("settings LISTEN_ADDR = %q, want :8443", got)
 	}
-	if !settings.GetBool(RDP_DISABLE_CLIPBOARD) {
-		t.Fatalf("settings RDP_DISABLE_CLIPBOARD = false, want true")
+	if !settings.GetBool(DEBUG_CONNECTIONS) {
+		t.Fatalf("settings DEBUG_CONNECTIONS = false, want true")
 	}
 }
 

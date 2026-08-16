@@ -122,9 +122,6 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetString(FRONT_DOMAIN, "Front domain to serve front page on HTTPS requests and also the prefix for vm names", "desktop.local.gd")
 	s.SetSecretString(SNI_HASH_SECRET, "Secret keying the HMAC that turns VM names into opaque SNI routing labels; auto-generated and persisted under the data root when empty", "")
 
-	s.SetBool(RDP_DISABLE_CLIPBOARD, "Strip clipboard (cliprdr) channel from RDP sessions so the gateway prevents clipboard redirection regardless of client/VM policy", false)
-	s.SetBool(RDP_DISABLE_DRIVES, "Strip drive redirection (rdpdr) channel from RDP sessions so the gateway prevents local drive mapping regardless of client/VM policy", false)
-
 	s.SetBool(DEBUG_CONNECTIONS, "Verbose debug logging of every accepted front connection and HTTP/WebSocket request (type, source address, method, path); use to trace connectivity", false)
 
 	s.setAuthDefaults()
@@ -480,8 +477,6 @@ const (
 	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
 	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
 	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
-	RDP_DISABLE_CLIPBOARD            = "RDP_DISABLE_CLIPBOARD"
-	RDP_DISABLE_DRIVES               = "RDP_DISABLE_DRIVES"
 	SNI_HASH_SECRET                  = "SNI_HASH_SECRET"
 	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"
 	BASE_IMAGE_DIR                   = "BASE_IMAGE_DIR"

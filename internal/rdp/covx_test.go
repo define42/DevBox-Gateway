@@ -6,7 +6,6 @@ import (
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/virt"
-	"encoding/binary"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -151,98 +150,6 @@ func TestCovxFindX224NegotiationSkipsWrongLengthThenFinds(t *testing.T) {
 	}
 	if neg.Result != x224.PROTOCOL_SSL {
 		t.Fatalf("expected PROTOCOL_SSL, got 0x%08x", neg.Result)
-	}
-}
-
-// covxCSNetCandidate builds a buffer holding a single CS_NET-looking header
-// with the given length/count and no channel data after it.
-func covxCSNetCandidate(length uint16, count uint32) []byte {
-	buf := make([]byte, 7, 15)
-	buf = append(buf, csNetTypeLow, csNetTypeHigh)
-	buf = binary.LittleEndian.AppendUint16(buf, length)
-	buf = binary.LittleEndian.AppendUint32(buf, count)
-	return buf
-}
-
-func TestCovxFindCSNetBlockEdgeCases(t *testing.T) {
-	tests := []struct {
-		name string
-		buf  []byte
-	}{
-		{"buffer shorter than minimum", make([]byte, 10)},
-		// length must equal 8 + 12*count (= 20 for one channel); 255 does not.
-		{"length count mismatch", covxCSNetCandidate(0xff, 1)},
-		// length matches the count but the block runs past the end of the buffer.
-		{"block truncated", covxCSNetCandidate(20, 1)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, _, ok := findCSNetBlock(tc.buf); ok {
-				t.Fatalf("expected findCSNetBlock to reject case %q", tc.name)
-			}
-		})
-	}
-}
-
-func TestCovxForwardMCSNoCSNetBlockForwardsUnchanged(t *testing.T) {
-	t.Setenv(config.RDP_DISABLE_CLIPBOARD, "true")
-	settings := config.NewSettingType(false)
-
-	client, clientPeer := net.Pipe()
-	backend, backendPeer := net.Pipe()
-	defer func() {
-		_ = client.Close()
-		_ = clientPeer.Close()
-		_ = backend.Close()
-		_ = backendPeer.Close()
-	}()
-
-	pdu := wrapTPKT(make([]byte, 16)) // valid TPKT, no CS_NET signature
-	go func() {
-		_, _ = clientPeer.Write(pdu)
-	}()
-	forwarded := make(chan []byte, 1)
-	go func() {
-		buf, err := readTPKT(backendPeer)
-		if err != nil {
-			forwarded <- nil
-			return
-		}
-		forwarded <- buf
-	}()
-
-	if !forwardClientMCSConnectInitial(client, backend, newChannelFilter(settings), settings) {
-		t.Fatal("expected forward to succeed for a PDU without CS_NET")
-	}
-	select {
-	case got := <-forwarded:
-		if len(got) != len(pdu) {
-			t.Fatalf("expected %d forwarded bytes, got %d", len(pdu), len(got))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("backend never received the forwarded PDU")
-	}
-}
-
-func TestCovxForwardMCSBackendWriteError(t *testing.T) {
-	t.Setenv(config.RDP_DISABLE_CLIPBOARD, "true")
-	settings := config.NewSettingType(false)
-
-	client, clientPeer := net.Pipe()
-	backend, backendPeer := net.Pipe()
-	_ = backend.Close()
-	_ = backendPeer.Close()
-	defer func() {
-		_ = client.Close()
-		_ = clientPeer.Close()
-	}()
-
-	go func() {
-		_, _ = clientPeer.Write(wrapTPKT(make([]byte, 16)))
-	}()
-
-	if forwardClientMCSConnectInitial(client, backend, newChannelFilter(settings), settings) {
-		t.Fatal("expected forward to fail when the backend connection is closed")
 	}
 }
 
@@ -422,50 +329,6 @@ func TestCovxAuthorizeRDPAccessWithoutGrant(t *testing.T) {
 	}
 }
 
-func TestCovxForwardMCSRewritesBlockedChannel(t *testing.T) {
-	t.Setenv(config.RDP_DISABLE_CLIPBOARD, "true")
-	settings := config.NewSettingType(false)
-
-	client, clientPeer := net.Pipe()
-	backend, backendPeer := net.Pipe()
-	defer func() {
-		_ = client.Close()
-		_ = clientPeer.Close()
-		_ = backend.Close()
-		_ = backendPeer.Close()
-	}()
-
-	pdu := buildCSNetPDU(t, []string{"cliprdr", "rdpsnd"})
-	go func() {
-		_, _ = clientPeer.Write(pdu)
-	}()
-	forwarded := make(chan []byte, 1)
-	go func() {
-		buf, err := readTPKT(backendPeer)
-		if err != nil {
-			forwarded <- nil
-			return
-		}
-		forwarded <- buf
-	}()
-
-	if !forwardClientMCSConnectInitial(client, backend, newChannelFilter(settings), settings) {
-		t.Fatal("expected forward to succeed while stripping channels")
-	}
-	select {
-	case got := <-forwarded:
-		offset, _, ok := findCSNetBlock(got)
-		if !ok {
-			t.Fatal("forwarded PDU lost its CS_NET block")
-		}
-		if name := channelNameAt(got, offset); strings.EqualFold(name, "cliprdr") {
-			t.Fatalf("clipboard channel was not stripped, got %q", name)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("backend never received the rewritten PDU")
-	}
-}
-
 func TestCovxResolveBackendAddrBranches(t *testing.T) {
 	stubVMIPs(t, map[string]string{"covxgood": "127.0.0.9", "covxempty": ""})
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
@@ -561,33 +424,6 @@ func TestCovxHandleRDPBackendDialRefused(t *testing.T) {
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
-
-	waitDone(t, done)
-}
-
-func TestCovxHandleRDPChannelFilterForwardFailure(t *testing.T) {
-	InitLogging()
-	name := covxUniqueName("filt")
-	backendHost := "127.0.0.73"
-	stubVMIPs(t, map[string]string{name: backendHost})
-	covxDefineOwnedDomain(t, name)
-	t.Setenv(config.RDP_DISABLE_CLIPBOARD, "true")
-
-	stopBackend := startTLSServingBackend(t, backendHost, func(tlsConn *tls.Conn) {
-		_, _ = readTPKT(tlsConn) // returns once the gateway tears the connection down
-	})
-	defer stopBackend()
-
-	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.183:5000", name)
-
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.183")
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
-	// Kill the raw front connection before sending the MCS Connect Initial so
-	// the channel-filter forward fails and HandleRDP tears everything down.
-	_ = client.Close()
-	_ = tlsClient.Close()
 
 	waitDone(t, done)
 }
