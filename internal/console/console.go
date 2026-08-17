@@ -158,6 +158,8 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			writeDashboardSerialSocketError(w, name, err)
 			return
 		}
+		// Opening the serial terminal counts as use for auto-shutdown.
+		virt.MarkVMUsed(name)
 		debugf("serial: libvirt console opened for vm %q; upgrading websocket", name)
 
 		dashboardSocketUpgrader := websocket.Upgrader{
@@ -236,6 +238,8 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			writeDashboardVNCSocketError(w, name, err)
 			return
 		}
+		// Opening noVNC counts as use for auto-shutdown.
+		virt.MarkVMUsed(name)
 		debugf("vnc: backend connected for vm %q (%s); upgrading websocket", name, vncConn.RemoteAddr())
 
 		dashboardSocketUpgrader := websocket.Upgrader{

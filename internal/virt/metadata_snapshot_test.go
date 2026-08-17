@@ -13,6 +13,7 @@ func TestLoadDomainMetadataSnapshotUsesOneInactiveXMLRead(t *testing.T) {
   <guest:guestuser xmlns:guest="urn:devboxgateway:domain:guestuser"> devbox </guest:guestuser>
   <image:baseimage xmlns:image="urn:devboxgateway:domain:baseimage"> ubuntu.qcow2 </image:baseimage>
   <created:createdat xmlns:created="urn:devboxgateway:domain:createdat"> 2026-08-15T12:00:00Z </created:createdat>
+  <used:lastused xmlns:used="urn:devboxgateway:domain:lastused"> 2026-08-16T09:30:00Z </used:lastused>
 </metadata></domain>`
 
 	calls := 0
@@ -36,6 +37,7 @@ func TestLoadDomainMetadataSnapshotUsesOneInactiveXMLRead(t *testing.T) {
 		GuestUser: "devbox",
 		BaseImage: "ubuntu.qcow2",
 		CreatedAt: "2026-08-15T12:00:00Z",
+		LastUsed:  "2026-08-16T09:30:00Z",
 	}
 	if metadata != want {
 		t.Fatalf("metadata = %+v, want %+v", metadata, want)

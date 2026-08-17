@@ -39,6 +39,34 @@ func TestNewSettingTypeDefaults(t *testing.T) {
 	if got := s.GetInt(MAX_VDI_PER_USER); got != DefaultMaxVDIPerUser {
 		t.Fatalf("expected default MAX_VDI_PER_USER=%d, got %d", DefaultMaxVDIPerUser, got)
 	}
+	if got := s.GetInt(VDI_AUTO_SHUTDOWN_HOURS); got != DefaultVDIAutoShutdownHours {
+		t.Fatalf("expected default VDI_AUTO_SHUTDOWN_HOURS=%d, got %d", DefaultVDIAutoShutdownHours, got)
+	}
+}
+
+func TestVDIAutoShutdownAfter(t *testing.T) {
+	if got := VDIAutoShutdownAfter(nil); got != 0 {
+		t.Fatalf("expected nil settings to disable auto-shutdown, got %v", got)
+	}
+
+	s := NewSettingType(false)
+	if got := VDIAutoShutdownAfter(s); got != 0 {
+		t.Fatalf("expected auto-shutdown disabled by default, got %v", got)
+	}
+
+	if err := s.OverwriteForTestInt(VDI_AUTO_SHUTDOWN_HOURS, 6); err != nil {
+		t.Fatalf("override VDI_AUTO_SHUTDOWN_HOURS: %v", err)
+	}
+	if got := VDIAutoShutdownAfter(s); got != 6*time.Hour {
+		t.Fatalf("expected 6h idle limit, got %v", got)
+	}
+
+	if err := s.OverwriteForTestInt(VDI_AUTO_SHUTDOWN_HOURS, -1); err != nil {
+		t.Fatalf("override VDI_AUTO_SHUTDOWN_HOURS: %v", err)
+	}
+	if got := VDIAutoShutdownAfter(s); got != 0 {
+		t.Fatalf("expected a negative setting to disable auto-shutdown, got %v", got)
+	}
 }
 
 func TestMaxVDIPerUserDefault(t *testing.T) {

@@ -139,6 +139,7 @@ func TestBuildDashboardRows(t *testing.T) {
 			Name:      "alice.vm",
 			Owner:     "alice",
 			GuestUser: "guest",
+			LastUsed:  " 2026-08-16T09:30:00Z ",
 			IP:        "192.0.2.10",
 			State:     "running",
 			MemoryMiB: 4096,
@@ -155,6 +156,9 @@ func TestBuildDashboardRows(t *testing.T) {
 	if row.DisplayName != "vm" {
 		t.Fatalf("expected display name to strip the owner prefix, got %q", row.DisplayName)
 	}
+	if row.LastUsed != "2026-08-16T09:30:00Z" {
+		t.Fatalf("expected trimmed last-used timestamp, got %q", row.LastUsed)
+	}
 	if row.User != "guest" {
 		t.Fatalf("expected user %q, got %q", "guest", row.User)
 	}
@@ -166,6 +170,25 @@ func TestBuildDashboardRows(t *testing.T) {
 	}
 	if row.RDPFilename != "alice.vm.rdp" {
 		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)
+	}
+}
+
+func TestDataResponseSerializesAutoShutdownHours(t *testing.T) {
+	enabled, err := json.Marshal(DataResponse{AutoShutdownHours: 6})
+	if err != nil {
+		t.Fatalf("marshal enabled response: %v", err)
+	}
+	if !strings.Contains(string(enabled), `"autoShutdownHours":6`) {
+		t.Fatalf("expected autoShutdownHours in payload, got %s", enabled)
+	}
+
+	// Disabled (0) is omitted; the dashboard treats the absent field as 0.
+	disabled, err := json.Marshal(DataResponse{})
+	if err != nil {
+		t.Fatalf("marshal disabled response: %v", err)
+	}
+	if strings.Contains(string(disabled), "autoShutdownHours") {
+		t.Fatalf("expected autoShutdownHours to be omitted when disabled, got %s", disabled)
 	}
 }
 

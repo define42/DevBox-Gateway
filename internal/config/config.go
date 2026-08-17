@@ -69,6 +69,10 @@ const (
 	// DefaultMaxVDIPerUser is the default maximum number of VDIs (VMs) each user
 	// may own at once. Override with MAX_VDI_PER_USER.
 	DefaultMaxVDIPerUser = 10
+	// DefaultVDIAutoShutdownHours is the default number of hours a running VDI
+	// may go unused before the gateway shuts it down. 0 disables auto-shutdown;
+	// override with VDI_AUTO_SHUTDOWN_HOURS.
+	DefaultVDIAutoShutdownHours = 0
 	// DefaultMaxConcurrentConnections is the default cap on simultaneously open
 	// front connections. Sized for ~100 active users: browsers hold up to 6
 	// HTTP/1.1 keep-alive connections each, and every dashboard, console, and
@@ -106,6 +110,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetInt(VM_VCPU_COUNT, "Number of virtual CPUs assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMVCPUCount)
 	s.SetInt(VM_MEMORY_MIB, "Memory in MiB assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMMemoryMiB)
 	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
+	s.SetInt(VDI_AUTO_SHUTDOWN_HOURS, "Shut down a running VDI after this many hours without use; a VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard. The guest is first asked to power off (ACPI) and is force-stopped if still running a few minutes later. Values <=0 disable auto-shutdown", DefaultVDIAutoShutdownHours)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously open front connections (RDP + HTTPS); connections beyond the cap are accepted and immediately closed (fail fast, logged) so clients see an error instead of hanging, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", DefaultMaxConcurrentConnections)
@@ -224,6 +229,20 @@ func MaxVDIPerUser(settings *SettingsType) int {
 		return 0
 	}
 	return limit
+}
+
+// VDIAutoShutdownAfter resolves how long a running VDI may go unused before
+// the gateway shuts it down, from VDI_AUTO_SHUTDOWN_HOURS. A missing or
+// non-positive setting disables auto-shutdown, reported as 0.
+func VDIAutoShutdownAfter(settings *SettingsType) time.Duration {
+	if settings == nil {
+		return 0
+	}
+	hours := settings.GetInt(VDI_AUTO_SHUTDOWN_HOURS)
+	if hours <= 0 {
+		return 0
+	}
+	return time.Duration(hours) * time.Hour
 }
 
 // VMDiskCapacityBytes resolves the virtual disk capacity, in bytes, for newly
@@ -478,6 +497,7 @@ const (
 	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
 	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
 	SNI_HASH_SECRET                  = "SNI_HASH_SECRET"
+	VDI_AUTO_SHUTDOWN_HOURS          = "VDI_AUTO_SHUTDOWN_HOURS"
 	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"
 	BASE_IMAGE_DIR                   = "BASE_IMAGE_DIR"
 	VM_DISK_SIZE_GB                  = "VM_DISK_SIZE_GB"

@@ -34,11 +34,17 @@ const (
 
 // VMInfo describes a VM entry shown in the dashboard and worker cache.
 type VMInfo struct {
-	Name           string
-	Owner          string
-	GuestUser      string
-	BaseImage      string
-	CreatedAt      string
+	Name      string
+	Owner     string
+	GuestUser string
+	BaseImage string
+	CreatedAt string
+	// LastUsed is the RFC3339 UTC timestamp of the VM's last recorded use. In
+	// the worker cache it holds the persisted metadata value from the sweep;
+	// GetVMs overlays the fresher in-memory registry before handing entries to
+	// callers, so touches (RDP/serial/noVNC clicks, starts) show up without
+	// waiting for a domain XML re-read.
+	LastUsed       string
 	State          string
 	MemoryMiB      int
 	VCPU           int
@@ -149,6 +155,7 @@ func domainVMInfoWithInventoryResolvers(
 		GuestUser:    metadata.GuestUser,
 		BaseImage:    metadata.BaseImage,
 		CreatedAt:    metadata.CreatedAt,
+		LastUsed:     metadata.LastUsed,
 		State:        formatState(state),
 		MemoryMiB:    mem,
 		VCPU:         vcpu,
@@ -402,17 +409,35 @@ func (s *SingletonWorker) invalidateVMSnapshot() {
 	s.setVMs(nil)
 }
 
-// GetVMs returns the cached VMs, optionally filtered by owner.
+// GetVMs returns the cached VMs, optionally filtered by owner. Each returned
+// entry's LastUsed is overlaid with the in-memory registry when it has a
+// fresher value: the cached snapshot carries the persisted metadata as of the
+// domain's first sweep, while the registry records every touch since. The
+// overlay happens on the returned copies only — the internal snapshot keeps
+// raw sweep data so its change detection is unaffected.
 func (s *SingletonWorker) GetVMs(user string) []VMInfo {
 	snapshot := s.snapshotVMs()
 
 	var filteredVMs []VMInfo
 	for _, vm := range snapshot {
 		if user == "" || vm.Owner == user {
+			if lastUsed, ok := vmLastUsed.get(vm.Name); ok {
+				vm.LastUsed = formatLastUsedTimestamp(lastUsed)
+			}
 			filteredVMs = append(filteredVMs, vm)
 		}
 	}
 	return filteredVMs
+}
+
+// NotifyVMDataChanged wakes the worker's subscribers so they take a fresh
+// user-filtered snapshot. The touch points call it (via MarkVMUsed) because a
+// last-used update changes what GetVMs returns without changing the underlying
+// sweep snapshot, so setVMs' own change detection would never fire for it.
+func (s *SingletonWorker) NotifyVMDataChanged() {
+	s.mu.Lock()
+	s.notifySubscribersLocked()
+	s.mu.Unlock()
 }
 
 // GetVMnames returns the cached VM names.

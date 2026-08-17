@@ -620,6 +620,8 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 			})
 			return
 		}
+		// The RDP connect click counts as use for auto-shutdown.
+		virt.MarkVMUsed(name)
 		dashboard.WriteRDPFile(w, settings, user.GetName(), name)
 	})
 }

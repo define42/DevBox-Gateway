@@ -13,6 +13,7 @@ const LOGIN_PATH = "/login";
 const state = {
     vms: [],
     filename: "rdpgw.rdp",
+    autoShutdownHours: 0,
     vmError: "",
     actionMessage: "",
     actionError: "",
@@ -46,6 +47,8 @@ const state = {
         user: "",
         baseImage: "",
         created: "",
+        lastUsed: "",
+        vmState: "",
     },
 };
 let loadInFlight = false;
@@ -75,6 +78,48 @@ function formatCreatedAt(createdAt) {
         return raw;
     }
     return parsed.toLocaleString();
+}
+// formatDurationShort renders a millisecond span as a compact human duration
+// ("3d 4h", "2h 15m", "45m"), rounding up to whole minutes so a countdown
+// never shows more time gone than actually is.
+function formatDurationShort(ms) {
+    const totalMinutes = Math.ceil(ms / 60000);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) {
+        return `${days}d ${hours}h`;
+    }
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    }
+    return `${Math.max(minutes, 1)}m`;
+}
+// formatAutoShutdown renders when the idle reaper will stop the VM: the
+// last-used time plus the configured VDI_AUTO_SHUTDOWN_HOURS limit. Only
+// running VMs are candidates, so anything else shows n/a; "imminent" means the
+// limit has already passed and the gateway is about to ask the guest to shut
+// down (force-stop follows a few minutes later if it does not).
+function formatAutoShutdown(lastUsed, vmState) {
+    if (state.autoShutdownHours <= 0) {
+        return "Disabled";
+    }
+    if (vmState.trim().toLowerCase() !== "running") {
+        return "n/a";
+    }
+    const raw = (lastUsed || "").trim();
+    if (raw === "") {
+        return "n/a";
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return "n/a";
+    }
+    const remainingMs = parsed.getTime() + state.autoShutdownHours * 3600000 - Date.now();
+    if (remainingMs <= 0) {
+        return "imminent";
+    }
+    return `in ${formatDurationShort(remainingMs)}`;
 }
 function clampCreationPercent(value) {
     if (!Number.isFinite(value)) {
@@ -197,7 +242,11 @@ function bootstrap() {
             <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Image</dt>
             <dd class="col-8 col-sm-9 mb-2 text-break" id="info-image"></dd>
             <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Created</dt>
-            <dd class="col-8 col-sm-9 mb-0" id="info-created"></dd>
+            <dd class="col-8 col-sm-9 mb-2" id="info-created"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Last used</dt>
+            <dd class="col-8 col-sm-9 mb-2" id="info-last-used"></dd>
+            <dt class="col-4 col-sm-3 text-body-secondary fw-normal">Auto-shutdown</dt>
+            <dd class="col-8 col-sm-9 mb-0" id="info-auto-shutdown"></dd>
           </dl>
         </div>
       </div>
@@ -294,6 +343,8 @@ function bootstrap() {
     const infoUser = root.querySelector("#info-user");
     const infoImage = root.querySelector("#info-image");
     const infoCreated = root.querySelector("#info-created");
+    const infoLastUsed = root.querySelector("#info-last-used");
+    const infoAutoShutdown = root.querySelector("#info-auto-shutdown");
     const infoClose = root.querySelector("#info-close");
     if (!form ||
         !input ||
@@ -337,6 +388,8 @@ function bootstrap() {
         !infoUser ||
         !infoImage ||
         !infoCreated ||
+        !infoLastUsed ||
+        !infoAutoShutdown ||
         !infoClose) {
         return;
     }
@@ -382,6 +435,8 @@ function bootstrap() {
     const infoUserEl = infoUser;
     const infoImageEl = infoImage;
     const infoCreatedEl = infoCreated;
+    const infoLastUsedEl = infoLastUsed;
+    const infoAutoShutdownEl = infoAutoShutdown;
     const infoCloseEl = infoClose;
     let terminalSocket = null;
     let terminalInstance = null;
@@ -534,8 +589,12 @@ function bootstrap() {
     }
     function applyDashboardData(data) {
         state.vms = data.vms || [];
+        // Serialized with omitempty, so an absent field means auto-shutdown is
+        // disabled (0), not "keep the previous value".
+        state.autoShutdownHours = typeof data.autoShutdownHours === "number" ? data.autoShutdownHours : 0;
         baseImages = data.baseImages || [];
         renderBaseImageOptions();
+        refreshOpenInfo();
         if (data.filename) {
             state.filename = data.filename;
         }
@@ -870,16 +929,38 @@ function bootstrap() {
         infoUserEl.textContent = state.info.user || "n/a";
         infoImageEl.textContent = state.info.baseImage || "n/a";
         infoCreatedEl.textContent = formatCreatedAt(state.info.created);
+        infoLastUsedEl.textContent = formatCreatedAt(state.info.lastUsed);
+        infoAutoShutdownEl.textContent = formatAutoShutdown(state.info.lastUsed, state.info.vmState);
     }
-    function openInfo(vm) {
+    function setInfoFromVM(vm) {
         const ipValue = (vm.ip || "").trim();
-        state.info.open = true;
         state.info.vmName = vm.name;
         state.info.vmDisplayName = vm.displayName || vm.name;
         state.info.ip = ipValue.toLowerCase() === "n/a" ? "" : ipValue;
         state.info.user = (vm.user || "").trim();
         state.info.baseImage = (vm.baseImage || "").trim();
         state.info.created = (vm.createdAt || "").trim();
+        state.info.lastUsed = (vm.lastUsed || "").trim();
+        state.info.vmState = (vm.state || "").trim();
+    }
+    function openInfo(vm) {
+        state.info.open = true;
+        setInfoFromVM(vm);
+        renderInfo();
+    }
+    // refreshOpenInfo re-reads the open popup's VM from a fresh dashboard
+    // snapshot so pushed updates (a state change, or a touch bumping the
+    // last-used time and its auto-shutdown countdown) appear without the user
+    // reopening the dialog. A VM that vanished from the list (deleted) keeps
+    // its last known values until the dialog is closed.
+    function refreshOpenInfo() {
+        if (!state.info.open) {
+            return;
+        }
+        const current = state.vms.find((vm) => (vm.name || "") === state.info.vmName);
+        if (current) {
+            setInfoFromVM(current);
+        }
         renderInfo();
     }
     function closeInfo() {
@@ -890,6 +971,8 @@ function bootstrap() {
         state.info.user = "";
         state.info.baseImage = "";
         state.info.created = "";
+        state.info.lastUsed = "";
+        state.info.vmState = "";
         renderInfo();
     }
     function closeTerminal() {
@@ -1760,6 +1843,14 @@ function bootstrap() {
     infoCloseEl.addEventListener("click", () => {
         closeInfo();
     });
+    // Keep the auto-shutdown countdown in the open Info dialog ticking even
+    // when no dashboard push arrives; renderInfo recomputes it from the
+    // last-used timestamp each time.
+    window.setInterval(() => {
+        if (state.info.open) {
+            renderInfo();
+        }
+    }, 30000);
     document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && state.info.open) {
             closeInfo();

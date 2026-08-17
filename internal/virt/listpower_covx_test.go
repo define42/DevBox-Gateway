@@ -22,6 +22,9 @@ func TestViocovConnectErrorsSurfaceFromHelpers(t *testing.T) {
 	if err := ShutdownVM("cvio-any"); err == nil {
 		t.Fatal("ShutdownVM: expected connect error")
 	}
+	if err := GracefulShutdownVM("cvio-any"); err == nil {
+		t.Fatal("GracefulShutdownVM: expected connect error")
+	}
 	if err := RestartVM("cvio-any"); err == nil {
 		t.Fatal("RestartVM: expected connect error")
 	}
@@ -44,6 +47,7 @@ func TestViocovPowerMissingDomain(t *testing.T) {
 	ops := map[string]func(string) error{
 		"start":    StartExistingVM,
 		"shutdown": ShutdownVM,
+		"graceful": GracefulShutdownVM,
 		"restart":  RestartVM,
 	}
 	for op, fn := range ops {
@@ -69,6 +73,10 @@ func TestViocovStartAndRestartSurfaceCreateFailure(t *testing.T) {
 	if err := ShutdownVM(name); err != nil {
 		t.Fatalf("ShutdownVM on inactive domain: %v", err)
 	}
+	// So is a graceful shutdown request.
+	if err := GracefulShutdownVM(name); err != nil {
+		t.Fatalf("GracefulShutdownVM on inactive domain: %v", err)
+	}
 }
 
 func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
@@ -88,6 +96,19 @@ func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 	}
 	if !active {
 		t.Fatal("expected domain to stay active after reboot request")
+	}
+	// The ACPI power-button request is delivered, but this firmware-only guest
+	// (SeaBIOS, no OS) ignores it and must stay running — exactly the case the
+	// auto-shutdown sweeper escalates on.
+	if err := GracefulShutdownVM(name); err != nil {
+		t.Fatalf("GracefulShutdownVM on active domain: %v", err)
+	}
+	active, err = dom.IsActive()
+	if err != nil {
+		t.Fatalf("check active after graceful shutdown request: %v", err)
+	}
+	if !active {
+		t.Fatal("expected firmware-only domain to ignore the ACPI power button")
 	}
 	if err := ShutdownVM(name); err != nil {
 		t.Fatalf("ShutdownVM: %v", err)

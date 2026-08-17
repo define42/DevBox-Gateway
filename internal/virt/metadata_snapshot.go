@@ -18,6 +18,12 @@ type domainMetadataSnapshot struct {
 	GuestUser string
 	BaseImage string
 	CreatedAt string
+	// LastUsed is the persisted last-used timestamp as of when this snapshot
+	// was cached. The gateway is its only writer and every write also updates
+	// the in-memory vmLastUsed registry, so readers wanting the current value
+	// overlay that registry on top (see SingletonWorker.GetVMs); the snapshot
+	// covers VMs not yet touched in this process lifetime.
+	LastUsed string
 }
 
 type domainMetadataSnapshotLoader func() (domainMetadataSnapshot, error)
@@ -85,11 +91,13 @@ type domainMetadataXMLContents struct {
 	GuestUser string
 	BaseImage string
 	CreatedAt string
+	LastUsed  string
 
 	ownerSeen     bool
 	guestUserSeen bool
 	baseImageSeen bool
 	createdAtSeen bool
+	lastUsedSeen  bool
 }
 
 type domainMetadataXMLTarget struct {
@@ -182,6 +190,12 @@ func (metadata *domainMetadataXMLContents) targetForXMLNamespace(namespace strin
 			seen:          &metadata.createdAtSeen,
 			expectedLocal: "createdat",
 		}
+	case domainLastUsedMetadataNamespace:
+		return &domainMetadataXMLTarget{
+			value:         &metadata.LastUsed,
+			seen:          &metadata.lastUsedSeen,
+			expectedLocal: "lastused",
+		}
 	default:
 		return nil
 	}
@@ -207,6 +221,7 @@ func parseDomainMetadataSnapshot(xmlDesc string) (domainMetadataSnapshot, error)
 		GuestUser: strings.TrimSpace(document.Metadata.GuestUser),
 		BaseImage: strings.TrimSpace(document.Metadata.BaseImage),
 		CreatedAt: strings.TrimSpace(document.Metadata.CreatedAt),
+		LastUsed:  strings.TrimSpace(document.Metadata.LastUsed),
 	}, nil
 }
 

@@ -83,6 +83,10 @@ type gatewayRuntime struct {
 	listener net.Listener
 	frontTLS *cert.TLSManager
 
+	// stopAutoShutdown stops the VDI auto-shutdown worker; nil when the
+	// feature is disabled or the worker was never started.
+	stopAutoShutdown func()
+
 	// done is closed when the accept loop exits; serveErr is written exactly
 	// once before that close, so it may be read only after done is observed
 	// closed. A non-nil serveErr means the loop died on a permanent Accept
@@ -93,6 +97,10 @@ type gatewayRuntime struct {
 
 func (g *gatewayRuntime) Close() error {
 	var errs []error
+
+	if g.stopAutoShutdown != nil {
+		g.stopAutoShutdown()
+	}
 
 	if g.listener != nil {
 		if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -176,6 +184,10 @@ func bootGateway() (*gatewayRuntime, error) {
 	if err := frontTLS.StartManaging(); err != nil {
 		log.Printf("%v; continuing with the fallback certificate", err)
 	}
+
+	// Started last so no bootGateway failure path has to unwind it; a no-op
+	// when VDI_AUTO_SHUTDOWN_HOURS is unset or non-positive.
+	runtime.stopAutoShutdown = virt.StartAutoShutdownWorker(settings)
 
 	return runtime, nil
 }

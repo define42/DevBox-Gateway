@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"libvirt.org/go/libvirt"
 )
@@ -74,36 +75,60 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		}
 	}()
 
-	if strings.TrimSpace(owner) != "" {
-		if err = setDomainOwnerMetadata(dom, owner); err != nil {
-			return fmt.Errorf("set owner metadata for %s: %w", name, err)
-		}
-	}
-
-	if strings.TrimSpace(guestUser) != "" {
-		if err = setDomainGuestUserMetadata(dom, guestUser); err != nil {
-			return fmt.Errorf("set guest user metadata for %s: %w", name, err)
-		}
-	}
-
-	if strings.TrimSpace(baseImage) != "" {
-		if err = setDomainBaseImageMetadata(dom, baseImage); err != nil {
-			return fmt.Errorf("set base image metadata for %s: %w", name, err)
-		}
-	}
-
-	// Record creation time once, when the domain is first defined. Starting or
-	// restarting an existing VM goes through dom.Create() elsewhere and never
-	// redefines the domain, so this timestamp is stable for the VM's lifetime.
-	if err = setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
-		return fmt.Errorf("set created-at metadata for %s: %w", name, err)
+	var lastUsedAt time.Time
+	lastUsedAt, err = applyNewDomainMetadata(dom, name, owner, guestUser, baseImage)
+	if err != nil {
+		return err
 	}
 
 	if err = dom.Create(); err != nil {
 		return err
 	}
 
+	vmLastUsed.set(name, lastUsedAt)
+
 	return nil
+}
+
+// applyNewDomainMetadata attaches the gateway metadata to a freshly defined
+// domain and returns the recorded last-used time. Owner, guest-user, and
+// base-image are optional and skipped when blank.
+func applyNewDomainMetadata(dom *libvirt.Domain, name, owner, guestUser, baseImage string) (time.Time, error) {
+	if strings.TrimSpace(owner) != "" {
+		if err := setDomainOwnerMetadata(dom, owner); err != nil {
+			return time.Time{}, fmt.Errorf("set owner metadata for %s: %w", name, err)
+		}
+	}
+
+	if strings.TrimSpace(guestUser) != "" {
+		if err := setDomainGuestUserMetadata(dom, guestUser); err != nil {
+			return time.Time{}, fmt.Errorf("set guest user metadata for %s: %w", name, err)
+		}
+	}
+
+	if strings.TrimSpace(baseImage) != "" {
+		if err := setDomainBaseImageMetadata(dom, baseImage); err != nil {
+			return time.Time{}, fmt.Errorf("set base image metadata for %s: %w", name, err)
+		}
+	}
+
+	// Creation counts as use for auto-shutdown, so a VDI that is created but
+	// never opened still gets a full idle window before being stopped. Written
+	// before created-at: created-at must stay the last metadata write, because
+	// the inventory cache treats it as the completion marker.
+	lastUsedAt := time.Now()
+	if err := setDomainLastUsedMetadata(dom, formatLastUsedTimestamp(lastUsedAt)); err != nil {
+		return time.Time{}, fmt.Errorf("set last-used metadata for %s: %w", name, err)
+	}
+
+	// Record creation time once, when the domain is first defined. Starting or
+	// restarting an existing VM goes through dom.Create() elsewhere and never
+	// redefines the domain, so this timestamp is stable for the VM's lifetime.
+	if err := setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
+		return time.Time{}, fmt.Errorf("set created-at metadata for %s: %w", name, err)
+	}
+
+	return lastUsedAt, nil
 }
 
 // undefinePartialDomain rolls back a domain that DomainDefineXML created but
@@ -671,6 +696,7 @@ func RemoveVM(name string, settings *config.SettingsType) error {
 	if err := RemoveVolumes(conn, poolName, name, seedIso); err != nil {
 		return err
 	}
+	vmLastUsed.remove(name)
 	// The VNC socket and serial PTY are libvirt-managed and removed with the
 	// destroyed domain; nothing for the gateway to clean up.
 	return nil

@@ -34,6 +34,10 @@ func viocovMetadataAccessors() []viocovMetadataAccess {
 			build: domainCreatedAtMetadataXML, set: setDomainCreatedAtMetadata, get: domainCreatedAt,
 		},
 		{
+			kind: "lastused", namespace: domainLastUsedMetadataNamespace, prefix: domainLastUsedMetadataPrefix,
+			build: domainLastUsedMetadataXML, set: setDomainLastUsedMetadata, get: domainLastUsed,
+		},
+		{
 			kind: "baseimage", namespace: domainBaseImageMetadataNamespace, prefix: domainBaseImageMetadataPrefix,
 			build: domainBaseImageMetadataXML, set: setDomainBaseImageMetadata, get: domainBaseImage,
 		},
