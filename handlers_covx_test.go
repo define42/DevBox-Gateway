@@ -323,7 +323,7 @@ func TestHcovRequestScheme(t *testing.T) {
 
 func TestHcovServeLoginStatusWriteFailure(t *testing.T) {
 	w := &hcovFailingResponseWriter{}
-	serveLoginStatus(w, "hcov", http.StatusOK)
+	serveLoginStatus(w, config.NewSettingType(false), "hcov", http.StatusOK)
 
 	if w.status != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, w.status)
@@ -448,7 +448,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.AddCookie(cookie)
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user, "hcovpass")
+		completeLogin(sessionManager, config.NewSettingType(false), w, r, user, "hcovpass")
 	}))
 	handler.ServeHTTP(rec, req)
 

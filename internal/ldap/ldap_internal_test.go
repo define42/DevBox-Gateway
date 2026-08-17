@@ -3,7 +3,10 @@ package ldap
 import (
 	"devboxgateway/internal/config"
 	"errors"
+	"reflect"
 	"testing"
+
+	"github.com/go-ldap/ldap/v3"
 )
 
 func TestAuthenticateAccessRejectsEmptyPassword(t *testing.T) {
@@ -67,5 +70,69 @@ func TestLoginIdentifierWithoutDomain(t *testing.T) {
 
 	if got := loginIdentifier("alice", settings); got != "alice" {
 		t.Fatalf("expected unmodified username, got %q", got)
+	}
+}
+
+func TestRequiredGroupsParsing(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"blank", "  ", nil},
+		{"single name", "vdi-users", []string{"vdi-users"}},
+		{"comma names", "vdi-users, admins", []string{"vdi-users", "admins"}},
+		{"semicolon names", "vdi-users; admins;", []string{"vdi-users", "admins"}},
+		{"single dn", "cn=vdi-users,ou=groups,dc=example,dc=com", []string{"cn=vdi-users,ou=groups,dc=example,dc=com"}},
+		{"semicolon dns", "cn=a,dc=x; cn=b,dc=y", []string{"cn=a,dc=x", "cn=b,dc=y"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.LDAP_REQUIRED_GROUPS, tc.raw)
+			settings := config.NewSettingType(false)
+
+			got := requiredGroups(settings)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("requiredGroups(%q) = %#v, want %#v", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMemberOfAny(t *testing.T) {
+	entry := &ldap.Entry{Attributes: []*ldap.EntryAttribute{{
+		Name:   "memberOf",
+		Values: []string{"cn=VDI-Users,ou=groups,dc=example,dc=com", "ou=team10_r,ou=groups,dc=glauth,dc=com"},
+	}}}
+
+	cases := []struct {
+		name   string
+		groups []string
+		want   bool
+	}{
+		{"full dn", []string{"cn=vdi-users,ou=groups,dc=example,dc=com"}, true},
+		{"bare name case-insensitive", []string{"vdi-users"}, true},
+		{"bare name ou-format", []string{"team10_r"}, true},
+		{"one of several", []string{"nope", "team10_r"}, true},
+		{"no match", []string{"other-group", "cn=other,dc=example,dc=com"}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := memberOfAny(entry, tc.groups); got != tc.want {
+				t.Fatalf("memberOfAny(entry, %#v) = %v, want %v", tc.groups, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMemberOfAnyWithoutMemberOfAttribute(t *testing.T) {
+	if memberOfAny(&ldap.Entry{}, []string{"vdi-users"}) {
+		t.Fatal("expected entry without memberOf to match no groups")
 	}
 }

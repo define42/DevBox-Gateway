@@ -1,6 +1,7 @@
 package main
 
 import (
+	"devboxgateway/internal/config"
 	"devboxgateway/internal/dashboard"
 	"devboxgateway/internal/session"
 	"devboxgateway/internal/types"
@@ -71,7 +72,7 @@ func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, w, r, user, "dogood")
+		completeLogin(sessionManager, config.NewSettingType(false), w, r, user, "dogood")
 		storedHash, ok := sessionManager.PasswordHashFromContext(r.Context())
 		if !ok {
 			t.Error("expected completeLogin to store the login password hash in the session")

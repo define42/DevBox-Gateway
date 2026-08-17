@@ -70,7 +70,9 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 		ldap.ScopeWholeSubtree,
 		ldap.NeverDerefAliases, 1, 0, false,
 		filter,
-		nil,
+		// memberOf is operational in some directories (e.g. OpenLDAP's memberof
+		// overlay) and only returned when requested explicitly.
+		[]string{"memberOf"},
 		nil,
 	)
 
@@ -82,7 +84,81 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 		return nil, fmt.Errorf("user %s not found", mail)
 	}
 
+	if groups := requiredGroups(settings); len(groups) > 0 && !memberOfAny(sr.Entries[0], groups) {
+		return nil, fmt.Errorf("user %s is not a member of any required group", mail)
+	}
+
 	return types.NewUser(username)
+}
+
+// requiredGroups parses LDAP_REQUIRED_GROUPS into a list of group DNs or bare
+// group names. When only ';' delimiters appear (or none), entries are split on
+// ';' so full DNs — which contain commas — survive intact; a list without any
+// ';' is split on ',' too, which suits bare group names. An empty setting
+// yields no groups, meaning everyone with a matching directory entry may log in.
+func requiredGroups(settings *config.SettingsType) []string {
+	raw := settings.Get(config.LDAP_REQUIRED_GROUPS)
+	separator := ";"
+	if !strings.Contains(raw, ";") && !strings.Contains(raw, "=") {
+		separator = ","
+	}
+	fields := strings.Split(raw, separator)
+	groups := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field = strings.TrimSpace(field); field != "" {
+			groups = append(groups, field)
+		}
+	}
+	return groups
+}
+
+// memberOfAny reports whether the entry's memberOf attribute contains at least
+// one of the required groups. Each required group may be a full group DN or a
+// bare group name, which is compared against the first RDN value of the
+// memberOf DN (e.g. "vdi-users" matches "cn=vdi-users,ou=groups,dc=..."). All
+// comparisons are case-insensitive per RFC 4517; nested group membership is
+// not resolved.
+func memberOfAny(entry *ldap.Entry, groups []string) bool {
+	for _, member := range entry.GetAttributeValues("memberOf") {
+		member = strings.TrimSpace(member)
+		name := firstRDNValue(member)
+		for _, group := range groups {
+			if strings.EqualFold(member, group) || (name != "" && strings.EqualFold(name, group)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RequiredGroupNames returns human-readable names of the groups listed in
+// LDAP_REQUIRED_GROUPS, for display on the login page: bare entries as-is, DN
+// entries reduced to their first RDN value ("cn=vdi-users,ou=groups,dc=..." →
+// "vdi-users"). Empty when LDAP is not configured or no groups are required.
+func RequiredGroupNames(settings *config.SettingsType) []string {
+	if !Configured(settings) {
+		return nil
+	}
+	groups := requiredGroups(settings)
+	names := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if name := firstRDNValue(group); name != "" {
+			group = name
+		}
+		names = append(names, group)
+	}
+	return names
+}
+
+// firstRDNValue extracts the value of the leading RDN of a DN ("vdi-users"
+// from "cn=vdi-users,ou=groups,dc=example,dc=com"), or "" if dn is not
+// parseable as a DN.
+func firstRDNValue(dn string) string {
+	parsed, err := ldap.ParseDN(dn)
+	if err != nil || len(parsed.RDNs) == 0 || len(parsed.RDNs[0].Attributes) == 0 {
+		return ""
+	}
+	return parsed.RDNs[0].Attributes[0].Value
 }
 
 func loginIdentifier(username string, settings *config.SettingsType) string {

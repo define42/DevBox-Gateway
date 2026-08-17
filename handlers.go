@@ -94,56 +94,56 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 
 		username, password, ok, err := extractCredentials(w, r)
 		if err != nil {
-			serveLogin(w, "Invalid form submission.")
+			serveLogin(w, settings, "Invalid form submission.")
 			return
 		}
 		if !ok {
-			serveLogin(w, "Missing credentials.")
+			serveLogin(w, settings, "Missing credentials.")
 			return
 		}
 
-		if rejectRateLimitedLogin(w, loginLimiter, "", r.RemoteAddr) {
+		if rejectRateLimitedLogin(w, settings, loginLimiter, "", r.RemoteAddr) {
 			return
 		}
 
 		username, err = validateLoginUsername(username)
 		if err != nil {
 			log.Printf("rejected login attempt: %v", err)
-			recordFailedLogin(w, loginLimiter, "", r.RemoteAddr, "Invalid credentials.")
+			recordFailedLogin(w, settings, loginLimiter, "", r.RemoteAddr, "Invalid credentials.")
 			return
 		}
 
-		if rejectRateLimitedLogin(w, loginLimiter, username, r.RemoteAddr) {
+		if rejectRateLimitedLogin(w, settings, loginLimiter, username, r.RemoteAddr) {
 			return
 		}
 
 		user, err := authenticateLogin(username, password, settings)
 		if err != nil {
 			log.Printf("auth failed for %s: %v", username, err)
-			recordFailedLogin(w, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
+			recordFailedLogin(w, settings, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
 			return
 		}
 
 		loginLimiter.RecordSuccess(username, r.RemoteAddr)
-		completeLogin(sessionManager, w, r, user, password)
+		completeLogin(sessionManager, settings, w, r, user, password)
 	}
 }
 
-func rejectRateLimitedLogin(w http.ResponseWriter, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
+func rejectRateLimitedLogin(w http.ResponseWriter, settings *config.SettingsType, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
 	retryAfter, limited := loginLimiter.RetryAfter(username, remoteAddr)
 	if !limited {
 		return false
 	}
-	serveLoginRateLimited(w, retryAfter)
+	serveLoginRateLimited(w, settings, retryAfter)
 	return true
 }
 
-func recordFailedLogin(w http.ResponseWriter, loginLimiter *loginRateLimiter, username, remoteAddr, message string) {
+func recordFailedLogin(w http.ResponseWriter, settings *config.SettingsType, loginLimiter *loginRateLimiter, username, remoteAddr, message string) {
 	if retryAfter := loginLimiter.RecordFailure(username, remoteAddr); retryAfter > 0 {
-		serveLoginRateLimited(w, retryAfter)
+		serveLoginRateLimited(w, settings, retryAfter)
 		return
 	}
-	serveLogin(w, message)
+	serveLogin(w, settings, message)
 }
 
 // authenticateLogin authorizes a login attempt. Local users (matched against the
@@ -167,29 +167,29 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 // in the in-memory session and later seeds the guest account when the user
 // creates a VDI; the cleartext is never retained. Hashing and session creation
 // share one failure path — both are server-side errors that abort the login.
-func completeLogin(sessionManager *session.Manager, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
+func completeLogin(sessionManager *session.Manager, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
 	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
 	if err == nil {
 		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
 	}
 	if err != nil {
 		log.Printf("login completion failed for %s: %v", user.GetName(), err)
-		serveLogin(w, "Login failed.")
+		serveLogin(w, settings, "Login failed.")
 		return
 	}
 	http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
 }
 
-func serveLogin(w http.ResponseWriter, message string) {
-	serveLoginStatus(w, message, http.StatusOK)
+func serveLogin(w http.ResponseWriter, settings *config.SettingsType, message string) {
+	serveLoginStatus(w, settings, message, http.StatusOK)
 }
 
-func serveLoginRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+func serveLoginRateLimited(w http.ResponseWriter, settings *config.SettingsType, retryAfter time.Duration) {
 	w.Header().Set("Retry-After", loginRetryAfterSeconds(retryAfter))
-	serveLoginStatus(w, loginLocked, http.StatusTooManyRequests)
+	serveLoginStatus(w, settings, loginLocked, http.StatusTooManyRequests)
 }
 
-func serveLoginStatus(w http.ResponseWriter, message string, status int) {
+func serveLoginStatus(w http.ResponseWriter, settings *config.SettingsType, message string, status int) {
 	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -197,9 +197,32 @@ func serveLoginStatus(w http.ResponseWriter, message string, status int) {
 	if message != "" {
 		errorHTML = `<div class="alert alert-danger mb-3" role="alert">` + html.EscapeString(message) + `</div>`
 	}
-	if _, err := fmt.Fprint(w, strings.Replace(loginHTML, "{{ERROR}}", errorHTML, 1)); err != nil {
+	page := strings.Replace(loginHTML, "{{ERROR}}", errorHTML, 1)
+	page = strings.Replace(page, "{{GROUPS}}", loginGroupsHTML(settings), 1)
+	if _, err := fmt.Fprint(w, page); err != nil {
 		log.Printf("serve login response: %v", err)
 	}
+}
+
+// loginGroupsHTML renders the informational box below the login form telling
+// users which directory groups grant access. Empty when LDAP_REQUIRED_GROUPS
+// is unset (or LDAP is not configured), so the box only appears when a group
+// requirement is actually enforced. Group names are HTML-escaped because they
+// come from operator configuration, not from request input.
+func loginGroupsHTML(settings *config.SettingsType) string {
+	names := ldap.RequiredGroupNames(settings)
+	if len(names) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="alert alert-info mt-4 mb-0" role="note"><div class="small fw-semibold mb-1"><i class="bi bi-people me-1" aria-hidden="true"></i>The following groups give access:</div><ul class="small mb-0 ps-4">`)
+	for _, name := range names {
+		b.WriteString("<li>")
+		b.WriteString(html.EscapeString(name))
+		b.WriteString("</li>")
+	}
+	b.WriteString("</ul></div>")
+	return b.String()
 }
 
 func setNoCacheHeaders(w http.ResponseWriter) {
@@ -208,8 +231,10 @@ func setNoCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Expires", expiresValue)
 }
 
-func handleLoginGet(w http.ResponseWriter, _ *http.Request) {
-	serveLogin(w, "")
+func handleLoginGet(settings *config.SettingsType) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		serveLogin(w, settings, "")
+	}
 }
 
 func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
@@ -344,7 +369,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 
 	router.Handle("/static/*", noCacheStaticFileServer())
 	router.Post("/login", handleLoginPost(sessionManager, settings, loginLimiter))
-	router.Get("/login", handleLoginGet)
+	router.Get("/login", handleLoginGet(settings))
 	router.Post("/logout", handleLogout(sessionManager))
 
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {

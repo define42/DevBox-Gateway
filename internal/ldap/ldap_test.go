@@ -118,6 +118,46 @@ func TestAuthenticateAccessUserNotFoundAfterBind(t *testing.T) {
 	}
 }
 
+func TestAuthenticateAccessRequiredGroupMember(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	ldapURL, cleanup := startGlauth(ctx, t)
+	defer cleanup()
+
+	applyLDAPSettings(t, ldapURL)
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "some-other-group, team10_r")
+	settings := config.NewSettingType(false)
+
+	user, err := AuthenticateAccess("johndoe", "dogood", settings)
+	if err != nil {
+		t.Fatalf("AuthenticateAccess(): %v", err)
+	}
+	if user == nil || user.GetName() != "johndoe" {
+		t.Fatalf("expected johndoe user, got %#v", user)
+	}
+}
+
+func TestAuthenticateAccessRequiredGroupNotMember(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	ldapURL, cleanup := startGlauth(ctx, t)
+	defer cleanup()
+
+	applyLDAPSettings(t, ldapURL)
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
+	settings := config.NewSettingType(false)
+
+	_, err := AuthenticateAccess("johndoe", "dogood", settings)
+	if err == nil {
+		t.Fatal("expected authentication to fail for user outside required groups")
+	}
+	if !strings.Contains(err.Error(), "not a member of any required group") {
+		t.Fatalf("expected group membership error, got %v", err)
+	}
+}
+
 func applyLDAPSettings(t *testing.T, ldapURL string) {
 	t.Helper()
 	t.Setenv(config.LDAP_URL, ldapURL)

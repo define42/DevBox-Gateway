@@ -159,6 +159,7 @@ func (s *SettingsType) setAuthDefaults() {
 	s.SetString(LDAP_URL, "LDAP server url", "ldaps://ldap:389")
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
+	s.SetString(LDAP_REQUIRED_GROUPS, "List of groups (bare names or full DNs, DNs must be ';'-delimited, bare names may use ',' too); when non-empty, LDAP login also requires the user's memberOf attribute to contain at least one listed group", "")
 	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
@@ -484,6 +485,7 @@ const (
 	LDAP_URL                         = "LDAP_URL"
 	LDAP_BASE_DN                     = "LDAP_BASE_DN"
 	LDAP_USER_FILTER                 = "LDAP_USER_FILTER"
+	LDAP_REQUIRED_GROUPS             = "LDAP_REQUIRED_GROUPS"
 	LDAP_USER_DOMAIN                 = "LDAP_USER_DOMAIN"
 	LDAP_STARTTLS                    = "LDAP_STARTTLS"
 	LDAP_SKIP_TLS_VERIFY             = "LDAP_SKIP_TLS_VERIFY"

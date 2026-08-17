@@ -344,6 +344,7 @@ file**, which keeps container and development overrides working.
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |
 | `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Domain appended to bare usernames before they are substituted into `LDAP_USER_FILTER`.            |
+| `LDAP_REQUIRED_GROUPS`    | _(empty)_                                                                                                        | Groups a user must belong to (any one of them) for LDAP login. Bare group names may be `,`- or `;`-delimited; full group DNs must be `;`-delimited because DNs contain commas. Matched case-insensitively against the user's `memberOf` attribute (full DN or its first RDN value). Empty allows every authenticated user. |
 | `LDAP_STARTTLS`           | `false`                                                                                                          | When `true`, upgrade plain LDAP connections with StartTLS.                                        |
 | `LDAP_SKIP_TLS_VERIFY`    | `false`                                                                                                          | When `true`, skip TLS certificate verification against the LDAP server.                           |
 | `LOCAL_USER_SHA256`       | _(empty)_                                                                                                        | `;`-delimited list of `sha256("username:password")` hex digests for local users authenticated without LDAP. Checked before LDAP. |
@@ -383,6 +384,31 @@ Prefer `ldaps://` or `LDAP_STARTTLS=true`. Certificate verification is on by
 default; only set `LDAP_SKIP_TLS_VERIFY=true` as a stopgap for a directory
 whose CA chain is not yet trusted (the bundled glauth container uses a
 self-signed certificate, which is why the Docker Compose dev setup sets it).
+
+To restrict login to members of specific directory groups, set
+`LDAP_REQUIRED_GROUPS`. A user is allowed when their `memberOf` attribute
+contains **at least one** of the listed groups; when the variable is empty,
+every user found by `LDAP_USER_FILTER` may log in. Entries can be bare group
+names or full group DNs:
+
+```bash
+# Bare names, ','- or ';'-delimited — matched against the group DN's first RDN
+# value (e.g. the cn), case-insensitively:
+LDAP_REQUIRED_GROUPS="vdi-users, admins"
+
+# Full DNs contain commas, so they must be ';'-delimited:
+LDAP_REQUIRED_GROUPS="cn=vdi-users,ou=groups,dc=example,dc=com;cn=admins,ou=groups,dc=example,dc=com"
+```
+
+When `LDAP_REQUIRED_GROUPS` is set, the login page shows an informational box
+below the sign-in form listing the groups that give access (full DNs are
+shortened to their first RDN value, e.g. the `cn`).
+
+Nested group membership is not resolved — the group must appear directly in
+the user's `memberOf`. Directories where `memberOf` is an operational
+attribute (e.g. OpenLDAP's `memberof` overlay) are supported; the gateway
+requests the attribute explicitly. Note that `LOCAL_USER_SHA256` users bypass
+LDAP entirely and are therefore not subject to this check.
 
 ### Local users
 

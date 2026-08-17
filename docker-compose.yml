@@ -15,6 +15,7 @@ services:
       - BASE_IMAGE_DIR=/data/baseimages
       - LDAP_SKIP_TLS_VERIFY=true
       - VDI_AUTO_SHUTDOWN_HOURS=2
+      - LDAP_REQUIRED_GROUPS=team10_r
     ports:
       - "443:443"
     volumes:

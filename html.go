@@ -39,6 +39,7 @@ const loginHTML = `<!doctype html>
               </div>
               <button class="btn btn-primary w-100" type="submit"><i class="bi bi-box-arrow-in-right me-1" aria-hidden="true"></i>Continue</button>
             </form>
+            {{GROUPS}}
           </div>
         </div>
       </div>

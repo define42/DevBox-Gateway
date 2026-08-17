@@ -95,7 +95,7 @@ func TestExtractCredentialsRejectsOversizedForm(t *testing.T) {
 
 func TestServeLogin(t *testing.T) {
 	rec := httptest.NewRecorder()
-	serveLogin(rec, "")
+	serveLogin(rec, config.NewSettingType(false), "")
 
 	res := rec.Result()
 	defer func() { _ = res.Body.Close() }()
@@ -120,11 +120,52 @@ func TestServeLogin(t *testing.T) {
 	if strings.Contains(body, "alert-danger") {
 		t.Fatal("expected no error alert when message is empty")
 	}
+	// No required-groups box without LDAP_REQUIRED_GROUPS, and no leftover placeholder
+	if strings.Contains(body, "groups give access") || strings.Contains(body, "{{GROUPS}}") {
+		t.Fatal("expected no groups box when LDAP_REQUIRED_GROUPS is unset")
+	}
+}
+
+func TestServeLoginShowsRequiredGroups(t *testing.T) {
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "cn=vdi-users,ou=groups,dc=example,dc=com;admins")
+	rec := httptest.NewRecorder()
+	serveLogin(rec, config.NewSettingType(false), "")
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "The following groups give access") {
+		t.Fatal("expected required-groups box on login page")
+	}
+	if !strings.Contains(body, "<li>vdi-users</li>") || !strings.Contains(body, "<li>admins</li>") {
+		t.Fatalf("expected friendly group names in groups box, got body %q", body)
+	}
+}
+
+func TestServeLoginHidesRequiredGroupsWithoutLDAP(t *testing.T) {
+	t.Setenv(config.LDAP_URL, "")
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "vdi-users")
+	rec := httptest.NewRecorder()
+	serveLogin(rec, config.NewSettingType(false), "")
+
+	if strings.Contains(rec.Body.String(), "groups give access") {
+		t.Fatal("expected no groups box when LDAP is not configured")
+	}
+}
+
+func TestLoginGroupsHTMLEscapesNames(t *testing.T) {
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "a<b>&c")
+	got := loginGroupsHTML(config.NewSettingType(false))
+
+	if strings.Contains(got, "<b>") {
+		t.Fatal("expected group name markup to be escaped")
+	}
+	if !strings.Contains(got, "a&lt;b&gt;&amp;c") {
+		t.Fatalf("expected escaped group name, got %q", got)
+	}
 }
 
 func TestServeLoginWithError(t *testing.T) {
 	rec := httptest.NewRecorder()
-	serveLogin(rec, "Bad credentials")
+	serveLogin(rec, config.NewSettingType(false), "Bad credentials")
 
 	body := rec.Body.String()
 	if !strings.Contains(body, "alert-danger") {
@@ -137,7 +178,7 @@ func TestServeLoginWithError(t *testing.T) {
 
 func TestServeLoginHTMLEscaping(t *testing.T) {
 	rec := httptest.NewRecorder()
-	serveLogin(rec, "<script>alert('xss')</script>")
+	serveLogin(rec, config.NewSettingType(false), "<script>alert('xss')</script>")
 
 	body := rec.Body.String()
 	if strings.Contains(body, "<script>") {
@@ -167,7 +208,7 @@ func TestHandleLoginGet(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 
-	handleLoginGet(rec, req)
+	handleLoginGet(config.NewSettingType(false))(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
