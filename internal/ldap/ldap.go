@@ -64,7 +64,7 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 	userFilter := settings.Get(config.LDAP_USER_FILTER)
 	baseDN := settings.Get(config.LDAP_BASE_DN)
 
-	filter := fmt.Sprintf(userFilter, mail)
+	filter := searchFilter(userFilter, mail)
 	searchReq := ldap.NewSearchRequest(
 		baseDN,
 		ldap.ScopeWholeSubtree,
@@ -159,6 +159,14 @@ func firstRDNValue(dn string) string {
 		return ""
 	}
 	return parsed.RDNs[0].Attributes[0].Value
+}
+
+// searchFilter builds the user search filter from the configured
+// LDAP_USER_FILTER template, escaping the identifier per RFC 4515 so special
+// characters (* ( ) \ NUL) cannot change the filter's structure, regardless of
+// what validation upstream callers apply to the username.
+func searchFilter(template, identifier string) string {
+	return fmt.Sprintf(template, ldap.EscapeFilter(identifier))
 }
 
 func loginIdentifier(username string, settings *config.SettingsType) string {

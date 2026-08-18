@@ -73,6 +73,27 @@ func TestLoginIdentifierWithoutDomain(t *testing.T) {
 	}
 }
 
+func TestSearchFilterEscapesIdentifier(t *testing.T) {
+	cases := []struct {
+		name       string
+		identifier string
+		want       string
+	}{
+		{"plain", "alice@example.test", "(mail=alice@example.test)"},
+		{"wildcard", "*", `(mail=\2a)`},
+		{"filter injection", "*)(uid=*", `(mail=\2a\29\28uid=\2a)`},
+		{"backslash", `a\b`, `(mail=a\5cb)`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := searchFilter("(mail=%s)", tc.identifier); got != tc.want {
+				t.Fatalf("searchFilter(%q) = %q, want %q", tc.identifier, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRequiredGroupsParsing(t *testing.T) {
 	cases := []struct {
 		name string
