@@ -162,7 +162,7 @@ func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ..
 	}
 	defer func() {
 		if err := pool.Free(); err != nil {
-			fmt.Println("pool free error:", err)
+			log.Printf("pool free error: %v", err)
 		}
 	}()
 
@@ -249,7 +249,7 @@ func copyAndResizeVolumeWithSettingsAndProgress(
 	}
 	defer func() {
 		if err := pool.Free(); err != nil {
-			fmt.Println("pool free error:", err)
+			log.Printf("pool free error: %v", err)
 		}
 	}()
 

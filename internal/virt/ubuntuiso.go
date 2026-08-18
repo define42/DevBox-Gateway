@@ -3,7 +3,7 @@ package virt
 import (
 	"bytes"
 	"devboxgateway/internal/config"
-	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"libvirt.org/go/libvirt"
@@ -42,7 +42,7 @@ func createUbuntuSeedISOToPoolWithSettings(
 	}
 	defer func() {
 		if err := pool.Free(); err != nil {
-			fmt.Println("pool free error:", err)
+			log.Printf("pool free error: %v", err)
 		}
 	}()
 
