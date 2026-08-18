@@ -171,12 +171,10 @@ func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ..
 		if err != nil {
 			continue
 		}
-		defer func() {
-			_ = vol.Free()
-		}()
-
-		if err := vol.Delete(0); err != nil {
-			return fmt.Errorf("delete volume %s: %w", volumeName, err)
+		deleteErr := vol.Delete(0)
+		_ = vol.Free()
+		if deleteErr != nil {
+			return fmt.Errorf("delete volume %s: %w", volumeName, deleteErr)
 		}
 		log.Printf("Deleted volume %s", volumeName)
 	}
