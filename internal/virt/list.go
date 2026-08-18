@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"math"
 	"net"
 	"slices"
 	"strings"
@@ -255,8 +256,11 @@ func domainResources(d libvirt.Domain) (int, int) {
 		log.Printf("domain info: %v", err)
 		return 0, 0
 	}
-	memMiB := int(info.Memory / 1024)
-	return memMiB, int(info.NrVirtCpu)
+	memMiB := info.Memory / 1024
+	if memMiB > math.MaxInt {
+		memMiB = math.MaxInt
+	}
+	return int(memMiB), int(info.NrVirtCpu)
 }
 
 // domainDiskGB returns the primary disk's used and total sizes in GiB. total is

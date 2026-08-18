@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"runtime"
 
@@ -197,7 +198,13 @@ func addPackageFiles(rpm *rpmpack.RPM, o options) error {
 	if err != nil {
 		return err
 	}
-	mtime := uint32(st.ModTime().Unix()) //nolint:gosec // RPM MTime is uint32 epoch seconds; build-artifact mtimes are positive and well within range.
+	// RPM MTime is uint32 epoch seconds; reject mtimes outside that range instead
+	// of silently wrapping them into the package metadata.
+	unixMTime := st.ModTime().Unix()
+	if unixMTime < 0 || unixMTime > math.MaxUint32 {
+		return fmt.Errorf("binary mtime %v is outside the RPM uint32 epoch range", st.ModTime())
+	}
+	mtime := uint32(unixMTime)
 
 	for _, f := range packageFiles(o) {
 		body, err := os.ReadFile(f.src)

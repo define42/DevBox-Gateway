@@ -229,14 +229,15 @@ func findServerSelectedProtocol(tpktPayload []byte) (uint32, bool) {
 
 // buildServerCCFSelectTLS returns a minimal X.224 Connection Confirm payload selecting TLS (PROTOCOL_SSL).
 func buildServerCCFSelectTLS() []byte {
+	const negotiationLength = 8 // an RDP_NEG_RSP structure is always 8 bytes
 	neg := x224.Negotiation{
 		Type:   x224.TYPE_RDP_NEG_RSP,
 		Flag:   0,
-		Length: 8,
+		Length: negotiationLength,
 		Result: x224.PROTOCOL_SSL,
 	}
 
-	li := uint8(6 + neg.Length) // CC header (6) + negotiation (8)
+	li := uint8(6 + negotiationLength) // CC header (6) + negotiation (8)
 	payload := make([]byte, 0, int(li)+1)
 	payload = append(payload,
 		li,
@@ -265,7 +266,7 @@ func buildClientCRQSelectTLS() []byte {
 	pdu.ProtocolNeg.Flag = 0
 	pdu.ProtocolNeg.Length = 8
 	pdu.ProtocolNeg.Result = x224.PROTOCOL_SSL
-	pdu.Len = uint8(len(pdu.Serialize()) - 1)
+	pdu.Len = uint8(len(pdu.Serialize()) - 1) // #nosec G115 -- fixed-size X.224 CRQ PDU, well under 255 bytes
 	return pdu.Serialize()
 }
 
@@ -556,6 +557,9 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 var backendSessionCache = tls.NewLRUClientSessionCache(0)
 
 func backendTLSConfig(sni string) *tls.Config {
+	// #nosec G402 -- the backend is a gateway-managed VM addressed via its own VM
+	// lookup (never an attacker-chosen host), and per-VM RDP certs are self-signed,
+	// so there is no chain or hostname to verify.
 	backendTLSCfg := &tls.Config{
 		InsecureSkipVerify: true, // ignore backend cert chain + hostname
 		MinVersion:         tls.VersionTLS12,

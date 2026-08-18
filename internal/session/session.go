@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -490,8 +491,8 @@ func (m *Manager) EnforceClientIP(next http.Handler) http.Handler {
 		if ok && sess.User != nil {
 			canonicalIP, ipOK := CanonicalClientIP(r.RemoteAddr)
 			if !ipOK || canonicalIP != sess.ClientIP {
-				log.Printf("session client IP changed for user %q (bound=%q now=%q): forcing re-login",
-					sess.User.GetName(), sess.ClientIP, canonicalIP)
+				log.Printf("session client IP changed for user %s (bound=%s now=%s): forcing re-login",
+					strconv.Quote(sess.User.GetName()), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
 				if err := m.Destroy(r.Context()); err != nil {
 					log.Printf("destroy roamed session for user %q failed: %v", sess.User.GetName(), err)
 				}

@@ -498,6 +498,7 @@ func ensureStoragePool(conn *libvirt.Connect, storagePoolName, storagePoolPath s
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G301 -- libvirt's qemu user must traverse the pool path to reach VM disks, so it cannot be group/other-restricted.
 	if err := os.MkdirAll(storagePoolPath, 0o755); err != nil {
 		return nil, fmt.Errorf("create storage pool path %s: %w", storagePoolPath, err)
 	}
@@ -732,6 +733,9 @@ func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageV
 		_ = stream.Free()
 	}()
 
+	if srcSize < 0 {
+		return fmt.Errorf("source image %s reports negative size %d", sourceImagePath, srcSize)
+	}
 	if err := vol.Upload(stream, 0, uint64(srcSize), 0); err != nil {
 		return fmt.Errorf("start upload: %w", err)
 	}
@@ -755,7 +759,7 @@ func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageV
 }
 
 func openSourceImage(sourceImagePath string) (*os.File, int64, error) {
-	src, err := os.Open(sourceImagePath)
+	src, err := os.Open(sourceImagePath) // #nosec G304 -- a gateway-resolved image below the operator-configured image/base-image directories, not a request-supplied path
 	if err != nil {
 		return nil, 0, fmt.Errorf("open source image: %w", err)
 	}

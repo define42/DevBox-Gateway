@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,7 +120,7 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 
 		user, err := authenticateLogin(username, password, settings)
 		if err != nil {
-			log.Printf("auth failed for %s: %v", username, err)
+			log.Printf("auth failed for %s: %v", strconv.Quote(username), err)
 			recordFailedLogin(w, settings, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
 			return
 		}
@@ -173,7 +174,7 @@ func completeLogin(sessionManager *session.Manager, settings *config.SettingsTyp
 		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
 	}
 	if err != nil {
-		log.Printf("login completion failed for %s: %v", user.GetName(), err)
+		log.Printf("login completion failed for %s: %v", strconv.Quote(user.GetName()), err)
 		serveLogin(w, settings, "Login failed.")
 		return
 	}
@@ -308,8 +309,9 @@ func debugConnectionLogger(next http.Handler) http.Handler {
 		if forwardedFor == "" {
 			forwardedFor = "-"
 		}
-		log.Printf("debug-conn: %s from %s host=%q %s %s (forwarded-for=%s)",
-			kind, r.RemoteAddr, r.Host, r.Method, r.URL.Path, forwardedFor)
+		log.Printf("debug-conn: %s from %s host=%s %s %s (forwarded-for=%s)",
+			kind, strconv.Quote(r.RemoteAddr), strconv.Quote(r.Host), strconv.Quote(r.Method),
+			strconv.Quote(r.URL.Path), strconv.Quote(forwardedFor))
 		next.ServeHTTP(w, r)
 	})
 }

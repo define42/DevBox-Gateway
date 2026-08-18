@@ -63,6 +63,9 @@ jobs:
       - name: Lint
         run: make lint
 
+      - name: Security scan (gosec)
+        run: make gosec
+
       - name: Run tests with coverage
         run: |
           export LIBVIRT_VOLUME_MODE=0666

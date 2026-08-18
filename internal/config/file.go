@@ -40,7 +40,7 @@ func FilePath() string {
 // Call this before NewSettingType so the parsed values feed the normal
 // environment-backed setting resolution.
 func LoadConfigFile(path string) error {
-	f, err := os.Open(path) //nolint:gosec // path is an operator-provided config file location.
+	f, err := os.Open(path) // #nosec G304 -- path is an operator-provided config file location.
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil

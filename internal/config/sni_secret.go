@@ -50,7 +50,7 @@ func EnsureSNIHashSecret(settings *SettingsType) error {
 func loadOrCreateSNIHashSecret(dataRoot string) (string, error) {
 	path := filepath.Join(dataRoot, sniHashSecretFile)
 
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil { // #nosec G304 -- fixed filename below the operator-configured data root
 		if secret := strings.TrimSpace(string(data)); secret != "" {
 			return secret, nil
 		}
@@ -64,6 +64,7 @@ func loadOrCreateSNIHashSecret(dataRoot string) (string, error) {
 	}
 	secret := hex.EncodeToString(buf)
 
+	// #nosec G301 -- the data root is traversed by libvirt/qemu (VM images and sockets live below it); the secret file itself is 0600.
 	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 		return "", fmt.Errorf("create data root %s: %w", dataRoot, err)
 	}

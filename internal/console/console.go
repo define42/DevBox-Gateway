@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,7 +37,7 @@ func SetDebugLogging(enabled bool) {
 
 func debugf(format string, args ...any) {
 	if debugLogging.Load() {
-		log.Printf("console-debug: "+format, args...)
+		log.Printf("console-debug: "+format, args...) // #nosec G706 -- DEBUG_CONNECTIONS-only diagnostics; call sites %q-escape request-derived values
 	}
 }
 
@@ -127,7 +128,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
-			log.Printf("reject serial console websocket from %s: no authenticated session", r.RemoteAddr)
+			log.Printf("reject serial console websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
 			return
 		}
@@ -169,7 +170,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("serial", name, w), r, nil)
 		if err != nil {
 			_ = console.Close()
-			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
+			log.Printf("upgrade dashboard websocket for vm %s failed: %v", strconv.Quote(name), err)
 			return
 		}
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
@@ -191,16 +192,16 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err error) {
 	switch {
 	case errors.Is(err, virt.ErrSerialConsoleNotRunning):
-		log.Printf("reject serial console for vm %q: VM is not running", name)
+		log.Printf("reject serial console for vm %s: VM is not running", strconv.Quote(name))
 		http.Error(w, "VM must be running for terminal access.", http.StatusConflict)
 	case errors.Is(err, virt.ErrSerialConsoleNotConfigured):
-		log.Printf("reject serial console for vm %q: no serial console device configured", name)
+		log.Printf("reject serial console for vm %s: no serial console device configured", strconv.Quote(name))
 		http.Error(w, "Serial terminal is not available for this VM.", http.StatusConflict)
 	case errors.Is(err, virt.ErrSerialConsoleNotReady):
-		log.Printf("reject serial console for vm %q: console not ready yet", name)
+		log.Printf("reject serial console for vm %s: console not ready yet", strconv.Quote(name))
 		http.Error(w, "Serial terminal is not ready yet.", http.StatusConflict)
 	default:
-		log.Printf("open serial console for vm %q failed: %v", name, err)
+		log.Printf("open serial console for vm %s failed: %v", strconv.Quote(name), err)
 		http.Error(w, "Failed to open serial terminal.", http.StatusInternalServerError)
 	}
 }
@@ -210,7 +211,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
-			log.Printf("reject VNC websocket from %s: no authenticated session", r.RemoteAddr)
+			log.Printf("reject VNC websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
 			return
 		}
@@ -249,7 +250,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("vnc", name, w), r, nil)
 		if err != nil {
 			_ = vncConn.Close()
-			log.Printf("upgrade dashboard websocket for vm %q failed: %v", name, err)
+			log.Printf("upgrade dashboard websocket for vm %s failed: %v", strconv.Quote(name), err)
 			return
 		}
 		debugf("vnc: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
@@ -297,7 +298,7 @@ func HandleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
-			log.Printf("reject dashboard websocket from %s: no authenticated session", r.RemoteAddr)
+			log.Printf("reject dashboard websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
 			return
 		}
@@ -474,39 +475,39 @@ func openDashboardVNCSocket(name string) (net.Conn, error) {
 func writeDashboardVNCSocketError(w http.ResponseWriter, name string, err error) {
 	switch {
 	case errors.Is(err, virt.ErrVNCNotRunning):
-		log.Printf("reject VNC for vm %q: VM is not running", name)
+		log.Printf("reject VNC for vm %s: VM is not running", strconv.Quote(name))
 		http.Error(w, "VM must be running for VNC access.", http.StatusConflict)
 	case errors.Is(err, virt.ErrVNCNotConfigured):
-		log.Printf("reject VNC for vm %q: no VNC graphics device configured", name)
+		log.Printf("reject VNC for vm %s: no VNC graphics device configured", strconv.Quote(name))
 		http.Error(w, "VNC is not available for this VM.", http.StatusConflict)
 	case errors.Is(err, virt.ErrVNCNotReady):
-		log.Printf("reject VNC for vm %q: VNC socket not ready yet", name)
+		log.Printf("reject VNC for vm %s: VNC socket not ready yet", strconv.Quote(name))
 		http.Error(w, "VNC is not ready yet.", http.StatusConflict)
 	default:
-		log.Printf("open VNC for vm %q failed: %v", name, err)
+		log.Printf("open VNC for vm %s failed: %v", strconv.Quote(name), err)
 		http.Error(w, "Failed to open VNC session.", http.StatusInternalServerError)
 	}
 }
 
 func writeDashboardConsoleOwnershipError(w http.ResponseWriter, name, username string, err error) {
 	if err != nil {
-		log.Printf("verify terminal access for user %q vm %q failed: %v", username, name, err)
+		log.Printf("verify terminal access for user %s vm %s failed: %v", strconv.Quote(username), strconv.Quote(name), err)
 		http.Error(w, "Unable to verify VM ownership.", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("user %q attempted to access terminal for vm %q not owned by them", username, name)
+	log.Printf("user %s attempted to access terminal for vm %s not owned by them", strconv.Quote(username), strconv.Quote(name))
 	http.Error(w, "You do not have permission to access this VM terminal.", http.StatusForbidden)
 }
 
 func writeDashboardVNCOwnershipError(w http.ResponseWriter, name, username string, err error) {
 	if err != nil {
-		log.Printf("verify VNC access for user %q vm %q failed: %v", username, name, err)
+		log.Printf("verify VNC access for user %s vm %s failed: %v", strconv.Quote(username), strconv.Quote(name), err)
 		http.Error(w, "Unable to verify VM ownership.", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("user %q attempted to access VNC for vm %q not owned by them", username, name)
+	log.Printf("user %s attempted to access VNC for vm %s not owned by them", strconv.Quote(username), strconv.Quote(name))
 	http.Error(w, "You do not have permission to access this VM VNC session.", http.StatusForbidden)
 }
 
@@ -515,8 +516,8 @@ func writeDashboardVNCOwnershipError(w http.ResponseWriter, name, username strin
 // only Interrupts (to unblock both goroutines) and frees the session via Close
 // after both have returned.
 func bridgeSerialConsole(name string, ws *websocket.Conn, console *virt.SerialConsole) {
-	log.Printf("dashboard serial websocket for vm %q established; bridging to console", name)
-	defer log.Printf("dashboard serial websocket for vm %q closed", name)
+	log.Printf("dashboard serial websocket for vm %s established; bridging to console", strconv.Quote(name))
+	defer log.Printf("dashboard serial websocket for vm %s closed", strconv.Quote(name))
 
 	configureWebsocketKeepalive(ws, serialReadLimit)
 
@@ -570,7 +571,7 @@ func pumpConsoleToWebsocket(name string, ws *websocket.Conn, console *virt.Seria
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) && !isExpectedConsoleClose(err) {
-				log.Printf("dashboard terminal recv for vm %q ended: %v", name, err)
+				log.Printf("dashboard terminal recv for vm %s ended: %v", strconv.Quote(name), err)
 			}
 			return
 		}
@@ -611,9 +612,9 @@ func sendAllToConsole(console *virt.SerialConsole, payload []byte) error {
 }
 
 func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn net.Conn) {
-	log.Printf("dashboard %s websocket for vm %q established; bridging to backend", channel, name)
+	log.Printf("dashboard %s websocket for vm %s established; bridging to backend", channel, strconv.Quote(name))
 	defer func() {
-		log.Printf("dashboard %s websocket for vm %q closed", channel, name)
+		log.Printf("dashboard %s websocket for vm %s closed", channel, strconv.Quote(name))
 		_ = ws.Close()
 		_ = backendConn.Close()
 	}()
@@ -645,7 +646,7 @@ func bridgeDashboardSocket(channel, name string, ws *websocket.Conn, backendConn
 	}()
 
 	if err := <-errCh; err != nil && !isExpectedConsoleClose(err) {
-		log.Printf("dashboard %s bridge for vm %q ended with error: %v", channel, name, err)
+		log.Printf("dashboard %s bridge for vm %s ended with error: %v", channel, strconv.Quote(name), err)
 	}
 }
 
