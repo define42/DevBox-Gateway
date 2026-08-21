@@ -163,22 +163,27 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 }
 
 // completeLogin establishes the authenticated session for a user whose
-// credentials have just been verified. The password is digested right away so
-// only its salted sha512_crypt hash outlives this request: the hash is stored
-// in the in-memory session and later seeds the guest account when the user
-// creates a VDI; the cleartext is never retained. Hashing and session creation
-// share one failure path — both are server-side errors that abort the login.
+// credentials have just been verified. Any session-establishment failure is a
+// server-side error that aborts the login.
 func completeLogin(sessionManager *session.Manager, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
-	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
-	if err == nil {
-		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
-	}
-	if err != nil {
+	if err := establishSession(r.Context(), sessionManager, user, r.RemoteAddr, password); err != nil {
 		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
 		serveLogin(w, settings, "Login failed.")
 		return
 	}
 	http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
+}
+
+// establishSession digests the password and creates the session. The password
+// is digested right away so only its salted sha512_crypt hash outlives this
+// request: the hash is stored in the in-memory session and later seeds the
+// guest account when the user creates a VDI; the cleartext is never retained.
+func establishSession(ctx context.Context, sessionManager *session.Manager, user *types.User, remoteAddr, password string) error {
+	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
+	if err != nil {
+		return err
+	}
+	return sessionManager.CreateSession(ctx, user, remoteAddr, loginPasswordHash)
 }
 
 func serveLogin(w http.ResponseWriter, settings *config.SettingsType, message string) {

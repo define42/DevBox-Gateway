@@ -52,6 +52,19 @@ func ListBaseImages(settings *config.SettingsType) ([]string, error) {
 	return names, nil
 }
 
+// isBareFileName reports whether name is a plain file name that can only refer
+// to an entry directly inside a directory: not "." or "..", no path separators,
+// and identical to its own filepath.Base.
+func isBareFileName(name string) bool {
+	if name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	return name == filepath.Base(name)
+}
+
 // resolveBaseImagePath validates the user-selected base image name and returns
 // its absolute path. The name must be a bare file name (no path separators or
 // "."/"..") and must match one of the images currently in the base-image
@@ -62,7 +75,7 @@ func resolveBaseImagePath(settings *config.SettingsType, selected string) (strin
 	if selected == "" {
 		return "", fmt.Errorf("base image is required")
 	}
-	if selected != filepath.Base(selected) || selected == "." || selected == ".." || strings.ContainsAny(selected, `/\`) {
+	if !isBareFileName(selected) {
 		return "", fmt.Errorf("invalid base image %q", selected)
 	}
 

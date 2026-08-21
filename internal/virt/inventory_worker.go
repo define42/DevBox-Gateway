@@ -145,12 +145,13 @@ func (s *SingletonWorker) VMs(user string) []VMInfo {
 
 	var filteredVMs []VMInfo
 	for _, vm := range snapshot {
-		if user == "" || vm.Owner == user {
-			if lastUsed, ok := vmLastUsed.get(vm.Name); ok {
-				vm.LastUsed = formatLastUsedTimestamp(lastUsed)
-			}
-			filteredVMs = append(filteredVMs, vm)
+		if user != "" && vm.Owner != user {
+			continue
 		}
+		if lastUsed, ok := vmLastUsed.get(vm.Name); ok {
+			vm.LastUsed = formatLastUsedTimestamp(lastUsed)
+		}
+		filteredVMs = append(filteredVMs, vm)
 	}
 	return filteredVMs
 }

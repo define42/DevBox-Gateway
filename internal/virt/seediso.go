@@ -125,16 +125,10 @@ func CreateSeedISO(userDataDoc *SeedUserData, metaDataDoc *SeedMetaData, network
 }
 
 func seedISOYAMLBytes[T any](name string, doc *T, required bool, prefix string) ([]byte, error) {
-	if doc == nil {
+	if doc == nil || isZeroSeedDoc(*doc) {
 		if required {
 			return nil, fmt.Errorf("%s is required", name)
 		}
-		return nil, nil
-	}
-	if required && isZeroSeedDoc(*doc) {
-		return nil, fmt.Errorf("%s is required", name)
-	}
-	if !required && isZeroSeedDoc(*doc) {
 		return nil, nil
 	}
 
