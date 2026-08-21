@@ -20,6 +20,11 @@ import (
 // authoritative backstop guaranteeing the bypass cannot reappear via any caller.
 var ErrEmptyPassword = errors.New("password must not be empty")
 
+// ErrEmptyIdentifier rejects a login that cannot produce an LDAP bind
+// identifier. Without this guard, skipping an empty identifier would leave the
+// connection anonymous and allow the subsequent search to run without a bind.
+var ErrEmptyIdentifier = errors.New("ldap login identifier must not be empty")
+
 // Configured reports whether an LDAP directory is configured. When LDAP_URL is
 // empty the gateway runs in local-users-only mode (see internal/localauth) and
 // callers should skip LDAP entirely rather than attempt a dial.
@@ -35,30 +40,20 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 		return nil, ErrEmptyPassword
 	}
 
+	mail := loginIdentifier(username, settings)
+	if mail == "" {
+		return nil, ErrEmptyIdentifier
+	}
+
 	conn, err := dialLDAP(settings)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
 
-	mail := loginIdentifier(username, settings)
-
 	// Bind as the user using only the mail/UPN form.
-	bindIDs := []string{mail}
-
-	var bindErr error
-	for _, id := range bindIDs {
-		if id == "" {
-			continue
-		}
-		if err := conn.Bind(id, password); err == nil {
-			bindErr = nil
-			break
-		}
-		bindErr = err
-	}
-	if bindErr != nil {
-		return nil, fmt.Errorf("ldap bind failed: %w", bindErr)
+	if err := conn.Bind(mail, password); err != nil {
+		return nil, fmt.Errorf("ldap bind failed: %w", err)
 	}
 
 	userFilter := settings.Get(config.LDAP_USER_FILTER)

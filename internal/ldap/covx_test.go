@@ -3,7 +3,6 @@ package ldap
 import (
 	"devboxgateway/internal/config"
 	"net"
-	"strings"
 	"testing"
 )
 
@@ -65,27 +64,5 @@ func TestAuthenticateAccessDialFailure(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("expected dial error for unreachable LDAP server")
-	}
-}
-
-func TestAuthenticateAccessSkipsEmptyBindID(t *testing.T) {
-	addr := startClosingLDAPListener(t)
-	t.Setenv(config.LDAP_URL, "ldap://"+addr)
-	t.Setenv(config.LDAP_STARTTLS, "false")
-	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettingType(false)
-
-	// An empty username with no mail domain yields an empty bind identifier,
-	// so the bind loop skips it entirely and the search runs on the still
-	// unauthenticated connection, which the fake server has already closed.
-	user, err := AuthenticateAccess("", "covxpassword", settings)
-	if user != nil {
-		t.Fatalf("expected no user, got %#v", user)
-	}
-	if err == nil {
-		t.Fatal("expected search on a closed connection to fail")
-	}
-	if !strings.Contains(err.Error(), "ldap search") {
-		t.Fatalf("expected ldap search error, got %v", err)
 	}
 }

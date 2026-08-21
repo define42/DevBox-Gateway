@@ -25,6 +25,22 @@ func TestAuthenticateAccessRejectsEmptyPassword(t *testing.T) {
 	}
 }
 
+func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
+	// Point at a reserved, non-resolvable host to verify the identifier is
+	// rejected before any LDAP connection is attempted.
+	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
+	t.Setenv(config.LDAP_USER_DOMAIN, "")
+	settings := config.NewSettingType(false)
+
+	user, err := AuthenticateAccess("", "nonempty-password", settings)
+	if user != nil {
+		t.Fatalf("expected no user for empty identifier, got %#v", user)
+	}
+	if !errors.Is(err, ErrEmptyIdentifier) {
+		t.Fatalf("expected ErrEmptyIdentifier, got %v", err)
+	}
+}
+
 func TestConfigured(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "ldaps://ldap:389")
 	if !Configured(config.NewSettingType(false)) {
