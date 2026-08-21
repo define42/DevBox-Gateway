@@ -68,7 +68,7 @@ func (sweep *domainMetadataCacheSweep) load(
 		return domainMetadataSnapshot{}, err
 	}
 
-	// startVM writes CreatedAt last, after all optional metadata setters have
+	// StartVM writes CreatedAt last, after all optional metadata setters have
 	// completed. It is therefore the completion marker. Owner, GuestUser, and
 	// BaseImage may legitimately be blank and do not prevent caching.
 	if domainUUID != "" && strings.TrimSpace(metadata.CreatedAt) != "" {

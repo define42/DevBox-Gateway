@@ -2,7 +2,6 @@ package main
 
 import (
 	"devboxgateway/internal/config"
-	dashboard "devboxgateway/internal/dashboard"
 	"devboxgateway/internal/hash"
 	"devboxgateway/internal/types"
 	"devboxgateway/internal/virt"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	dashboard "devboxgateway/internal/dashboard"
 )
 
 const dashboardVMTestTimeout = 30 * time.Second
@@ -65,7 +66,12 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 		t.Fatalf("create user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(vmShortName, user, "", testGuestPasswordHash, testBaseImageName, settings)
+	vmName, err := virt.BootNewVM(virt.VMCreateRequest{
+		Name:         vmShortName,
+		Owner:        user,
+		PasswordHash: testGuestPasswordHash,
+		BaseImage:    testBaseImageName,
+	}, settings)
 	if err != nil {
 		t.Fatalf("boot VM %s: %v", vmShortName, err)
 	}

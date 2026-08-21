@@ -56,7 +56,13 @@ func TestVbtcovStartVMRejectsInvalidDomainName(t *testing.T) {
 	// any capability checks, so this fails identically with and without KVM and
 	// never defines a domain.
 	name := fmt.Sprintf("cvbt/invalid-%d", time.Now().UnixNano())
-	err := StartVM(name, "cvbt-seed.iso", "cvbt-unused-pool", 1, 512)
+	err := StartVM(VMStartConfig{
+		Name:            name,
+		SeedISO:         "cvbt-seed.iso",
+		StoragePoolName: "cvbt-unused-pool",
+		VCPU:            1,
+		MemoryMiB:       512,
+	})
 	vbtcovRequireErrContains(t, err, "cannot contain", "StartVM with slash in domain name")
 }
 
@@ -64,22 +70,22 @@ func TestVbtcovBootNewVMEarlyValidation(t *testing.T) {
 	user := vbtcovNewUser(t, "cvbtvaliduser")
 
 	t.Run("nil owner", func(t *testing.T) {
-		_, err := BootNewVM("vm", nil, "", testGuestPasswordHash, "img.img", nil)
+		_, err := BootNewVM(VMCreateRequest{Name: "vm", PasswordHash: testGuestPasswordHash, BaseImage: "img.img"}, nil)
 		vbtcovRequireErrContains(t, err, "vm owner is required", "BootNewVM without owner")
 	})
 
 	t.Run("invalid hostname", func(t *testing.T) {
-		_, err := BootNewVM("Bad_Name!", user, "", testGuestPasswordHash, "img.img", nil)
+		_, err := BootNewVM(VMCreateRequest{Name: "Bad_Name!", Owner: user, PasswordHash: testGuestPasswordHash, BaseImage: "img.img"}, nil)
 		vbtcovRequireErrContains(t, err, "vm name", "BootNewVM with invalid hostname")
 	})
 
 	t.Run("missing guest password hash", func(t *testing.T) {
-		_, err := BootNewVM("goodname", user, "", "", "img.img", nil)
+		_, err := BootNewVM(VMCreateRequest{Name: "goodname", Owner: user, BaseImage: "img.img"}, nil)
 		vbtcovRequireErrContains(t, err, "guest password hash is required", "BootNewVM without guest password hash")
 	})
 
 	t.Run("cleartext guest password rejected", func(t *testing.T) {
-		_, err := BootNewVM("goodname", user, "", "not-a-hash", "img.img", nil)
+		_, err := BootNewVM(VMCreateRequest{Name: "goodname", Owner: user, PasswordHash: "not-a-hash", BaseImage: "img.img"}, nil)
 		vbtcovRequireErrContains(t, err, "sha512_crypt", "BootNewVM with cleartext guest password")
 	})
 }
@@ -91,7 +97,7 @@ func TestVbtcovBootNewVMStoragePoolFailure(t *testing.T) {
 
 	// All request validation and base-image resolution succeed; the boot then
 	// fails while ensuring the storage pool, before any domain is defined.
-	_, err := BootNewVM("poolfail", user, "", testGuestPasswordHash, imageName, settings)
+	_, err := BootNewVM(VMCreateRequest{Name: "poolfail", Owner: user, PasswordHash: testGuestPasswordHash, BaseImage: imageName}, settings)
 	vbtcovRequireErrContains(t, err, "failed to ensure storage pool", "BootNewVM with file-blocked pool path")
 }
 
@@ -260,7 +266,15 @@ func TestVbtcovProvisionBootVolumesCopyFailure(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	source := vbtcovWriteTinyFile(t, "base.img")
 
-	err := provisionBootVolumes(conn, nil, uniquePoolName("cvbt-nopool"), "cvbt-vm", "cvbt-vm_seed.iso", "host", "guest", "$6$hash", source)
+	err := provisionBootVolumes(conn, nil, vmProvisionSpec{
+		poolName:      uniquePoolName("cvbt-nopool"),
+		vmName:        "cvbt-vm",
+		seedISO:       "cvbt-vm_seed.iso",
+		hostname:      "host",
+		guestUsername: "guest",
+		passwordHash:  "$6$hash",
+		baseImagePath: source,
+	}, nil)
 	vbtcovRequireErrContains(t, err, "failed to copy and resize base image", "provisionBootVolumes into missing pool")
 }
 
@@ -286,7 +300,15 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 	_ = vol.Free()
 
 	source := vbtcovWriteTinyFile(t, "base.img")
-	err = provisionBootVolumes(conn, settings, poolName, vmName, seedIso, "host", "guest", "$6$hash", source)
+	err = provisionBootVolumes(conn, settings, vmProvisionSpec{
+		poolName:      poolName,
+		vmName:        vmName,
+		seedISO:       seedIso,
+		hostname:      "host",
+		guestUsername: "guest",
+		passwordHash:  "$6$hash",
+		baseImagePath: source,
+	}, nil)
 	vbtcovRequireErrContains(t, err, "failed to create seed ISO", "provisionBootVolumes with occupied seed ISO name")
 }
 
@@ -316,7 +338,15 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedIso) })
 
 	source := vbtcovWriteTinyFile(t, "base.img")
-	if err := provisionBootVolumes(conn, settings, poolName, vmName, seedIso, "cvbt-host", "cvbtguest", "$6$hash", source); err != nil {
+	if err := provisionBootVolumes(conn, settings, vmProvisionSpec{
+		poolName:      poolName,
+		vmName:        vmName,
+		seedISO:       seedIso,
+		hostname:      "cvbt-host",
+		guestUsername: "cvbtguest",
+		passwordHash:  "$6$hash",
+		baseImagePath: source,
+	}, nil); err != nil {
 		t.Fatalf("provisionBootVolumes: %v", err)
 	}
 

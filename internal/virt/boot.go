@@ -29,17 +29,25 @@ func reportDiskCopyProgress(report DiskCopyProgressFunc, copiedBytes, totalBytes
 	report(copiedBytes, totalBytes)
 }
 
-// StartVM defines and starts a VM without attaching owner metadata.
-func StartVM(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, "", "", "", vcpu, memoryMiB)
+// VMStartConfig describes the domain define-and-start step of a VM boot: the
+// volumes to attach, the operator-defined sizing, and the gateway metadata to
+// record on the new domain.
+type VMStartConfig struct {
+	Name            string // domain (VDI) name
+	SeedISO         string // cloud-init seed volume name in the storage pool
+	StoragePoolName string
+	VCPU            int
+	MemoryMiB       int
+
+	// Gateway metadata attached to the new domain; each field is optional and
+	// skipped when blank.
+	Owner     string // owning gateway user
+	GuestUser string // login account provisioned inside the guest
+	BaseImage string // image library file name the disk was cloned from
 }
 
-// StartVMWithOwner defines and starts a VM while attaching owner, guest-user, and base-image metadata.
-func StartVMWithOwner(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) error {
-	return startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage, vcpu, memoryMiB)
-}
-
-func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string, vcpu int, memoryMiB int) (err error) {
+// StartVM defines and starts a VM, attaching the configured gateway metadata.
+func StartVM(cfg VMStartConfig) (err error) {
 	conn, err := connectLibvirt()
 	if err != nil {
 		return err
@@ -50,7 +58,7 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 
 	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
 	// owns no console sockets.
-	dom, err := conn.DomainDefineXML(UbuntuDomain(name, seedIso, storagePoolName, vcpu, memoryMiB))
+	dom, err := conn.DomainDefineXML(UbuntuDomain(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB))
 	if err != nil {
 		return err
 	}
@@ -71,12 +79,12 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 	// valid.
 	defer func() {
 		if err != nil {
-			undefinePartialDomain(dom, name)
+			undefinePartialDomain(dom, cfg.Name)
 		}
 	}()
 
 	var lastUsedAt time.Time
-	lastUsedAt, err = applyNewDomainMetadata(dom, name, owner, guestUser, baseImage)
+	lastUsedAt, err = applyNewDomainMetadata(dom, cfg)
 	if err != nil {
 		return err
 	}
@@ -85,7 +93,7 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 		return err
 	}
 
-	vmLastUsed.set(name, lastUsedAt)
+	vmLastUsed.set(cfg.Name, lastUsedAt)
 
 	return nil
 }
@@ -93,22 +101,22 @@ func startVM(name, seedIso, storagePoolName, owner, guestUser, baseImage string,
 // applyNewDomainMetadata attaches the gateway metadata to a freshly defined
 // domain and returns the recorded last-used time. Owner, guest-user, and
 // base-image are optional and skipped when blank.
-func applyNewDomainMetadata(dom *libvirt.Domain, name, owner, guestUser, baseImage string) (time.Time, error) {
-	if strings.TrimSpace(owner) != "" {
-		if err := setDomainOwnerMetadata(dom, owner); err != nil {
-			return time.Time{}, fmt.Errorf("set owner metadata for %s: %w", name, err)
+func applyNewDomainMetadata(dom *libvirt.Domain, cfg VMStartConfig) (time.Time, error) {
+	if strings.TrimSpace(cfg.Owner) != "" {
+		if err := setDomainOwnerMetadata(dom, cfg.Owner); err != nil {
+			return time.Time{}, fmt.Errorf("set owner metadata for %s: %w", cfg.Name, err)
 		}
 	}
 
-	if strings.TrimSpace(guestUser) != "" {
-		if err := setDomainGuestUserMetadata(dom, guestUser); err != nil {
-			return time.Time{}, fmt.Errorf("set guest user metadata for %s: %w", name, err)
+	if strings.TrimSpace(cfg.GuestUser) != "" {
+		if err := setDomainGuestUserMetadata(dom, cfg.GuestUser); err != nil {
+			return time.Time{}, fmt.Errorf("set guest user metadata for %s: %w", cfg.Name, err)
 		}
 	}
 
-	if strings.TrimSpace(baseImage) != "" {
-		if err := setDomainBaseImageMetadata(dom, baseImage); err != nil {
-			return time.Time{}, fmt.Errorf("set base image metadata for %s: %w", name, err)
+	if strings.TrimSpace(cfg.BaseImage) != "" {
+		if err := setDomainBaseImageMetadata(dom, cfg.BaseImage); err != nil {
+			return time.Time{}, fmt.Errorf("set base image metadata for %s: %w", cfg.Name, err)
 		}
 	}
 
@@ -118,14 +126,14 @@ func applyNewDomainMetadata(dom *libvirt.Domain, name, owner, guestUser, baseIma
 	// the inventory cache treats it as the completion marker.
 	lastUsedAt := time.Now()
 	if err := setDomainLastUsedMetadata(dom, formatLastUsedTimestamp(lastUsedAt)); err != nil {
-		return time.Time{}, fmt.Errorf("set last-used metadata for %s: %w", name, err)
+		return time.Time{}, fmt.Errorf("set last-used metadata for %s: %w", cfg.Name, err)
 	}
 
 	// Record creation time once, when the domain is first defined. Starting or
 	// restarting an existing VM goes through dom.Create() elsewhere and never
 	// redefines the domain, so this timestamp is stable for the VM's lifetime.
 	if err := setDomainCreatedAtMetadata(dom, nowCreatedAtTimestamp()); err != nil {
-		return time.Time{}, fmt.Errorf("set created-at metadata for %s: %w", name, err)
+		return time.Time{}, fmt.Errorf("set created-at metadata for %s: %w", cfg.Name, err)
 	}
 
 	return lastUsedAt, nil
@@ -309,7 +317,7 @@ var ErrVMLimitReached = errors.New("vm limit reached")
 
 // vmCreationMu guards inflightVMCreations, which tracks creations that have
 // reserved a MAX_VDI_PER_USER slot but not yet persisted owner metadata (which
-// only happens inside StartVMWithOwner, late in BootNewVM). Counting existing
+// only happens inside StartVM, late in BootNewVM). Counting existing
 // domains alone would let two concurrent creates for the same user both pass
 // the check before either domain exists; reserving a slot under the mutex and
 // holding it until BootNewVM returns closes that race. The mutex is only ever
@@ -322,7 +330,7 @@ var (
 
 // vmNameLocks serializes create and remove operations per VDI name. BootNewVM
 // checks the name is free (ensureVMNameAvailable) and only defines the domain
-// much later (StartVMWithOwner); between those two steps it destroys any
+// much later (StartVM); between those two steps it destroys any
 // leftover artifacts and writes a fresh disk and cloud-init seed (guest user +
 // password hash). Without a per-name lock, two concurrent BootNewVM calls for
 // the same name could both pass the availability check and then race through
@@ -580,94 +588,173 @@ func resolveGuestCredentials(user *types.User, guestUsername, guestPasswordHash 
 	return guestUsername, guestPasswordHash, nil
 }
 
-// BootNewVM creates or recreates a VM for the user and starts it with owner metadata.
-// The resulting VM (VDI) name is always "<username>-<hostname>", enforced via
-// vmname.Compose; an invalid owner or hostname is rejected before anything is created.
-// guestUsername is the login account provisioned inside the guest (and used for RDP);
-// it falls back to the owning user's name when empty. guestPasswordHash is the salted
-// sha512_crypt ($6$) digest of that account's password — the hash of the owner's
-// gateway login password stored in the session at login — and is required; cleartext
-// passwords are never accepted here.
-// baseImage is the file name of the base image to clone, selected from the
-// configured image library; it is validated against that library before use.
-// CPU and memory are operator-defined only (VM_VCPU_COUNT / VM_MEMORY_MIB):
-// they are resolved from settings here so no caller can pass user-chosen values.
-func BootNewVM(name string, user *types.User, guestUsername, guestPasswordHash, baseImage string, settings *config.SettingsType) (vmName string, err error) {
-	return BootNewVMWithProgress(name, user, guestUsername, guestPasswordHash, baseImage, settings, nil)
+// VMCreateRequest carries the user-supplied inputs for creating a VDI. CPU,
+// memory, and disk size are deliberately absent: VM resources are
+// operator-defined only (VM_VCPU_COUNT / VM_MEMORY_MIB) and resolved from
+// settings during preparation, so no caller can pass user-chosen values.
+type VMCreateRequest struct {
+	// Name is the requested hostname. The resulting VM (VDI) name is always
+	// "<username>-<hostname>", enforced via vmname.Compose; an invalid owner
+	// or hostname is rejected before anything is created.
+	Name string
+	// Owner is the gateway user the VM belongs to; required.
+	Owner *types.User
+	// GuestUsername is the login account provisioned inside the guest (and
+	// used for RDP); it falls back to Owner's name when empty.
+	GuestUsername string
+	// PasswordHash is the salted sha512_crypt ($6$) digest of the guest
+	// account's password — the hash of the owner's gateway login password
+	// stored in the session at login — and is required; cleartext passwords
+	// are never accepted here.
+	PasswordHash string
+	// BaseImage is the file name of the base image to clone, selected from the
+	// configured image library; it is validated against that library before use.
+	BaseImage string
+}
+
+// vmProvisionSpec is the resolved provisioning plan a VMCreateRequest turns
+// into during preparation: every field is validated or operator-configured, so
+// the locked provision/start phase handles no raw user input.
+type vmProvisionSpec struct {
+	vmName        string // composed "<username>-<hostname>" VDI name
+	hostname      string // requested guest hostname (the request's short name)
+	seedISO       string // cloud-init seed volume name
+	owner         string // owning user's name
+	guestUsername string // guest login account
+	passwordHash  string // sha512_crypt digest for the guest account
+	baseImage     string // image library file name (recorded as metadata)
+	baseImagePath string // resolved absolute path of the base image
+	poolName      string
+	poolPath      string
+	vcpu          int
+	memoryMiB     int
+}
+
+// startConfig returns the domain define-and-start step of the plan.
+func (s vmProvisionSpec) startConfig() VMStartConfig {
+	return VMStartConfig{
+		Name:            s.vmName,
+		SeedISO:         s.seedISO,
+		StoragePoolName: s.poolName,
+		VCPU:            s.vcpu,
+		MemoryMiB:       s.memoryMiB,
+		Owner:           s.owner,
+		GuestUser:       s.guestUsername,
+		BaseImage:       s.baseImage,
+	}
+}
+
+// prepareVMCreation validates the request and resolves everything the boot
+// needs that does not require libvirt: the composed VDI name, the guest
+// credentials, operator-defined CPU/memory, the base image path, and the
+// storage pool. It takes no locks and reserves nothing. On error the returned
+// spec still carries the composed VDI name when composition succeeded, so
+// callers can report which VM the failure was about.
+func prepareVMCreation(req VMCreateRequest, settings *config.SettingsType) (vmProvisionSpec, error) {
+	var spec vmProvisionSpec
+	if req.Owner == nil {
+		return spec, fmt.Errorf("vm owner is required")
+	}
+	spec.owner = req.Owner.GetName()
+	spec.hostname = strings.TrimSpace(req.Name)
+
+	// Enforce the VDI naming invariant ("<username>-<hostname>") at the single
+	// construction point so no caller can bypass it.
+	vmName, err := vmname.Compose(spec.owner, spec.hostname)
+	if err != nil {
+		return spec, err
+	}
+	spec.vmName = vmName
+	spec.seedISO = vmName + "_seed.iso"
+
+	spec.guestUsername, spec.passwordHash, err = resolveGuestCredentials(req.Owner, req.GuestUsername, req.PasswordHash)
+	if err != nil {
+		return spec, err
+	}
+
+	spec.vcpu = config.VMVCPUCount(settings)
+	spec.memoryMiB = config.VMMemoryMiB(settings)
+
+	// Validate the selected base image against the library and resolve it to an
+	// absolute path (the single path-traversal guard) before anything is created.
+	spec.baseImage = req.BaseImage
+	spec.baseImagePath, err = resolveBaseImagePath(settings, req.BaseImage)
+	if err != nil {
+		return spec, err
+	}
+
+	spec.poolName, spec.poolPath = storagePoolConfig(settings)
+	return spec, nil
+}
+
+// BootNewVM creates or recreates a VM for the requesting user and starts it
+// with owner metadata. Preparation (prepareVMCreation) validates the request
+// and resolves the provisioning plan without locks; the per-name locked phase
+// (provisionAndStartVM) then provisions storage and starts the domain.
+func BootNewVM(req VMCreateRequest, settings *config.SettingsType) (vmName string, err error) {
+	return BootNewVMWithProgress(req, settings, nil)
 }
 
 // BootNewVMWithProgress behaves like BootNewVM and synchronously reports the
 // selected base image's disk-copy byte progress. A nil callback disables
 // reporting. The callback is observational: callers should return promptly and
 // must not call back into VM create/remove operations.
-func BootNewVMWithProgress(name string, user *types.User, guestUsername, guestPasswordHash, baseImage string, settings *config.SettingsType, report DiskCopyProgressFunc) (vmName string, err error) {
-	if user == nil {
-		return "", fmt.Errorf("vm owner is required")
-	}
-	name = strings.TrimSpace(name)
-	// Enforce the VDI naming invariant ("<username>-<hostname>") at the single
-	// construction point so no caller can bypass it.
-	vmName, err = vmname.Compose(user.GetName(), name)
+func BootNewVMWithProgress(req VMCreateRequest, settings *config.SettingsType, report DiskCopyProgressFunc) (vmName string, err error) {
+	spec, err := prepareVMCreation(req, settings)
 	if err != nil {
-		return "", err
+		return spec.vmName, err
 	}
-
-	guestUsername, cloudInitPasswordHash, err := resolveGuestCredentials(user, guestUsername, guestPasswordHash)
-	if err != nil {
-		return vmName, err
-	}
-
-	vcpu := config.VMVCPUCount(settings)
-	memoryMiB := config.VMMemoryMiB(settings)
-
-	// Validate the selected base image against the library and resolve it to an
-	// absolute path (the single path-traversal guard) before anything is created.
-	baseImagePath, err := resolveBaseImagePath(settings, baseImage)
-	if err != nil {
-		return vmName, err
-	}
-	seedIso := vmName + "_seed.iso"
-	poolName, poolPath := storagePoolConfig(settings)
 
 	conn, err := connectLibvirt()
 	if err != nil {
-		return vmName, fmt.Errorf("failed to connect to libvirt: %w", err)
+		return spec.vmName, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
 		_, _ = conn.Close()
 	}()
 
-	if err := ensureBootStoragePool(conn, poolName, poolPath); err != nil {
-		return vmName, err
+	if err := ensureBootStoragePool(conn, spec.poolName, spec.poolPath); err != nil {
+		return spec.vmName, err
 	}
 	// Serialize the whole check-and-act region for this name: the availability
 	// check, the destroy of any leftover artifacts, the disk/seed provisioning,
 	// and the domain definition must be atomic with respect to another create or
-	// remove of the same VDI name. Held until BootNewVM returns.
-	unlockName := vmNameLocks.Lock(vmName)
+	// remove of the same VDI name. Held until the boot finishes.
+	unlockName := vmNameLocks.Lock(spec.vmName)
 	defer unlockName()
-	if err := ensureVMNameAvailable(conn, vmName); err != nil {
-		return vmName, err
+	if err := provisionAndStartVM(conn, settings, spec, report); err != nil {
+		return spec.vmName, err
+	}
+
+	return spec.vmName, nil
+}
+
+// provisionAndStartVM runs the locked phase of a VM creation: the caller must
+// hold vmNameLocks.Lock(spec.vmName) for the whole call. It checks the name is
+// free, reserves the owner's quota slot, clears leftover artifacts, provisions
+// the disk and seed volumes, and starts the domain.
+func provisionAndStartVM(conn *libvirt.Connect, settings *config.SettingsType, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+	if err := ensureVMNameAvailable(conn, spec.vmName); err != nil {
+		return err
 	}
 	// The slot stays reserved until this create finishes (or fails), so a
 	// concurrent create for the same user cannot pass the limit check before
 	// this VM's owner metadata exists.
-	releaseVMSlot, err := reserveUserVMSlot(conn, settings, user.GetName())
+	releaseVMSlot, err := reserveUserVMSlot(conn, settings, spec.owner)
 	if err != nil {
-		return vmName, err
+		return err
 	}
 	defer releaseVMSlot()
-	if err := resetExistingVMArtifacts(conn, poolName, vmName, seedIso); err != nil {
-		return vmName, err
+	if err := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); err != nil {
+		return err
 	}
-	if err := provisionBootVolumesWithProgress(conn, settings, poolName, vmName, seedIso, name, guestUsername, cloudInitPasswordHash, baseImagePath, report); err != nil {
-		return vmName, err
+	if err := provisionBootVolumes(conn, settings, spec, report); err != nil {
+		return err
 	}
-	if err := StartVMWithOwner(vmName, seedIso, poolName, user.GetName(), guestUsername, baseImage, vcpu, memoryMiB); err != nil {
-		return vmName, fmt.Errorf("failed to start VM: %w", err)
+	if err := StartVM(spec.startConfig()); err != nil {
+		return fmt.Errorf("failed to start VM: %w", err)
 	}
-
-	return vmName, nil
+	return nil
 }
 
 // RemoveVM deletes the named VM, its disks, and any leftover console sockets.
@@ -1014,26 +1101,14 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso s
 	return nil
 }
 
-func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, poolName, vmName, seedIso, hostname, guestUsername, cloudInitPasswordHash, baseImagePath string) error {
-	return provisionBootVolumesWithProgress(conn, settings, poolName, vmName, seedIso, hostname, guestUsername, cloudInitPasswordHash, baseImagePath, nil)
-}
-
-func provisionBootVolumesWithProgress(
-	conn *libvirt.Connect,
-	settings *config.SettingsType,
-	poolName string,
-	vmName string,
-	seedIso string,
-	hostname string,
-	guestUsername string,
-	cloudInitPasswordHash string,
-	baseImagePath string,
-	report DiskCopyProgressFunc,
-) error {
-	if err := copyAndResizeVolumeWithSettingsAndProgress(conn, settings, poolName, vmName, baseImagePath, config.VMDiskCapacityBytes(settings), report); err != nil {
+// provisionBootVolumes creates the VM's disk (cloned from the resolved base
+// image) and its cloud-init seed ISO in the storage pool. A nil report
+// disables disk-copy progress reporting.
+func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+	if err := copyAndResizeVolumeWithSettingsAndProgress(conn, settings, spec.poolName, spec.vmName, spec.baseImagePath, config.VMDiskCapacityBytes(settings), report); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
-	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, poolName, seedIso, guestUsername, cloudInitPasswordHash, hostname); err != nil {
+	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, spec.poolName, spec.seedISO, spec.guestUsername, spec.passwordHash, spec.hostname); err != nil {
 		return fmt.Errorf("failed to create seed ISO: %w", err)
 	}
 	return nil

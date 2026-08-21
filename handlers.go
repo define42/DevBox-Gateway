@@ -491,36 +491,27 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 	})
 }
 
-// createVMInput holds the validated dashboard create-VM form fields. CPU and
-// memory are deliberately absent: VM resources are operator-defined only
-// (VM_VCPU_COUNT / VM_MEMORY_MIB) and never accepted from the form. The guest
-// password is not a form field either: the guest account is provisioned with
-// the salted sha512_crypt hash of the user's own gateway login password,
-// captured at login and held in the in-memory session (never in cleartext).
-type createVMInput struct {
-	name              string
-	user              *types.User
-	guestUsername     string
-	guestPasswordHash string
-	baseImage         string
-}
-
-// parseCreateVMInput validates and collects the create-VM form fields. It writes
-// the error response and returns ok=false when any field is invalid or the
-// session is missing.
-func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.SettingsType) (createVMInput, bool) {
+// parseCreateVMInput validates and collects the create-VM form fields into a
+// virt.VMCreateRequest. It writes the error response and returns ok=false when
+// any field is invalid or the session is missing. CPU and memory are
+// deliberately never read from the form: VM resources are operator-defined
+// only (VM_VCPU_COUNT / VM_MEMORY_MIB). The guest password is not a form field
+// either: the guest account is provisioned with the salted sha512_crypt hash
+// of the user's own gateway login password, captured at login and held in the
+// in-memory session (never in cleartext).
+func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.SettingsType) (virt.VMCreateRequest, bool) {
 	if err := parseFormWithBodyLimit(w, req); err != nil {
 		log.Printf("dashboard form parse failed: %v", err)
 		dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
 			OK:    false,
 			Error: "Invalid form submission.",
 		})
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
 
 	name, err := validateVMName(req.FormValue("vm_name"))
 	if handleDashboardFormError(w, "dashboard create", err) {
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
 	user, ok := sessionManager.UserFromContext(req.Context())
 	if !ok {
@@ -528,11 +519,11 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 			OK:    false,
 			Error: "Login required.",
 		})
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
 	guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.GetName())
 	if handleDashboardFormError(w, "dashboard create", err) {
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
 	// The guest account password is the user's own gateway login password. Only
 	// its salted sha512_crypt hash was kept (in the session, at login), so that
@@ -545,18 +536,18 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 			OK:    false,
 			Error: "Your session is missing the credentials needed to create a DevBox. Log out and log in again.",
 		})
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
 	baseImage, err := validateBaseImage(req.FormValue("vm_base_image"), settings)
 	if handleDashboardFormError(w, "dashboard create", err) {
-		return createVMInput{}, false
+		return virt.VMCreateRequest{}, false
 	}
-	return createVMInput{
-		name:              name,
-		user:              user,
-		guestUsername:     guestUsername,
-		guestPasswordHash: guestPasswordHash,
-		baseImage:         baseImage,
+	return virt.VMCreateRequest{
+		Name:          name,
+		Owner:         user,
+		GuestUsername: guestUsername,
+		PasswordHash:  guestPasswordHash,
+		BaseImage:     baseImage,
 	}, true
 }
 
@@ -575,16 +566,8 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			reportProgress = creationStream.ReportDiskCopy
 		}
 
-		vmName, err := virt.BootNewVMWithProgress(
-			input.name,
-			input.user,
-			input.guestUsername,
-			input.guestPasswordHash,
-			input.baseImage,
-			settings,
-			reportProgress,
-		)
-		status, result := dashboardCreateResult(input.name, vmName, err, settings)
+		vmName, err := virt.BootNewVMWithProgress(input, settings, reportProgress)
+		status, result := dashboardCreateResult(input.Name, vmName, err, settings)
 		if creationStream != nil && creationStream.Started() {
 			if result.OK {
 				result.Message = "VM created."

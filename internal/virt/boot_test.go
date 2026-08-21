@@ -2,7 +2,6 @@ package virt_test
 
 import (
 	"devboxgateway/internal/config"
-	typesUser "devboxgateway/internal/types"
 	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
@@ -13,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	typesUser "devboxgateway/internal/types"
 
 	"libvirt.org/go/libvirt"
 )
@@ -262,7 +263,12 @@ func TestStartVM(t *testing.T) {
 		t.Fatalf("Failed to create test user: %v", err)
 	}
 
-	vmName, err := virt.BootNewVM(testVMName, user, "", testPasswordHash, testBaseImageName, settings)
+	vmName, err := virt.BootNewVM(virt.VMCreateRequest{
+		Name:         testVMName,
+		Owner:        user,
+		PasswordHash: testPasswordHash,
+		BaseImage:    testBaseImageName,
+	}, settings)
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}

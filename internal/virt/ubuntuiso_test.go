@@ -144,7 +144,7 @@ func TestPowerLifecycle(t *testing.T) {
 		t.Fatalf("new user: %v", err)
 	}
 
-	vmName, err := BootNewVM("power-vm", user, "", testGuestPasswordHash, testBaseImageName, settings)
+	vmName, err := BootNewVM(VMCreateRequest{Name: "power-vm", Owner: user, PasswordHash: testGuestPasswordHash, BaseImage: testBaseImageName}, settings)
 	if err != nil {
 		t.Fatalf("BootNewVM: %v", err)
 	}
