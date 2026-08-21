@@ -499,7 +499,7 @@ func TestViocovWorkerRunSurvivesConnectFailure(t *testing.T) {
 	worker.Stop()
 	waitForWorkerStop(t, done)
 
-	if names := worker.VMNames(); names != nil {
+	if names := worker.VMNames(); len(names) != 0 {
 		t.Fatalf("expected no cached VMs after connect failures, got %v", names)
 	}
 	if len(worker.metadataByUUID) != 1 {

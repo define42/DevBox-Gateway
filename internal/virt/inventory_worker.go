@@ -143,7 +143,7 @@ func (s *SingletonWorker) invalidateVMSnapshot() {
 func (s *SingletonWorker) VMs(user string) []VMInfo {
 	snapshot := s.snapshotVMs()
 
-	var filteredVMs []VMInfo
+	filteredVMs := make([]VMInfo, 0, len(snapshot))
 	for _, vm := range snapshot {
 		if user != "" && vm.Owner != user {
 			continue
@@ -170,7 +170,7 @@ func (s *SingletonWorker) NotifyVMDataChanged() {
 func (s *SingletonWorker) VMNames() []string {
 	snapshot := s.snapshotVMs()
 
-	var names []string
+	names := make([]string, 0, len(snapshot))
 	for _, vm := range snapshot {
 		names = append(names, vm.Name)
 	}

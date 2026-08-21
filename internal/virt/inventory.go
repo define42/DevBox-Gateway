@@ -81,7 +81,7 @@ func listVMsWithInventoryResolvers(
 	}
 	defer freeDomains(doms)
 
-	var result []VMInfo
+	result := make([]VMInfo, 0, len(doms))
 	for _, d := range doms {
 		info, ok := domainVMInfoWithInventoryResolvers(d, user, resolveMetadata, resolveDisk)
 		if ok {

@@ -32,12 +32,12 @@ func ListBaseImages(settings *config.SettingsType) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []string{}, nil
 		}
 		return nil, fmt.Errorf("read base image directory %s: %w", dir, err)
 	}
 
-	var names []string
+	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !isBaseImageName(entry.Name()) {
 			continue
