@@ -236,12 +236,21 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, error) {
 // limitListenerConnections caps the number of simultaneously open front
 // connections so a flood of connections — or slow clients that stall before the
 // TLS handshake — cannot spawn an unbounded number of per-connection goroutines
-// and exhaust the gateway's memory and file descriptors. Connections over the
-// cap are accepted and immediately closed (see failFastLimitListener) so
-// clients fail fast instead of hanging unserved in the accept backlog, and
-// saturation shows up in the logs. A value <=0 disables the cap and restores
-// the previous unbounded behavior.
+// and exhaust the gateway's memory and file descriptors. Two caps compose: a
+// per-source cap (per IPv4 address / per IPv6 /64, see perSourceLimitListener)
+// keeps any single unauthenticated source from occupying the budget, and a
+// global cap bounds the total. Connections over either cap are accepted and
+// immediately closed (see failFastLimitListener) so clients fail fast instead
+// of hanging unserved in the accept backlog, and saturation shows up in the
+// logs. A value <=0 disables that cap; both <=0 restores the previous
+// unbounded behavior.
 func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
+	// The per-source cap wraps the raw listener, inside the global cap, so a
+	// connection rejected for one greedy source never consumes a global slot.
+	if perSource := settings.GetInt(config.MAX_CONNECTIONS_PER_SOURCE); perSource > 0 {
+		log.Printf("limiting to %d concurrent front connections per source address", perSource)
+		ln = newPerSourceLimitListener(ln, perSource)
+	}
 	maxConns := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
 	if maxConns <= 0 {
 		return ln

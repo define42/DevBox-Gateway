@@ -88,6 +88,14 @@ const (
 	// meaningful share of the front-connection budget. Override with
 	// MAX_CONNECTIONS_PER_USER.
 	DefaultMaxConnectionsPerUser = 32
+	// DefaultMaxConnectionsPerSource is the default cap on simultaneously open
+	// front connections from one source address (one IPv4 address, or one /64
+	// prefix for IPv6, since a single host commonly controls an entire /64).
+	// Enforced before the TLS handshake, it keeps a single unauthenticated
+	// source from exhausting the shared MAX_CONCURRENT_CONNECTIONS budget while
+	// still leaving room for a few dozen users behind one NAT or proxy address.
+	// Override with MAX_CONNECTIONS_PER_SOURCE.
+	DefaultMaxConnectionsPerSource = 256
 )
 
 const (
@@ -115,6 +123,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously open front connections (RDP + HTTPS); connections beyond the cap are accepted and immediately closed (fail fast, logged) so clients see an error instead of hanging, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", DefaultMaxConcurrentConnections)
 	s.SetInt(MAX_CONNECTIONS_PER_USER, "Maximum number of concurrently open authenticated long-lived connections (dashboard/serial/VNC websockets and proxied RDP sessions) per user; connections beyond the cap are closed immediately so one scripted user cannot exhaust the shared front-connection budget. Values <=0 disable the cap", DefaultMaxConnectionsPerUser)
+	s.SetInt(MAX_CONNECTIONS_PER_SOURCE, "Maximum number of simultaneously open front connections per source address (per IPv4 address, per /64 prefix for IPv6), enforced before authentication and the TLS handshake; connections beyond the cap are accepted and immediately closed (fail fast, logged) so one source cannot exhaust the shared MAX_CONCURRENT_CONNECTIONS budget. Raise it when many users share one NAT or proxy address. Values <=0 disable the cap", DefaultMaxConnectionsPerSource)
 	s.SetString(CERT_FILE, "TLS certificate PEM for clients (front side)", "")
 	s.SetString(KEY_FILE, "TLS private key PEM for clients (front side, unencrypted)", "")
 
@@ -498,6 +507,7 @@ const (
 	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
 	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
 	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
+	MAX_CONNECTIONS_PER_SOURCE       = "MAX_CONNECTIONS_PER_SOURCE"
 	SNI_HASH_SECRET                  = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
 	VDI_AUTO_SHUTDOWN_HOURS          = "VDI_AUTO_SHUTDOWN_HOURS"
 	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"

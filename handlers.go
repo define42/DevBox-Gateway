@@ -375,6 +375,10 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 	router.Post("/logout", handleLogout(sessionManager))
 
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
+		// Health checks are unauthenticated; close the connection after each
+		// response so parked keep-alive probes cannot pin front-connection
+		// slots for the httpIdleTimeout between requests.
+		w.Header().Set("Connection", "close")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte("ok\n")); err != nil {
 			log.Printf("failed to write health response: %v", err)
