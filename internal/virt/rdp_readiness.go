@@ -4,6 +4,12 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
+)
+
+const (
+	rdpPort                  = "3389"
+	rdpReadinessProbeTimeout = 500 * time.Millisecond
 )
 
 type rdpReadinessProbe func(context.Context, string) bool
@@ -91,6 +97,20 @@ func probeRDPAddress(ctx context.Context, address string) bool {
 	return tcpEndpointReadyContext(ctx, address, rdpReadinessProbeTimeout)
 }
 
+func tcpEndpointReady(address string, timeout time.Duration) bool {
+	return tcpEndpointReadyContext(context.Background(), address, timeout)
+}
+
+func tcpEndpointReadyContext(ctx context.Context, address string, timeout time.Duration) bool {
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
 func (s *SingletonWorker) rdpReadinessJobs(username string) []rdpReadinessJob {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -165,4 +185,42 @@ func rdpResultMatchesTarget(vm *VMInfo, result *rdpReadinessResult) bool {
 		vm.PrimaryIP == result.job.primaryIP &&
 		vm.rdpGeneration == result.job.generation &&
 		vm.State == "running"
+}
+
+// mergeRDPReadinessLocked carries RDP readiness state forward onto a fresh VM
+// snapshot: an entry whose probe target is unchanged keeps its readiness and
+// generation, while a new or changed entry gets a new generation so stale probe
+// results can never be applied to it. Callers must hold s.mu.
+func (s *SingletonWorker) mergeRDPReadinessLocked(next []VMInfo) {
+	previous := make(map[string]VMInfo, len(s.vms))
+	for _, vm := range s.vms {
+		previous[vm.Name] = vm
+	}
+
+	for i := range next {
+		old, ok := previous[next[i].Name]
+		if ok && sameRDPReadinessTarget(old, next[i]) {
+			if next[i].State == "running" {
+				next[i].RDPReady = old.RDPReady
+			} else {
+				next[i].RDPReady = false
+			}
+			next[i].rdpGeneration = old.rdpGeneration
+			next[i].rdpObservation = old.rdpObservation
+			continue
+		}
+
+		s.nextRDPGeneration++
+		next[i].RDPReady = false
+		next[i].rdpGeneration = s.nextRDPGeneration
+		next[i].rdpObservation = 0
+	}
+}
+
+func sameRDPReadinessTarget(old, next VMInfo) bool {
+	return old.Name == next.Name &&
+		old.Owner == next.Owner &&
+		old.PrimaryIP == next.PrimaryIP &&
+		old.CreatedAt == next.CreatedAt &&
+		old.State == next.State
 }
