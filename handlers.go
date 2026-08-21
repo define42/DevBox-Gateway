@@ -417,12 +417,44 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 	registerDashboardDataRoute(group, sessionManager, settings)
 	registerDashboardCreateRoute(group, sessionManager, settings)
 	registerDashboardRDPRoute(group, sessionManager, settings)
-	registerDashboardVMActionRoute(group, sessionManager, "/dashboard/remove", "dashboard remove", "remove", "Failed to remove VM.", "VM removed.", func(name string) error {
-		return virt.RemoveVM(name, settings)
-	})
-	registerDashboardVMActionRoute(group, sessionManager, "/dashboard/start", "dashboard start", "start", "Failed to start VM.", "VM start requested.", virt.StartExistingVM)
-	registerDashboardVMActionRoute(group, sessionManager, "/dashboard/restart", "dashboard restart", "restart", "Failed to restart VM.", "VM restart requested.", virt.RestartVM)
-	registerDashboardVMActionRoute(group, sessionManager, "/dashboard/shutdown", "dashboard shutdown", "shutdown", "Failed to shutdown VM.", "VM shutdown requested.", virt.ShutdownVM)
+	for _, spec := range []dashboardVMActionSpec{
+		{
+			path:           "/dashboard/remove",
+			action:         "dashboard remove",
+			verb:           "remove",
+			failureMessage: "Failed to remove VM.",
+			successMessage: "VM removed.",
+			run: func(name string) error {
+				return virt.RemoveVM(name, settings)
+			},
+		},
+		{
+			path:           "/dashboard/start",
+			action:         "dashboard start",
+			verb:           "start",
+			failureMessage: "Failed to start VM.",
+			successMessage: "VM start requested.",
+			run:            virt.StartExistingVM,
+		},
+		{
+			path:           "/dashboard/restart",
+			action:         "dashboard restart",
+			verb:           "restart",
+			failureMessage: "Failed to restart VM.",
+			successMessage: "VM restart requested.",
+			run:            virt.RestartVM,
+		},
+		{
+			path:           "/dashboard/shutdown",
+			action:         "dashboard shutdown",
+			verb:           "shutdown",
+			failureMessage: "Failed to shutdown VM.",
+			successMessage: "VM shutdown requested.",
+			run:            virt.ShutdownVM,
+		},
+	} {
+		registerDashboardVMActionRoute(group, sessionManager, spec)
+	}
 }
 
 type dashboardRouteBody func(huma.Context)
@@ -640,33 +672,36 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 	})
 }
 
-func registerDashboardVMActionRoute(
-	group huma.API,
-	sessionManager *session.Manager,
-	path string,
-	dashboardAction string,
-	verb string,
-	failureMessage string,
-	successMessage string,
-	run func(string) error,
-) {
-	registerHiddenPost(group, path, func(ctx huma.Context) {
+// dashboardVMActionSpec describes one per-VM dashboard action route: where it
+// is mounted, how it is named in logs and form-error messages, what the user
+// sees on success or failure, and the virt operation it invokes.
+type dashboardVMActionSpec struct {
+	path           string
+	action         string
+	verb           string
+	failureMessage string
+	successMessage string
+	run            func(string) error
+}
+
+func registerDashboardVMActionRoute(group huma.API, sessionManager *session.Manager, spec dashboardVMActionSpec) {
+	registerHiddenPost(group, spec.path, func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(req, w, sessionManager, dashboardAction, verb)
+		name, ok := authorizeDashboardVMAction(req, w, sessionManager, spec.action, spec.verb)
 		if !ok {
 			return
 		}
-		if err := run(name); err != nil {
-			log.Printf("%s vm %q failed: %v", verb, name, err)
+		if err := spec.run(name); err != nil {
+			log.Printf("%s vm %q failed: %v", spec.verb, name, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
-				Error: failureMessage,
+				Error: spec.failureMessage,
 			})
 			return
 		}
 		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
 			OK:      true,
-			Message: successMessage,
+			Message: spec.successMessage,
 		})
 	})
 }
