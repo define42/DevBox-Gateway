@@ -141,7 +141,7 @@ func TestViocovListVMsAndDoWorkErrors(t *testing.T) {
 	if len(worker.diskByUUID) != 1 {
 		t.Fatalf("failed libvirt listing cleared disk cache: %+v", worker.diskByUUID)
 	}
-	if vms := worker.GetVMs(""); len(vms) != 1 || vms[0].Name != "cached-vm" {
+	if vms := worker.VMs(""); len(vms) != 1 || vms[0].Name != "cached-vm" {
 		t.Fatalf("failed libvirt listing replaced last successful VM snapshot: %+v", vms)
 	}
 }
@@ -322,7 +322,7 @@ func (fixture *viocovWorkerDiskCacheFixture) assertInitialSnapshot(domainUUID st
 	if metadataCachedWithoutCompletion {
 		fixture.t.Fatal("incomplete metadata was cached alongside valid block info")
 	}
-	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
+	if vm := requireListedVM(fixture.t, fixture.worker.VMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
 		fixture.t.Fatalf("initial worker disk = %d/%d, want 0/0", vm.VolumeUsedGB, vm.VolumeGB)
 	}
 }
@@ -348,7 +348,7 @@ func (fixture *viocovWorkerDiskCacheFixture) resizeAndAssertSnapshotIsImmutable(
 	if err := fixture.worker.doWork(fixture.conn); err != nil {
 		fixture.t.Fatalf("inventory cached disk after same-UUID change: %v", err)
 	}
-	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
+	if vm := requireListedVM(fixture.t, fixture.worker.VMs(""), fixture.name); vm.VolumeUsedGB != 0 || vm.VolumeGB != 0 {
 		fixture.t.Fatalf("same-UUID worker disk changed to %d/%d, want cached 0/0", vm.VolumeUsedGB, vm.VolumeGB)
 	}
 }
@@ -383,7 +383,7 @@ func (fixture *viocovWorkerDiskCacheFixture) assertReplacement(firstUUID string,
 	if disk, ok := fixture.cachedDisk(secondUUID); !ok || disk != (domainDiskSnapshot{UsedGB: 1, TotalGB: 2}) {
 		fixture.t.Fatalf("replacement cached disk = %+v (present=%v), want 1/2", disk, ok)
 	}
-	if vm := requireListedVM(fixture.t, fixture.worker.GetVMs(""), fixture.name); vm.VolumeUsedGB != 1 || vm.VolumeGB != 2 {
+	if vm := requireListedVM(fixture.t, fixture.worker.VMs(""), fixture.name); vm.VolumeUsedGB != 1 || vm.VolumeGB != 2 {
 		fixture.t.Fatalf("replacement worker disk = %d/%d, want 1/2", vm.VolumeUsedGB, vm.VolumeGB)
 	}
 }
@@ -461,13 +461,13 @@ func TestViocovWorkerRunRefreshesCache(t *testing.T) {
 	}()
 
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) && !slices.Contains(worker.GetVMnames(), name) {
+	for time.Now().Before(deadline) && !slices.Contains(worker.VMNames(), name) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	worker.Stop()
 	waitForWorkerStop(t, done)
 
-	if !slices.Contains(worker.GetVMnames(), name) {
+	if !slices.Contains(worker.VMNames(), name) {
 		t.Fatalf("expected worker cache to list %s", name)
 	}
 }
@@ -499,7 +499,7 @@ func TestViocovWorkerRunSurvivesConnectFailure(t *testing.T) {
 	worker.Stop()
 	waitForWorkerStop(t, done)
 
-	if names := worker.GetVMnames(); names != nil {
+	if names := worker.VMNames(); names != nil {
 		t.Fatalf("expected no cached VMs after connect failures, got %v", names)
 	}
 	if len(worker.metadataByUUID) != 1 {

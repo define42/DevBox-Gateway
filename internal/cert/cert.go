@@ -39,8 +39,8 @@ type TLSManager struct {
 	stopOnce       sync.Once
 }
 
-// GetTLSConfig returns the tls.Config used for incoming frontend connections.
-func (tm *TLSManager) GetTLSConfig() *tls.Config {
+// TLSConfig returns the tls.Config used for incoming frontend connections.
+func (tm *TLSManager) TLSConfig() *tls.Config {
 	return tm.tlsConfig
 }
 
@@ -77,7 +77,7 @@ func (tm *TLSManager) Close() error {
 }
 
 func (tm *TLSManager) updateDomains() {
-	vmNames := virt.GetInstance().GetVMnames()
+	vmNames := virt.GetInstance().VMNames()
 	frontPageDomain := tm.settings.Get(config.FRONT_DOMAIN)
 	secret := []byte(tm.settings.Get(config.SNI_HASH_SECRET))
 

@@ -166,7 +166,7 @@ func StartAutoShutdownWorker(settings *config.SettingsType) (stop func()) {
 			if worker == nil {
 				return nil
 			}
-			return worker.GetVMs("")
+			return worker.VMs("")
 		},
 		lastUsed:            vmLastUsed,
 		loadLastUsed:        loadVMLastUsedFromMetadata,

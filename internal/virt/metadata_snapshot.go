@@ -21,7 +21,7 @@ type domainMetadataSnapshot struct {
 	// LastUsed is the persisted last-used timestamp as of when this snapshot
 	// was cached. The gateway is its only writer and every write also updates
 	// the in-memory vmLastUsed registry, so readers wanting the current value
-	// overlay that registry on top (see SingletonWorker.GetVMs); the snapshot
+	// overlay that registry on top (see SingletonWorker.VMs); the snapshot
 	// covers VMs not yet touched in this process lifetime.
 	LastUsed string
 }

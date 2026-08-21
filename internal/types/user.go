@@ -10,8 +10,3 @@ type User struct {
 func NewUser(name string) (*User, error) {
 	return &User{Name: name}, nil
 }
-
-// GetName returns the username.
-func (u *User) GetName() string {
-	return u.Name
-}

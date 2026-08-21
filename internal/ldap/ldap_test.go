@@ -53,7 +53,7 @@ func TestAuthenticateAccessWithUserDomainSuffix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
-	if user == nil || user.GetName() != "johndoe" {
+	if user == nil || user.Name != "johndoe" {
 		t.Fatalf("expected johndoe user, got %#v", user)
 	}
 }
@@ -73,7 +73,7 @@ func TestAuthenticateAccessWithExplicitEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
-	if user == nil || user.GetName() != "johndoe@example.com" {
+	if user == nil || user.Name != "johndoe@example.com" {
 		t.Fatalf("expected explicit email user, got %#v", user)
 	}
 }
@@ -133,7 +133,7 @@ func TestAuthenticateAccessRequiredGroupMember(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
-	if user == nil || user.GetName() != "johndoe" {
+	if user == nil || user.Name != "johndoe" {
 		t.Fatalf("expected johndoe user, got %#v", user)
 	}
 }

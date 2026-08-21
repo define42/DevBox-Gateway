@@ -374,7 +374,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 		t.Fatalf("existing VM domain UUID changed (was clobbered): was %q, now %q", firstUUID, got)
 	}
 
-	vms, err := ListVMs(user.GetName(), conn)
+	vms, err := ListVMs(user.Name, conn)
 	if err != nil {
 		t.Fatalf("ListVMs: %v", err)
 	}
@@ -472,16 +472,16 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VMOwner(owner): %v", err)
 	}
-	if !hasOwner || owner != user.GetName() {
-		t.Fatalf("expected owner %q, got owner=%q hasOwner=%v", user.GetName(), owner, hasOwner)
+	if !hasOwner || owner != user.Name {
+		t.Fatalf("expected owner %q, got owner=%q hasOwner=%v", user.Name, owner, hasOwner)
 	}
 
-	owned, err := UserOwnsVM(vmName, user.GetName())
+	owned, err := UserOwnsVM(vmName, user.Name)
 	if err != nil {
 		t.Fatalf("UserOwnsVM(owner): %v", err)
 	}
 	if !owned {
-		t.Fatalf("expected %q to own %q", user.GetName(), vmName)
+		t.Fatalf("expected %q to own %q", user.Name, vmName)
 	}
 
 	owned, err = UserOwnsVM(vmName, "meta")
@@ -492,11 +492,11 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 		t.Fatalf("did not expect prefix user %q to own %q", "meta", vmName)
 	}
 
-	metaVMs, err := ListVMs(user.GetName(), conn)
+	metaVMs, err := ListVMs(user.Name, conn)
 	if err != nil {
 		t.Fatalf("ListVMs(owner): %v", err)
 	}
-	assertListedVMOwner(t, metaVMs, vmName, user.GetName())
+	assertListedVMOwner(t, metaVMs, vmName, user.Name)
 
 	prefixVMs, err := ListVMs("meta", conn)
 	if err != nil {
@@ -523,8 +523,8 @@ func TestBootNewVMFailsWithoutBaseImageSource(t *testing.T) {
 	if !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("expected base image resolution failure, got %v", err)
 	}
-	if !strings.HasPrefix(vmName, user.GetName()+vmname.Separator) {
-		t.Fatalf("expected VM name prefix %q, got %q", user.GetName()+vmname.Separator, vmName)
+	if !strings.HasPrefix(vmName, user.Name+vmname.Separator) {
+		t.Fatalf("expected VM name prefix %q, got %q", user.Name+vmname.Separator, vmName)
 	}
 }
 
@@ -555,7 +555,7 @@ func TestBootNewVMNameUsesLoginUserNotGuestUser(t *testing.T) {
 		t.Fatalf("expected base image resolution failure (proving the boot logic ran), got %v", err)
 	}
 
-	want := user.GetName() + vmname.Separator + chosenName
+	want := user.Name + vmname.Separator + chosenName
 	if vmName != want {
 		t.Fatalf("VM name must be <login-username><Separator><chosen-name>: want %q, got %q", want, vmName)
 	}

@@ -29,7 +29,7 @@ type VMInfo struct {
 	CreatedAt string
 	// LastUsed is the RFC3339 UTC timestamp of the VM's last recorded use. In
 	// the worker cache it holds the persisted metadata value from the sweep;
-	// GetVMs overlays the fresher in-memory registry before handing entries to
+	// VMs overlays the fresher in-memory registry before handing entries to
 	// callers, so touches (RDP/serial/noVNC clicks, starts) show up without
 	// waiting for a domain XML re-read.
 	LastUsed       string

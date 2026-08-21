@@ -149,7 +149,7 @@ func TestSetInventoryHostIdentityClearsCachesWithUnknownProvenance(t *testing.T)
 	if len(worker.metadataByUUID) != 0 || len(worker.diskByUUID) != 0 {
 		t.Fatalf("initial identity retained unverified caches: metadata=%+v disk=%+v", worker.metadataByUUID, worker.diskByUUID)
 	}
-	if vms := worker.GetVMs(""); len(vms) != 0 {
+	if vms := worker.VMs(""); len(vms) != 0 {
 		t.Fatalf("initial identity retained unverified VM snapshot: %+v", vms)
 	}
 }
@@ -184,7 +184,7 @@ func TestSetInventoryHostIdentityClearsCachesOnlyForConfirmedChange(t *testing.T
 	if len(worker.diskByUUID) != 0 {
 		t.Fatalf("host change retained disk cache: %+v", worker.diskByUUID)
 	}
-	if vms := worker.GetVMs(""); len(vms) != 0 {
+	if vms := worker.VMs(""); len(vms) != 0 {
 		t.Fatalf("host change retained old VM snapshot: %+v", vms)
 	}
 }

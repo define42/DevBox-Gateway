@@ -405,7 +405,7 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 
 func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.SettingsType) {
 	// TLS handshake with client; get SNI
-	clientTLS := tls.Server(raw, frontTLS.GetTLSConfig())
+	clientTLS := tls.Server(raw, frontTLS.TLSConfig())
 	if err := clientTLS.Handshake(); err != nil {
 		log.Printf("client tls handshake: %v", err)
 		return

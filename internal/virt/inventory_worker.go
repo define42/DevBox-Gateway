@@ -134,13 +134,13 @@ func (s *SingletonWorker) invalidateVMSnapshot() {
 	s.setVMs(nil)
 }
 
-// GetVMs returns the cached VMs, optionally filtered by owner. Each returned
+// VMs returns the cached VMs, optionally filtered by owner. Each returned
 // entry's LastUsed is overlaid with the in-memory registry when it has a
 // fresher value: the cached snapshot carries the persisted metadata as of the
 // domain's first sweep, while the registry records every touch since. The
 // overlay happens on the returned copies only — the internal snapshot keeps
 // raw sweep data so its change detection is unaffected.
-func (s *SingletonWorker) GetVMs(user string) []VMInfo {
+func (s *SingletonWorker) VMs(user string) []VMInfo {
 	snapshot := s.snapshotVMs()
 
 	var filteredVMs []VMInfo
@@ -157,7 +157,7 @@ func (s *SingletonWorker) GetVMs(user string) []VMInfo {
 
 // NotifyVMDataChanged wakes the worker's subscribers so they take a fresh
 // user-filtered snapshot. The touch points call it (via MarkVMUsed) because a
-// last-used update changes what GetVMs returns without changing the underlying
+// last-used update changes what VMs returns without changing the underlying
 // sweep snapshot, so setVMs' own change detection would never fire for it.
 func (s *SingletonWorker) NotifyVMDataChanged() {
 	s.mu.Lock()
@@ -165,8 +165,8 @@ func (s *SingletonWorker) NotifyVMDataChanged() {
 	s.mu.Unlock()
 }
 
-// GetVMnames returns the cached VM names.
-func (s *SingletonWorker) GetVMnames() []string {
+// VMNames returns the cached VM names.
+func (s *SingletonWorker) VMNames() []string {
 	snapshot := s.snapshotVMs()
 
 	var names []string
@@ -176,8 +176,8 @@ func (s *SingletonWorker) GetVMnames() []string {
 	return names
 }
 
-// GetIPOfVM returns the primary IP address cached for the named VM.
-func (s *SingletonWorker) GetIPOfVM(vmName string) (string, error) {
+// VMIP returns the primary IP address cached for the named VM.
+func (s *SingletonWorker) VMIP(vmName string) (string, error) {
 	for _, vm := range s.snapshotVMs() {
 		if vm.Name == vmName {
 			return vm.PrimaryIP, nil

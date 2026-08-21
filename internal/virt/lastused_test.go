@@ -110,24 +110,24 @@ func TestLoadVMLastUsedFromMetadataFailureModes(t *testing.T) {
 	}
 }
 
-func TestGetVMsOverlaysRegistryLastUsed(t *testing.T) {
+func TestVMsOverlaysRegistryLastUsed(t *testing.T) {
 	const name = "overlay-vm"
 	worker := &SingletonWorker{}
 	worker.setVMs([]VMInfo{{Name: name, Owner: "alice", LastUsed: "2026-08-15T12:00:00Z"}})
 	t.Cleanup(func() { vmLastUsed.remove(name) })
 
 	// Without a registry entry the persisted snapshot value passes through.
-	vms := worker.GetVMs("alice")
+	vms := worker.VMs("alice")
 	if len(vms) != 1 || vms[0].LastUsed != "2026-08-15T12:00:00Z" {
-		t.Fatalf("GetVMs without registry entry = %+v, want the snapshot timestamp", vms)
+		t.Fatalf("VMs without registry entry = %+v, want the snapshot timestamp", vms)
 	}
 
 	// A registry entry (a touch since the sweep) takes precedence.
 	touched := time.Date(2026, 8, 16, 9, 30, 0, 0, time.UTC)
 	vmLastUsed.set(name, touched)
-	vms = worker.GetVMs("alice")
+	vms = worker.VMs("alice")
 	if len(vms) != 1 || vms[0].LastUsed != formatLastUsedTimestamp(touched) {
-		t.Fatalf("GetVMs with registry entry = %+v, want the registry timestamp", vms)
+		t.Fatalf("VMs with registry entry = %+v, want the registry timestamp", vms)
 	}
 
 	// The overlay must not leak into the worker's internal snapshot.

@@ -228,8 +228,8 @@ func TestVbtcovResolveGuestCredentials(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveGuestCredentials: %v", err)
 		}
-		if name != user.GetName() {
-			t.Fatalf("guest username = %q, want owner %q", name, user.GetName())
+		if name != user.Name {
+			t.Fatalf("guest username = %q, want owner %q", name, user.Name)
 		}
 		if hash != testGuestPasswordHash {
 			t.Fatalf("expected the pre-computed hash to pass through unchanged, got %q", hash)

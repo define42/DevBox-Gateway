@@ -36,15 +36,15 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		debugf("vnc: request from %s user=%q vm=%q", r.RemoteAddr, user.GetName(), name)
+		debugf("vnc: request from %s user=%q vm=%q", r.RemoteAddr, user.Name, name)
 
-		owned, err := virt.UserOwnsVM(name, user.GetName())
+		owned, err := virt.UserOwnsVM(name, user.Name)
 		if err != nil {
-			writeDashboardVNCOwnershipError(w, name, user.GetName(), err)
+			writeDashboardVNCOwnershipError(w, name, user.Name, err)
 			return
 		}
 		if !owned {
-			writeDashboardVNCOwnershipError(w, name, user.GetName(), nil)
+			writeDashboardVNCOwnershipError(w, name, user.Name, nil)
 			return
 		}
 		debugf("vnc: ownership confirmed for vm %q; opening VNC backend", name)
@@ -69,12 +69,12 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			return
 		}
 		debugf("vnc: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
 			_ = ws.Close()
 			_ = vncConn.Close()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("vnc", user.GetName(), ws)
+			rejectOverUserConnectionLimit("vnc", user.Name, ws)
 			_ = vncConn.Close()
 			return
 		}

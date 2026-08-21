@@ -174,7 +174,7 @@ func completeLogin(sessionManager *session.Manager, settings *config.SettingsTyp
 		err = sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, loginPasswordHash)
 	}
 	if err != nil {
-		log.Printf("login completion failed for %s: %v", strconv.Quote(user.GetName()), err)
+		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
 		serveLogin(w, settings, "Login failed.")
 		return
 	}
@@ -248,7 +248,7 @@ func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
 		user, authenticated := sessionManager.UserFromContext(r.Context())
 		username := ""
 		if authenticated {
-			username = user.GetName()
+			username = user.Name
 			if err := sessionManager.DestroyAllSessionsForUser(username); err != nil {
 				log.Printf("destroy sessions for user %q failed: %v", username, err)
 			}
@@ -553,7 +553,7 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 		})
 		return virt.VMCreateRequest{}, false
 	}
-	guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.GetName())
+	guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.Name)
 	if handleDashboardFormError(w, "dashboard create", err) {
 		return virt.VMCreateRequest{}, false
 	}
@@ -668,7 +668,7 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 		}
 		// The RDP connect click counts as use for auto-shutdown.
 		virt.MarkVMUsed(name)
-		dashboard.WriteRDPFile(w, settings, user.GetName(), name)
+		dashboard.WriteRDPFile(w, settings, user.Name, name)
 	})
 }
 
@@ -716,19 +716,19 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 		return "", false
 	}
 
-	name, err := parseDashboardVMName(w, req, user.GetName())
+	name, err := parseDashboardVMName(w, req, user.Name)
 	if handleDashboardFormError(w, dashboardAction, err) {
 		return "", false
 	}
 
-	owned, err := virt.UserOwnsVM(name, user.GetName())
+	owned, err := virt.UserOwnsVM(name, user.Name)
 	if err != nil {
-		writeDashboardVMActionOwnershipError(w, name, user.GetName(), verb, err)
+		writeDashboardVMActionOwnershipError(w, name, user.Name, verb, err)
 		return "", false
 	}
 
 	if !owned {
-		writeDashboardVMActionOwnershipError(w, name, user.GetName(), verb, nil)
+		writeDashboardVMActionOwnershipError(w, name, user.Name, verb, nil)
 		return "", false
 	}
 

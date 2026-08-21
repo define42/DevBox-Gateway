@@ -70,7 +70,7 @@ func TestStartSweepIfDueAbandonsStalledSweep(t *testing.T) {
 	// The stalled sweep's late outcome must go nowhere: the worker dropped its
 	// channel, so a buffered send simply completes into the void.
 	stalled.outcome <- sweepOutcome{vms: []VMInfo{{Name: "stale-vm"}}}
-	if vms := worker.GetVMs(""); vms != nil {
+	if vms := worker.VMs(""); vms != nil {
 		t.Fatalf("abandoned sweep outcome must never be published, got %+v", vms)
 	}
 }
@@ -113,7 +113,7 @@ func TestApplySweepPublishesCurrentHostResults(t *testing.T) {
 		disks:    map[string]domainDiskSnapshot{"uuid-1": {UsedGB: 1, TotalGB: 2}},
 	})
 
-	if vms := worker.GetVMs("alice"); len(vms) != 1 || vms[0].Name != "alice-desktop" {
+	if vms := worker.VMs("alice"); len(vms) != 1 || vms[0].Name != "alice-desktop" {
 		t.Fatalf("expected the sweep's VMs to be published, got %+v", vms)
 	}
 	if count, ok := worker.CountVMsOwnedBy("alice"); !ok || count != 1 {
@@ -145,7 +145,7 @@ func TestApplySweepDiscardsResultsAcrossHostChange(t *testing.T) {
 		disks:    map[string]domainDiskSnapshot{"uuid-2": {UsedGB: 3, TotalGB: 4}},
 	})
 
-	if vms := worker.GetVMs(""); vms != nil {
+	if vms := worker.VMs(""); vms != nil {
 		t.Fatalf("expected the snapshot to be invalidated on host change, got %+v", vms)
 	}
 	if _, ok := worker.CountVMsOwnedBy("alice"); ok {
@@ -172,7 +172,7 @@ func TestApplySweepIgnoresFailedSweep(t *testing.T) {
 
 	worker.applySweep(sweepOutcome{err: errors.New("libvirt unreachable")})
 
-	if vms := worker.GetVMs(""); vms != nil {
+	if vms := worker.VMs(""); vms != nil {
 		t.Fatalf("expected no snapshot from a failed sweep, got %+v", vms)
 	}
 	if _, ok := worker.CountVMsOwnedBy("alice"); ok {

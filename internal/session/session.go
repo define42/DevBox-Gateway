@@ -234,7 +234,7 @@ func (m *Manager) getSessionFromUserName(username string) (sessionData, bool) {
 	}
 
 	for _, sess := range m.allSessions() {
-		if sess.User != nil && sess.User.GetName() == username {
+		if sess.User != nil && sess.User.Name == username {
 			return sess, true
 		}
 	}
@@ -257,7 +257,7 @@ func (m *Manager) UserHasActiveSessionFromIP(username, clientIP string) bool {
 		if sess.User == nil {
 			continue
 		}
-		if sess.User.GetName() == username && sess.ClientIP == canonicalIP {
+		if sess.User.Name == username && sess.ClientIP == canonicalIP {
 			return true
 		}
 	}
@@ -321,7 +321,7 @@ func (m *Manager) consumeStoredGrant(token string, raw []byte, username, canonic
 	if !ok || sess.User == nil {
 		return false
 	}
-	if sess.User.GetName() != username || sess.ClientIP != canonicalIP {
+	if sess.User.Name != username || sess.ClientIP != canonicalIP {
 		return false
 	}
 	expiry, ok := sess.RDPConnectGrants[vmName]
@@ -395,7 +395,7 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 			continue
 		}
 		sess, ok := values[sessionKey].(sessionData)
-		if !ok || sess.User == nil || sess.User.GetName() != username {
+		if !ok || sess.User == nil || sess.User.Name != username {
 			continue
 		}
 		if err := m.Store.Delete(token); err != nil && firstErr == nil {
@@ -492,9 +492,9 @@ func (m *Manager) EnforceClientIP(next http.Handler) http.Handler {
 			canonicalIP, ipOK := CanonicalClientIP(r.RemoteAddr)
 			if !ipOK || canonicalIP != sess.ClientIP {
 				log.Printf("session client IP changed for user %s (bound=%s now=%s): forcing re-login",
-					strconv.Quote(sess.User.GetName()), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
+					strconv.Quote(sess.User.Name), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
 				if err := m.Destroy(r.Context()); err != nil {
-					log.Printf("destroy roamed session for user %q failed: %v", sess.User.GetName(), err)
+					log.Printf("destroy roamed session for user %q failed: %v", sess.User.Name, err)
 				}
 			}
 		}

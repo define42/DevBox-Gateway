@@ -255,7 +255,7 @@ func viocovAssertMetadataReplacement(
 	if metadata, ok := viocovWorkerCachedMetadata(worker, secondUUID); !ok || metadata.Owner != "bob" {
 		t.Fatalf("replacement cached metadata = %+v (present=%v)", metadata, ok)
 	}
-	if vm := requireListedVM(t, worker.GetVMs(""), name); vm.Owner != "bob" {
+	if vm := requireListedVM(t, worker.VMs(""), name); vm.Owner != "bob" {
 		t.Fatalf("replacement inventory owner = %q, want bob", vm.Owner)
 	}
 }
@@ -281,7 +281,7 @@ func viocovAssertMetadataSnapshotIsImmutable(
 	if err := worker.doWork(conn); err != nil {
 		t.Fatalf("inventory cached replacement: %v", err)
 	}
-	if vm := requireListedVM(t, worker.GetVMs(""), name); vm.Owner != "bob" {
+	if vm := requireListedVM(t, worker.VMs(""), name); vm.Owner != "bob" {
 		t.Fatalf("worker did not reuse immutable metadata: owner=%q, want bob", vm.Owner)
 	}
 }

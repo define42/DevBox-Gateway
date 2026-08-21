@@ -39,11 +39,11 @@ func TestRefreshRDPReadinessProbesOnlyRequestedUsersRunningVMs(t *testing.T) {
 		t.Fatalf("probed addresses = %v, want [%s]", gotAddresses, wantAddress)
 	}
 
-	alice := worker.GetVMs("alice")
+	alice := worker.VMs("alice")
 	if len(alice) != 2 || !alice[0].RDPReady || alice[1].RDPReady {
 		t.Fatalf("unexpected Alice readiness state: %+v", alice)
 	}
-	bob := worker.GetVMs("bob")
+	bob := worker.VMs("bob")
 	if len(bob) != 1 || bob[0].RDPReady {
 		t.Fatalf("Bob VM was probed by Alice's connection: %+v", bob)
 	}
@@ -108,7 +108,7 @@ func TestOlderWebSocketObservationCannotOverwriteNewerResult(t *testing.T) {
 		observation: olderObservation,
 	}})
 
-	if got := worker.GetVMs("alice"); len(got) != 1 || got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || got[0].RDPReady {
 		t.Fatalf("older WebSocket observation overwrote newer result: %+v", got)
 	}
 }
@@ -161,7 +161,7 @@ func TestRefreshRDPReadinessHasNoGlobalConcurrencyLimit(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("uncapped readiness round did not complete")
 	}
-	for _, vm := range worker.GetVMs("alice") {
+	for _, vm := range worker.VMs("alice") {
 		if !vm.RDPReady {
 			t.Fatalf("VM %q was not updated after its probe", vm.Name)
 		}
@@ -190,19 +190,19 @@ func TestRDPReadinessSurvivesInventoryRefreshAndRejectsStaleResult(t *testing.T)
 	refreshed := original
 	refreshed.MemoryMiB = 8192
 	worker.setVMs([]VMInfo{refreshed})
-	if got := worker.GetVMs("alice"); len(got) != 1 || !got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || !got[0].RDPReady {
 		t.Fatalf("unchanged RDP target lost readiness during inventory refresh: %+v", got)
 	}
 
 	changedIP := refreshed
 	changedIP.PrimaryIP = "192.168.122.20"
 	worker.setVMs([]VMInfo{changedIP})
-	if got := worker.GetVMs("alice"); len(got) != 1 || got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || got[0].RDPReady {
 		t.Fatalf("changed RDP target retained stale readiness: %+v", got)
 	}
 
 	worker.applyRDPReadinessResults([]rdpReadinessResult{{job: staleJob, ready: true}})
-	if got := worker.GetVMs("alice"); len(got) != 1 || got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || got[0].RDPReady {
 		t.Fatalf("stale probe result was applied after IP change: %+v", got)
 	}
 
@@ -211,14 +211,14 @@ func TestRDPReadinessSurvivesInventoryRefreshAndRejectsStaleResult(t *testing.T)
 		t.Fatalf("expected one current job, got %d", len(currentJobs))
 	}
 	worker.applyRDPReadinessResults([]rdpReadinessResult{{job: currentJobs[0], ready: true}})
-	if got := worker.GetVMs("alice"); len(got) != 1 || !got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || !got[0].RDPReady {
 		t.Fatalf("current probe result was not applied: %+v", got)
 	}
 
 	worker.setVMs(nil)
 	worker.setVMs([]VMInfo{original})
 	worker.applyRDPReadinessResults([]rdpReadinessResult{{job: currentJobs[0], ready: true}})
-	if got := worker.GetVMs("alice"); len(got) != 1 || got[0].RDPReady {
+	if got := worker.VMs("alice"); len(got) != 1 || got[0].RDPReady {
 		t.Fatalf("pre-removal probe result was applied to a recreated VM: %+v", got)
 	}
 }

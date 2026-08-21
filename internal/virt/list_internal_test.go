@@ -58,9 +58,9 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < loops; i++ {
-			_ = worker.GetVMs("alice")
-			_ = worker.GetVMnames()
-			_, _ = worker.GetIPOfVM(fmt.Sprintf("alice-vm-%d", i))
+			_ = worker.VMs("alice")
+			_ = worker.VMNames()
+			_, _ = worker.VMIP(fmt.Sprintf("alice-vm-%d", i))
 		}
 	}()
 
@@ -182,7 +182,7 @@ func TestTCPEndpointNotReady(t *testing.T) {
 	}
 }
 
-func TestGetVMsFiltersByUser(t *testing.T) {
+func TestVMsFiltersByUser(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]VMInfo{
 		{Name: "alice-desktop", Owner: "alice", PrimaryIP: "10.0.0.1"},
@@ -190,30 +190,30 @@ func TestGetVMsFiltersByUser(t *testing.T) {
 		{Name: "bob-desktop", Owner: "bob", PrimaryIP: "10.0.0.3"},
 	})
 
-	aliceVMs := worker.GetVMs("alice")
+	aliceVMs := worker.VMs("alice")
 	if len(aliceVMs) != 2 {
 		t.Fatalf("expected 2 VMs for alice, got %d", len(aliceVMs))
 	}
 
-	bobVMs := worker.GetVMs("bob")
+	bobVMs := worker.VMs("bob")
 	if len(bobVMs) != 1 {
 		t.Fatalf("expected 1 VM for bob, got %d", len(bobVMs))
 	}
 
-	allVMs := worker.GetVMs("")
+	allVMs := worker.VMs("")
 	if len(allVMs) != 3 {
 		t.Fatalf("expected 3 VMs for empty user, got %d", len(allVMs))
 	}
 }
 
-func TestGetVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
+func TestVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]VMInfo{
 		{Name: "legacy-vm"},
 		{Name: "alice-desktop", Owner: "alice"},
 	})
 
-	aliceVMs := worker.GetVMs("alice")
+	aliceVMs := worker.VMs("alice")
 	if len(aliceVMs) != 1 {
 		t.Fatalf("expected 1 VM for alice, got %d", len(aliceVMs))
 	}
@@ -222,7 +222,7 @@ func TestGetVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
 	}
 }
 
-func TestGetVMnames(t *testing.T) {
+func TestVMNames(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]VMInfo{
 		{Name: "vm-a"},
@@ -230,19 +230,19 @@ func TestGetVMnames(t *testing.T) {
 		{Name: "vm-c"},
 	})
 
-	names := worker.GetVMnames()
+	names := worker.VMNames()
 	if len(names) != 3 {
 		t.Fatalf("expected 3 names, got %d", len(names))
 	}
 }
 
-func TestGetIPOfVM(t *testing.T) {
+func TestVMIP(t *testing.T) {
 	worker := &SingletonWorker{}
 	worker.setVMs([]VMInfo{
 		{Name: "my-vm", PrimaryIP: "192.168.1.100"},
 	})
 
-	ip, err := worker.GetIPOfVM("my-vm")
+	ip, err := worker.VMIP("my-vm")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestGetIPOfVM(t *testing.T) {
 		t.Fatalf("expected 192.168.1.100, got %q", ip)
 	}
 
-	_, err = worker.GetIPOfVM("nonexistent")
+	_, err = worker.VMIP("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for nonexistent VM")
 	}
@@ -327,7 +327,7 @@ func TestInvalidateVMSnapshotStopsQuotaCounting(t *testing.T) {
 	if _, ok := worker.CountVMsOwnedBy("alice"); ok {
 		t.Fatal("invalidated snapshot was treated as authoritative")
 	}
-	if vms := worker.GetVMs(""); len(vms) != 0 {
+	if vms := worker.VMs(""); len(vms) != 0 {
 		t.Fatalf("invalidation retained the visible snapshot: %+v", vms)
 	}
 }
@@ -337,7 +337,7 @@ func TestSetVMsNil(t *testing.T) {
 	worker.setVMs([]VMInfo{{Name: "test"}})
 	worker.setVMs(nil)
 
-	vms := worker.GetVMs("")
+	vms := worker.VMs("")
 	if len(vms) != 0 {
 		t.Fatalf("expected 0 VMs after setting nil, got %d", len(vms))
 	}
@@ -348,7 +348,7 @@ func TestSetVMsEmpty(t *testing.T) {
 	worker.setVMs([]VMInfo{{Name: "test"}})
 	worker.setVMs([]VMInfo{})
 
-	vms := worker.GetVMs("")
+	vms := worker.VMs("")
 	if len(vms) != 0 {
 		t.Fatalf("expected 0 VMs after setting empty, got %d", len(vms))
 	}

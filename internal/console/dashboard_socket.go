@@ -58,16 +58,16 @@ func HandleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 			log.Printf("upgrade dashboard websocket failed: %v", err)
 			return
 		}
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
 			_ = ws.Close()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("dashboard", user.GetName(), ws)
+			rejectOverUserConnectionLimit("dashboard", user.Name, ws)
 			return
 		}
 		defer unregisterConnection()
 
-		bridgeDashboardControlSocket(ws, user.GetName(), settings, sessionDeadline)
+		bridgeDashboardControlSocket(ws, user.Name, settings, sessionDeadline)
 	}
 }
 

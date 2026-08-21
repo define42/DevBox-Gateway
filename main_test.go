@@ -136,7 +136,7 @@ func TestHandleHTTPS_ServesRequest(t *testing.T) {
 func TestHandleHTTPS_ACMETLSALPNClosesConn(t *testing.T) {
 	frontTLS, settings := newTestTLSManager(t)
 
-	frontTLS.GetTLSConfig().NextProtos = []string{acmez.ACMETLS1Protocol}
+	frontTLS.TLSConfig().NextProtos = []string{acmez.ACMETLS1Protocol}
 
 	handlerCalled := make(chan struct{}, 1)
 	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {

@@ -217,7 +217,7 @@ func TestCovxUserFromContextContextKeyFallback(t *testing.T) {
 	withLoadedSession(t, m, covxRemoteAddr, nil, func(r *http.Request) {
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, sessionData{User: user})
 		got, ok := m.UserFromContext(ctx)
-		if !ok || got == nil || got.GetName() != "mona" {
+		if !ok || got == nil || got.Name != "mona" {
 			t.Fatalf("expected the context-key fallback user, got ok=%v user=%#v", ok, got)
 		}
 	})

@@ -50,7 +50,7 @@ func debugf(format string, args ...any) {
 
 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 var vmIPAddressLookup = func(hostname string) (string, error) {
-	return virt.GetInstance().GetIPOfVM(hostname)
+	return virt.GetInstance().VMIP(hostname)
 }
 
 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
@@ -381,7 +381,7 @@ func writeFrontConnectionConfirm(raw net.Conn) bool {
 }
 
 func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Time) (*tls.Conn, string, bool) {
-	clientTLS := tls.Server(raw, frontTLS.GetTLSConfig())
+	clientTLS := tls.Server(raw, frontTLS.TLSConfig())
 	if err := clientTLS.Handshake(); err != nil {
 		log.Printf("client tls handshake: %v", err)
 		return nil, "", false

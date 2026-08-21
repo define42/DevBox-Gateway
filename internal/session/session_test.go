@@ -85,8 +85,8 @@ func TestCreateAndGetSession(t *testing.T) {
 		if !ok {
 			t.Fatal("expected user from context")
 		}
-		if u.GetName() != "alice" {
-			t.Fatalf("expected user %q, got %q", "alice", u.GetName())
+		if u.Name != "alice" {
+			t.Fatalf("expected user %q, got %q", "alice", u.Name)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -222,8 +222,8 @@ func TestGetSessionFromUserName(t *testing.T) {
 	if sess.User == nil {
 		t.Fatal("expected non-nil user in session")
 	}
-	if sess.User.GetName() != "bob" {
-		t.Fatalf("expected user %q, got %q", "bob", sess.User.GetName())
+	if sess.User.Name != "bob" {
+		t.Fatalf("expected user %q, got %q", "bob", sess.User.Name)
 	}
 	if sess.ClientIP != "192.0.2.10" {
 		t.Fatalf("expected canonical client IP %q, got %q", "192.0.2.10", sess.ClientIP)
@@ -589,7 +589,7 @@ func TestSessionMiddlewareCallsNextWithSession(t *testing.T) {
 			if !ok {
 				t.Fatal("expected session data in huma context")
 			}
-			if sess.User == nil || sess.User.GetName() != "heidi" {
+			if sess.User == nil || sess.User.Name != "heidi" {
 				t.Fatalf("expected session user %q, got %#v", "heidi", sess.User)
 			}
 
@@ -627,7 +627,7 @@ func TestEnforceClientIPKeepsSessionFromSameIP(t *testing.T) {
 	})))
 	handler.ServeHTTP(rec, req)
 
-	if seenUser == nil || seenUser.GetName() != "ivan" {
+	if seenUser == nil || seenUser.Name != "ivan" {
 		t.Fatalf("expected session preserved for same IP, got %#v", seenUser)
 	}
 }

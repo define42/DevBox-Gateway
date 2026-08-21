@@ -60,7 +60,7 @@ const cloudInitPasswordHashPrefix = "$6$"
 func resolveGuestCredentials(user *types.User, guestUsername, guestPasswordHash string) (string, string, error) {
 	guestUsername = strings.TrimSpace(guestUsername)
 	if guestUsername == "" {
-		guestUsername = user.GetName()
+		guestUsername = user.Name
 	}
 
 	if guestPasswordHash == "" {
@@ -139,7 +139,7 @@ func prepareVMCreation(req VMCreateRequest, settings *config.SettingsType) (vmPr
 	if req.Owner == nil {
 		return spec, fmt.Errorf("vm owner is required")
 	}
-	spec.owner = req.Owner.GetName()
+	spec.owner = req.Owner.Name
 	spec.hostname = strings.TrimSpace(req.Name)
 
 	// Enforce the VDI naming invariant ("<username>-<hostname>") at the single

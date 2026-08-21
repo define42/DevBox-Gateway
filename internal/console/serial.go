@@ -36,15 +36,15 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		debugf("serial: request from %s user=%q vm=%q", r.RemoteAddr, user.GetName(), name)
+		debugf("serial: request from %s user=%q vm=%q", r.RemoteAddr, user.Name, name)
 
-		owned, err := virt.UserOwnsVM(name, user.GetName())
+		owned, err := virt.UserOwnsVM(name, user.Name)
 		if err != nil {
-			writeDashboardConsoleOwnershipError(w, name, user.GetName(), err)
+			writeDashboardConsoleOwnershipError(w, name, user.Name, err)
 			return
 		}
 		if !owned {
-			writeDashboardConsoleOwnershipError(w, name, user.GetName(), nil)
+			writeDashboardConsoleOwnershipError(w, name, user.Name, nil)
 			return
 		}
 		debugf("serial: ownership confirmed for vm %q; opening libvirt console", name)
@@ -72,12 +72,12 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			return
 		}
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.GetName(), func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
 			_ = ws.Close()
 			_ = console.Interrupt()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("serial", user.GetName(), ws)
+			rejectOverUserConnectionLimit("serial", user.Name, ws)
 			_ = console.Close()
 			return
 		}

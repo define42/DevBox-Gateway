@@ -131,7 +131,7 @@ func TestNewTLSManagerWithoutACME(t *testing.T) {
 		t.Fatal("expected non-nil TLSManager")
 		return
 	}
-	cfg := tm.GetTLSConfig()
+	cfg := tm.TLSConfig()
 	if cfg == nil {
 		t.Fatal("expected non-nil TLS config")
 		return
