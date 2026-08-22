@@ -38,11 +38,11 @@ func loadInventoryHostIdentity(
 ) (inventoryHostIdentity, error) {
 	canonicalURI, err := getURI()
 	if err != nil {
-		return inventoryHostIdentity{}, fmt.Errorf("get canonical libvirt URI: %w", err)
+		return inventoryHostIdentity{}, fmt.Errorf("get canonical libvirt uri: %w", err)
 	}
 	canonicalURI = strings.TrimSpace(canonicalURI)
 	if canonicalURI == "" {
-		return inventoryHostIdentity{}, fmt.Errorf("get canonical libvirt URI: empty result")
+		return inventoryHostIdentity{}, fmt.Errorf("get canonical libvirt uri: empty result")
 	}
 
 	capabilities, err := getCapabilities()
@@ -64,7 +64,7 @@ func loadInventoryHostIdentity(
 	if rawHostUUID != "" {
 		hostUUID, parseErr := uuid.Parse(rawHostUUID)
 		if parseErr != nil {
-			return inventoryHostIdentity{}, fmt.Errorf("parse libvirt host UUID: %w", parseErr)
+			return inventoryHostIdentity{}, fmt.Errorf("parse libvirt host uuid: %w", parseErr)
 		}
 		if hostUUID != uuid.Nil {
 			return inventoryHostIdentity{URI: canonicalURI, HostUUID: hostUUID.String()}, nil

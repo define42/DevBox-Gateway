@@ -57,11 +57,11 @@ func checkCPUAndMemory(testUsername, vmName string, vcpu, memory int, conn *libv
 			if v.VCPU == vcpu && v.MemoryMiB == memory {
 				return nil
 			}
-			return fmt.Errorf("vm %s has CPU %d and memory %dMB, expected CPU %d and memory %dMB", vmName, v.VCPU, v.MemoryMiB, vcpu, memory)
+			return fmt.Errorf("vm %s has cpu %d and memory %dmb, expected cpu %d and memory %dmb", vmName, v.VCPU, v.MemoryMiB, vcpu, memory)
 		}
 	}
 
-	return fmt.Errorf("vm %s not found for CPU and memory check", vmName)
+	return fmt.Errorf("vm %s not found for cpu and memory check", vmName)
 }
 
 func checkState(testUsername, vmName, state string, conn *libvirt.Connect) error {

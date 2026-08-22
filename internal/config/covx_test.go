@@ -48,7 +48,7 @@ func TestCovxEnsureSNIHashSecretReadError(t *testing.T) {
 	s := NewSettings(false)
 
 	err := EnsureSNIHashSecret(s)
-	if err == nil || !strings.Contains(err.Error(), "read SNI hash secret") {
+	if err == nil || !strings.Contains(err.Error(), "read sni hash secret") {
 		t.Fatalf("expected a secret read error, got %v", err)
 	}
 }
@@ -94,7 +94,7 @@ func TestCovxLoadOrCreateSNIHashSecretWriteError(t *testing.T) {
 	}
 
 	_, err := loadOrCreateSNIHashSecret(dataRoot)
-	if err == nil || !strings.Contains(err.Error(), "persist SNI hash secret") {
+	if err == nil || !strings.Contains(err.Error(), "persist sni hash secret") {
 		t.Fatalf("expected a secret persist error, got %v", err)
 	}
 }

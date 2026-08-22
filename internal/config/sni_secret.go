@@ -55,12 +55,12 @@ func loadOrCreateSNIHashSecret(dataRoot string) (string, error) {
 			return secret, nil
 		}
 	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("read SNI hash secret %s: %w", path, err)
+		return "", fmt.Errorf("read sni hash secret %s: %w", path, err)
 	}
 
 	buf := make([]byte, sniHashSecretBytes)
 	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate SNI hash secret: %w", err)
+		return "", fmt.Errorf("generate sni hash secret: %w", err)
 	}
 	secret := hex.EncodeToString(buf)
 
@@ -69,7 +69,7 @@ func loadOrCreateSNIHashSecret(dataRoot string) (string, error) {
 		return "", fmt.Errorf("create data root %s: %w", dataRoot, err)
 	}
 	if err := os.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
-		return "", fmt.Errorf("persist SNI hash secret %s: %w", path, err)
+		return "", fmt.Errorf("persist sni hash secret %s: %w", path, err)
 	}
 
 	return secret, nil

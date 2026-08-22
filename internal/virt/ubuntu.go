@@ -91,12 +91,12 @@ const ubuntuDomainXML = `<domain type='kvm'>
 // runtime dir, and the serial console is a PTY. The gateway reaches both only
 // through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
 // Every interpolated value is XML-escaped so a name can never alter the document.
-func UbuntuDomain(name, seedIso, storagePoolName string, vcpu int, memoryMiB int) string {
+func UbuntuDomain(name, seedISO, storagePoolName string, vcpu int, memoryMiB int) string {
 	return fmt.Sprintf(
 		ubuntuDomainXML,
 		xmlValue(name), memoryMiB, memoryMiB, vcpu,
 		xmlValue(storagePoolName), xmlValue(name),
-		xmlValue(storagePoolName), xmlValue(seedIso),
+		xmlValue(storagePoolName), xmlValue(seedISO),
 	)
 }
 

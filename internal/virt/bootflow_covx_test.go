@@ -171,7 +171,7 @@ func TestVbtcovReserveUserVMSlotCountFailure(t *testing.T) {
 	conn := vbtcovClosedConn(t)
 
 	_, err := reserveUserVMSlot(conn, vbtcovLimitSettings(t, 1), "cvbt-count-user")
-	vbtcovRequireErrContains(t, err, "count VMs owned by", "reserveUserVMSlot on closed connection")
+	vbtcovRequireErrContains(t, err, "count vms owned by", "reserveUserVMSlot on closed connection")
 }
 
 func TestVbtcovReleaseUserVMSlotDecrement(t *testing.T) {
@@ -289,12 +289,12 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 	}
 
 	vmName := fmt.Sprintf("cvbt-provision-%d", time.Now().UnixNano())
-	seedIso := vmName + "_seed.iso"
-	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedIso) })
+	seedISO := vmName + "_seed.iso"
+	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedISO) })
 
 	// Occupy the seed ISO name so the disk copy succeeds but the seed ISO
 	// creation fails on the duplicate volume.
-	vol, err := createQCOW2Volume(nil, pool, seedIso, vbtcovTinyCapacity)
+	vol, err := createQCOW2Volume(nil, pool, seedISO, vbtcovTinyCapacity)
 	if err != nil {
 		t.Fatalf("create conflicting seed volume: %v", err)
 	}
@@ -304,13 +304,13 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 	err = provisionBootVolumes(conn, settings, vmProvisionSpec{
 		poolName:      poolName,
 		vmName:        vmName,
-		seedISO:       seedIso,
+		seedISO:       seedISO,
 		hostname:      "host",
 		guestUsername: "guest",
 		passwordHash:  "$6$hash",
 		baseImagePath: source,
 	}, nil)
-	vbtcovRequireErrContains(t, err, "failed to create seed ISO", "provisionBootVolumes with occupied seed ISO name")
+	vbtcovRequireErrContains(t, err, "failed to create seed iso", "provisionBootVolumes with occupied seed ISO name")
 }
 
 func TestVbtcovEnsureBootStoragePoolAndResetArtifactsSucceed(t *testing.T) {
@@ -335,14 +335,14 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 	}
 
 	vmName := fmt.Sprintf("cvbt-provok-%d", time.Now().UnixNano())
-	seedIso := vmName + "_seed.iso"
-	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedIso) })
+	seedISO := vmName + "_seed.iso"
+	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedISO) })
 
 	source := vbtcovWriteTinyFile(t, "base.img")
 	if err := provisionBootVolumes(conn, settings, vmProvisionSpec{
 		poolName:      poolName,
 		vmName:        vmName,
-		seedISO:       seedIso,
+		seedISO:       seedISO,
 		hostname:      "cvbt-host",
 		guestUsername: "cvbtguest",
 		passwordHash:  "$6$hash",
@@ -351,7 +351,7 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 		t.Fatalf("provisionBootVolumes: %v", err)
 	}
 
-	for _, volumeName := range []string{vmName, seedIso} {
+	for _, volumeName := range []string{vmName, seedISO} {
 		vol, err := pool.LookupStorageVolByName(volumeName)
 		if err != nil {
 			t.Fatalf("expected volume %s to exist: %v", volumeName, err)

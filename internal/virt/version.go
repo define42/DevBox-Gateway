@@ -33,7 +33,7 @@ func ensureLibvirtVersion(conn *libvirt.Connect) error {
 func checkLibvirtVersion(version uint32) error {
 	if version < minLibvirtVersion {
 		return fmt.Errorf(
-			"libvirt %s is too old: VDI network isolation (<port isolated='yes'>) requires libvirt %s or newer",
+			"libvirt %s is too old: vdi network isolation (<port isolated='yes'>) requires libvirt %s or newer",
 			formatLibvirtVersion(version),
 			formatLibvirtVersion(minLibvirtVersion),
 		)

@@ -19,7 +19,7 @@ func ValidateFrontDomain(settings *Settings) error {
 		return fmt.Errorf("settings is nil")
 	}
 	if strings.TrimSpace(settings.Get(FRONT_DOMAIN)) == "" {
-		return fmt.Errorf("%s must be set; it is the required domain suffix for RDP SNI routing and the front page, and without it every RDP connection is rejected", FRONT_DOMAIN)
+		return fmt.Errorf("%s must be set; it is the required domain suffix for rdp sni routing and the front page, and without it every rdp connection is rejected", FRONT_DOMAIN)
 	}
 	return nil
 }
@@ -46,5 +46,5 @@ func ValidateRemovedSSHTunnelMode() error {
 	if err != nil || !enabled {
 		return nil
 	}
-	return fmt.Errorf("%s=true is set, but the SSH reverse-tunnel mode has been removed; remove the SSH_TUNNEL_* settings and expose LISTEN_ADDR directly instead", removedSSHTunnelEnableKey)
+	return fmt.Errorf("%s=true is set, but the ssh reverse-tunnel mode has been removed; remove the SSH_TUNNEL_* settings and expose LISTEN_ADDR directly instead", removedSSHTunnelEnableKey)
 }

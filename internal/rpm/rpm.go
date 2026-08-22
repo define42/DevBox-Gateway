@@ -173,7 +173,7 @@ func addPackageFiles(packageRPM *rpmpack.RPM, o Options) error {
 	// of silently wrapping them into the package metadata.
 	unixMTime := info.ModTime().Unix()
 	if unixMTime < 0 || unixMTime > math.MaxUint32 {
-		return fmt.Errorf("binary mtime %v is outside the RPM uint32 epoch range", info.ModTime())
+		return fmt.Errorf("binary mtime %v is outside the rpm uint32 epoch range", info.ModTime())
 	}
 	mtime := uint32(unixMTime)
 

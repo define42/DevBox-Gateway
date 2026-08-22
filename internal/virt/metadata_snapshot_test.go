@@ -217,7 +217,7 @@ func TestDomainMetadataCacheSweepRetriesIncompleteSnapshot(t *testing.T) {
 
 func TestDomainMetadataCacheSweepRetriesLoaderError(t *testing.T) {
 	const domainUUID = "33333333-3333-3333-3333-333333333333"
-	wantErr := errors.New("metadata XML unavailable")
+	wantErr := errors.New("metadata xml unavailable")
 	want := domainMetadataSnapshot{Owner: "alice", CreatedAt: "2026-08-15T12:00:00Z"}
 	calls := 0
 

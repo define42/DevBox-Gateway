@@ -238,7 +238,7 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec 
 		return err
 	}
 	if err := StartVM(spec.startConfig()); err != nil {
-		return fmt.Errorf("failed to start VM: %w", err)
+		return fmt.Errorf("failed to start vm: %w", err)
 	}
 	return nil
 }
@@ -264,8 +264,8 @@ func RemoveVM(name string, settings *config.Settings) error {
 	if err := DestroyExistingDomain(conn, name); err != nil {
 		return err
 	}
-	seedIso := name + "_seed.iso"
-	if err := storage.RemoveVolumes(conn, poolName, name, seedIso); err != nil {
+	seedISO := name + "_seed.iso"
+	if err := storage.RemoveVolumes(conn, poolName, name, seedISO); err != nil {
 		return err
 	}
 	vmLastUsed.remove(name)
@@ -278,11 +278,11 @@ func RemoveVM(name string, settings *config.Settings) error {
 // during a create. It runs while BootNewVM already holds vmNameLocks.Lock(vmName),
 // so it must NOT be reimplemented in terms of RemoveVM: RemoveVM re-acquires the
 // same (non-reentrant) per-name lock and would self-deadlock.
-func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso string) error {
+func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedISO string) error {
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
 		return fmt.Errorf("failed to destroy existing domain: %w", err)
 	}
-	if err := storage.RemoveVolumes(conn, poolName, vmName, seedIso); err != nil {
+	if err := storage.RemoveVolumes(conn, poolName, vmName, seedISO); err != nil {
 		return fmt.Errorf("failed to remove existing volumes: %w", err)
 	}
 	// The VNC socket and serial PTY are libvirt-managed and removed with the
@@ -314,7 +314,7 @@ func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec
 		spec.passwordHash,
 		spec.hostname,
 	); err != nil {
-		return fmt.Errorf("failed to create seed ISO: %w", err)
+		return fmt.Errorf("failed to create seed iso: %w", err)
 	}
 	return nil
 }

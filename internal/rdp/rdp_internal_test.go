@@ -38,7 +38,7 @@ func TestGetSubdomain(t *testing.T) {
 	}
 }
 
-func TestTlsVersionLabel(t *testing.T) {
+func TestTLSVersionLabel(t *testing.T) {
 	tests := []struct {
 		version uint16
 		want    string

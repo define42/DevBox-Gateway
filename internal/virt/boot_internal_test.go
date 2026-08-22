@@ -23,7 +23,7 @@ func bootLimitSettings(t *testing.T, limit int) *config.Settings {
 
 // TestReserveUserVMSlotUsesCachedCount proves the quota check trusts an
 // authoritative cached count and never falls back to live counting: the
-// invalid zero-value connection would fail the fallback scan with a "count VMs
+// invalid zero-value connection would fail the fallback scan with a "count vms
 // owned by" error rather than the limit refusal asserted here.
 func TestReserveUserVMSlotUsesCachedCount(t *testing.T) {
 	settings := bootLimitSettings(t, 2)
@@ -72,7 +72,7 @@ func TestReserveUserVMSlotFallsBackToLiveCountWhenCacheUnavailable(t *testing.T)
 		"fallback-count-user",
 		func(string) (int, bool) { return 0, false },
 	)
-	if err == nil || !strings.Contains(err.Error(), "count VMs owned by") {
+	if err == nil || !strings.Contains(err.Error(), "count vms owned by") {
 		t.Fatalf("reserve without cache on invalid connection = %v, want live-count error", err)
 	}
 }

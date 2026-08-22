@@ -206,7 +206,7 @@ type domainXMLDescGetter func(libvirt.DomainXMLFlags) (string, error)
 func loadDomainMetadataSnapshot(getXML domainXMLDescGetter) (domainMetadataSnapshot, error) {
 	xmlDesc, err := getXML(libvirt.DOMAIN_XML_INACTIVE)
 	if err != nil {
-		return domainMetadataSnapshot{}, fmt.Errorf("get inactive domain XML: %w", err)
+		return domainMetadataSnapshot{}, fmt.Errorf("get inactive domain xml: %w", err)
 	}
 	return parseDomainMetadataSnapshot(xmlDesc)
 }
@@ -214,7 +214,7 @@ func loadDomainMetadataSnapshot(getXML domainXMLDescGetter) (domainMetadataSnaps
 func parseDomainMetadataSnapshot(xmlDesc string) (domainMetadataSnapshot, error) {
 	var document domainMetadataXMLDocument
 	if err := xml.Unmarshal([]byte(xmlDesc), &document); err != nil {
-		return domainMetadataSnapshot{}, fmt.Errorf("parse domain metadata XML: %w", err)
+		return domainMetadataSnapshot{}, fmt.Errorf("parse domain metadata xml: %w", err)
 	}
 	return domainMetadataSnapshot{
 		Owner:     strings.TrimSpace(document.Metadata.Owner),

@@ -195,11 +195,11 @@ func readTPKT(c net.Conn) ([]byte, error) {
 		return nil, err
 	}
 	if h[0] != tpkt.FASTPATH_ACTION_X224 || h[1] != 0x00 {
-		return nil, fmt.Errorf("not TPKT (v=%02x r=%02x)", h[0], h[1])
+		return nil, fmt.Errorf("not tpkt (v=%02x r=%02x)", h[0], h[1])
 	}
 	n := int(binary.BigEndian.Uint16(h[2:4]))
 	if n < 4 || n > 64*1024 {
-		return nil, fmt.Errorf("invalid TPKT length %d", n)
+		return nil, fmt.Errorf("invalid tpkt length %d", n)
 	}
 	b := make([]byte, n)
 	copy(b[:4], h)
@@ -525,11 +525,11 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 	debugf("backend selected protocol ok=%v value=0x%08x", ok, sel)
 	if !ok {
 		log.Printf("backend did not include RDP_NEG_RSP (cannot confirm TLS); backend=%s", backendAddr)
-		return nil, fmt.Errorf("backend did not confirm TLS")
+		return nil, fmt.Errorf("backend did not confirm tls")
 	}
 	if sel != x224.PROTOCOL_SSL {
 		log.Printf("backend did not select TLS (selected=0x%08x) backend=%s", sel, backendAddr)
-		return nil, fmt.Errorf("backend did not select TLS")
+		return nil, fmt.Errorf("backend did not select tls")
 	}
 
 	backendTLS := tls.Client(backendRaw, backendTLSConfig(sni))

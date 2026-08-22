@@ -118,7 +118,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	}
 
 	if err := config.EnsureSNIHashSecret(settings); err != nil {
-		return nil, fmt.Errorf("failed to resolve SNI hash secret: %w", err)
+		return nil, fmt.Errorf("failed to resolve sni hash secret: %w", err)
 	}
 
 	mux := NewHandler(sessionManager, settings)

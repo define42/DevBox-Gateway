@@ -100,7 +100,7 @@ func reserveUserVMSlotWithCounter(
 		count, err = countDomainsOwnedBy(conn, owner)
 		if err != nil {
 			release()
-			return nil, fmt.Errorf("count VMs owned by %s: %w", owner, err)
+			return nil, fmt.Errorf("count vms owned by %s: %w", owner, err)
 		}
 	}
 	// Reservations concurrently live for one owner observe strictly increasing
@@ -112,7 +112,7 @@ func reserveUserVMSlotWithCounter(
 	// snapshot staleness documented on reserveUserVMSlot.
 	if have := count + inflightIncludingThis - 1; have >= limit {
 		release()
-		return nil, fmt.Errorf("%w: user %s already has %d of %d allowed VMs (including creations in progress)", ErrVMLimitReached, owner, have, limit)
+		return nil, fmt.Errorf("%w: user %s already has %d of %d allowed vms (including creations in progress)", ErrVMLimitReached, owner, have, limit)
 	}
 	return release, nil
 }

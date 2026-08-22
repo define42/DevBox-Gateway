@@ -162,7 +162,7 @@ func TestMcovBootGatewayRejectsRemovedSSHTunnelMode(t *testing.T) {
 	t.Setenv("SSH_TUNNEL_ENABLE", "true")
 
 	_, err := bootGateway()
-	if err == nil || !strings.Contains(err.Error(), "SSH reverse-tunnel mode has been removed") {
+	if err == nil || !strings.Contains(err.Error(), "ssh reverse-tunnel mode has been removed") {
 		t.Fatalf("expected removed SSH-tunnel mode error, got %v", err)
 	}
 }
@@ -177,7 +177,7 @@ func TestMcovBootGatewaySNIHashSecretError(t *testing.T) {
 	}
 
 	_, err := bootGateway()
-	if err == nil || !strings.Contains(err.Error(), "failed to resolve SNI hash secret") {
+	if err == nil || !strings.Contains(err.Error(), "failed to resolve sni hash secret") {
 		t.Fatalf("expected SNI hash secret error, got %v", err)
 	}
 }
