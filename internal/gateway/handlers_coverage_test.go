@@ -1,9 +1,6 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/dashboard"
-	"devboxgateway/internal/session"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +8,10 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 func TestExtractCredentialsFromForm(t *testing.T) {

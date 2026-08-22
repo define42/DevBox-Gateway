@@ -1,10 +1,11 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // viocovBrokenBaseImageSettings points BASE_IMAGE_DIR at a regular file so

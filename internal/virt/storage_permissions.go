@@ -1,7 +1,6 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -10,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"libvirt.org/go/libvirt"
 )

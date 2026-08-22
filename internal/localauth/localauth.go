@@ -7,9 +7,10 @@ package localauth
 import (
 	"crypto/sha256"
 	"crypto/subtle"
-	"devboxgateway/internal/config"
 	"encoding/hex"
 	"strings"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // digestSeparator delimits individual digests inside LOCAL_USER_SHA256.

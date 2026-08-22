@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"devboxgateway/internal/gateway"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/define42/devbox-gateway/internal/gateway"
 )
 
 func main() {

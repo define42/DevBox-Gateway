@@ -1,12 +1,13 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 func TestStaticFilesDisableCaching(t *testing.T) {

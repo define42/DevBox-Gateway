@@ -2,12 +2,13 @@ package virt
 
 import (
 	"context"
-	"devboxgateway/internal/config"
 	"encoding/xml"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 func TestStoragePermissionHelpers(t *testing.T) {

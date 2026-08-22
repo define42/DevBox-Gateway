@@ -3,10 +3,6 @@ package rdp
 
 import (
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -17,6 +13,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/tomatome/grdp/core"
 	"github.com/tomatome/grdp/glog"

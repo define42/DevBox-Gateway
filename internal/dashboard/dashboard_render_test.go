@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"devboxgateway/internal/virt"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/virt"
 )
 
 func TestRenderDashboardPage(t *testing.T) {

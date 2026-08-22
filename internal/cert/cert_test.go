@@ -5,14 +5,15 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
 	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"

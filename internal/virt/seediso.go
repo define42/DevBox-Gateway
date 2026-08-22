@@ -1,6 +1,6 @@
 package virt
 
-import "devboxgateway/internal/cloudinit"
+import "github.com/define42/devbox-gateway/internal/cloudinit"
 
 type (
 	// SeedUserData is the cloud-init user-data document stored on the seed ISO.

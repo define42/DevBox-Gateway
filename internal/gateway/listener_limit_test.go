@@ -1,11 +1,12 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
 	"net"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // newLimitTestSettings builds settings with the global and per-source

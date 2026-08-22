@@ -2,8 +2,6 @@ package gateway
 
 import (
 	"crypto/sha256"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 func TestLoginRateLimiterScopesPrimaryLimitToUsernameAndIP(t *testing.T) {

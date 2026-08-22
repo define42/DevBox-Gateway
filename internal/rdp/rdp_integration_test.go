@@ -2,11 +2,6 @@ package rdp
 
 import (
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/types"
-	"devboxgateway/internal/virt"
 	"encoding/binary"
 	"encoding/xml"
 	"errors"
@@ -18,6 +13,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/tomatome/grdp/protocol/x224"
 	"libvirt.org/go/libvirt"

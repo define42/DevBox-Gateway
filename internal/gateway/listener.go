@@ -3,10 +3,6 @@ package gateway
 import (
 	"bufio"
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/rdp"
-	"devboxgateway/internal/session"
 	"errors"
 	"fmt"
 	"log"
@@ -18,6 +14,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/rdp"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 // rejectionLogInterval throttles connection-cap logging so a flood at the cap

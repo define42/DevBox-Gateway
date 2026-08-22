@@ -2,9 +2,10 @@ package localauth
 
 import (
 	"crypto/sha256"
-	"devboxgateway/internal/config"
 	"encoding/hex"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // digest returns the hex sha256 of "username:password", matching what an

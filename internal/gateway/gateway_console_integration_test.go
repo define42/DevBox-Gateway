@@ -3,14 +3,15 @@ package gateway
 import (
 	"context"
 	"crypto/tls"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"github.com/gorilla/websocket"
 )

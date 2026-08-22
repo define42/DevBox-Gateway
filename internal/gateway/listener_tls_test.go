@@ -3,14 +3,15 @@ package gateway
 import (
 	"bufio"
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/mholt/acmez"
 )

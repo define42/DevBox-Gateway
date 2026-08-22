@@ -1,9 +1,6 @@
 package dashboard
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
-	"devboxgateway/internal/virt"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -13,6 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"libvirt.org/go/libvirt"
 )

@@ -8,9 +8,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
-	"devboxgateway/internal/virt"
 	"encoding/pem"
 	"fmt"
 	"log"
@@ -20,6 +17,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"

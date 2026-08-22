@@ -2,15 +2,6 @@ package gateway
 
 import (
 	"context"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
-	"devboxgateway/internal/ldap"
-	"devboxgateway/internal/localauth"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/types"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
-	"devboxgateway/static"
 	"errors"
 	"fmt"
 	"html"
@@ -22,8 +13,18 @@ import (
 	"strings"
 	"time"
 
-	consolepkg "devboxgateway/internal/console"
-	dashboard "devboxgateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/ldap"
+	"github.com/define42/devbox-gateway/internal/localauth"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
+	"github.com/define42/devbox-gateway/static"
+
+	consolepkg "github.com/define42/devbox-gateway/internal/console"
+	dashboard "github.com/define42/devbox-gateway/internal/dashboard"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"

@@ -1,16 +1,17 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/dashboard"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/types"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/types"
 )
 
 func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username string) *http.Cookie {

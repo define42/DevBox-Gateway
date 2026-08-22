@@ -1,12 +1,13 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 const loginRateLimitCleanupInterval = time.Minute

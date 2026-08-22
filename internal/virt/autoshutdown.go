@@ -2,9 +2,10 @@ package virt
 
 import (
 	"context"
-	"devboxgateway/internal/config"
 	"log"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // autoShutdownSweepInterval is how often the auto-shutdown worker examines

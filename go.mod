@@ -1,4 +1,4 @@
-module devboxgateway
+module github.com/define42/devbox-gateway
 
 go 1.26.0
 

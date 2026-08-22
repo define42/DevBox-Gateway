@@ -3,12 +3,6 @@ package gateway
 import (
 	"context"
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/dashboard"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
 	"encoding/json"
 	"io"
 	"net"
@@ -18,6 +12,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
 )
 
 const (

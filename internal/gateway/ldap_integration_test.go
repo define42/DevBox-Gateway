@@ -2,12 +2,13 @@ package gateway
 
 import (
 	"context"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/ldap"
 	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/ldap"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"

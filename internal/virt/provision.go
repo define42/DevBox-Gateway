@@ -1,12 +1,13 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/types"
-	"devboxgateway/internal/vmname"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"libvirt.org/go/libvirt"
 )

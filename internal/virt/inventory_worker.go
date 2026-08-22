@@ -3,7 +3,6 @@ package virt
 import (
 	"context"
 	"crypto/hmac"
-	"devboxgateway/internal/hash"
 	"fmt"
 	"log"
 	"maps"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/hash"
 
 	"libvirt.org/go/libvirt"
 )

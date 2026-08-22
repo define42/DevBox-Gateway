@@ -3,10 +3,6 @@
 package dashboard
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -14,6 +10,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
 )
 
 const (

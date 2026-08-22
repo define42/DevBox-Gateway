@@ -1,10 +1,11 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // newBaseImageSettings returns settings whose BaseImageDir is seeded with the

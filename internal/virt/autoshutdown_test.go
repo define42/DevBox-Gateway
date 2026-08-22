@@ -1,11 +1,12 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"errors"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // autoShutdownFixture wires an autoShutdownSweeper to fakes: a controllable

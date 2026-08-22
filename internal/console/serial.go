@@ -1,8 +1,6 @@
 package console
 
 import (
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"errors"
 	"io"
 	"log"
@@ -10,6 +8,9 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"

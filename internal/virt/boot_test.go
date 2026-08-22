@@ -1,8 +1,6 @@
 package virt_test
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +11,10 @@ import (
 	"testing"
 	"time"
 
-	typesUser "devboxgateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/virt"
+
+	typesUser "github.com/define42/devbox-gateway/internal/types"
 
 	"libvirt.org/go/libvirt"
 )

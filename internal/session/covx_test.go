@@ -2,12 +2,13 @@ package session
 
 import (
 	"context"
-	"devboxgateway/internal/types"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/alexedwards/scs/v2"
 )

@@ -3,9 +3,6 @@ package console
 import (
 	"bufio"
 	"context"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/types"
 	"errors"
 	"io"
 	"net"
@@ -14,6 +11,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"

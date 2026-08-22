@@ -1,10 +1,11 @@
 package ldap
 
 import (
-	"devboxgateway/internal/config"
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/go-ldap/ldap/v3"
 )

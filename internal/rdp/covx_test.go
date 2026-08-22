@@ -3,9 +3,6 @@ package rdp
 import (
 	"bytes"
 	"crypto/tls"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -15,6 +12,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/tomatome/grdp/protocol/x224"
 	"libvirt.org/go/libvirt"

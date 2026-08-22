@@ -3,17 +3,18 @@ package gateway
 
 import (
 	"context"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
-	consolepkg "devboxgateway/internal/console"
-	"devboxgateway/internal/rdp"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
+	consolepkg "github.com/define42/devbox-gateway/internal/console"
+	"github.com/define42/devbox-gateway/internal/rdp"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 )
 
 // Run boots the gateway and blocks until ctx is canceled or the listener stops.

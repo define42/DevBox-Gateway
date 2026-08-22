@@ -1,7 +1,6 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"libvirt.org/go/libvirt"
 )

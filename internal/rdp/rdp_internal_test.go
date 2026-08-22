@@ -2,11 +2,12 @@ package rdp
 
 import (
 	"crypto/tls"
-	"devboxgateway/internal/session"
 	"io"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/session"
 
 	"github.com/tomatome/grdp/protocol/x224"
 )

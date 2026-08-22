@@ -1,16 +1,17 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/dashboard"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
 )
 
 func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.SettingsType {

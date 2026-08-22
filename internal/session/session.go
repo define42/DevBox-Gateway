@@ -3,7 +3,6 @@ package session
 
 import (
 	"context"
-	"devboxgateway/internal/types"
 	"encoding/gob"
 	"errors"
 	"log"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/alexedwards/scs/v2/memstore"

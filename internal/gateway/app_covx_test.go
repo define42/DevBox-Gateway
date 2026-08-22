@@ -3,9 +3,6 @@ package gateway
 import (
 	"context"
 	"crypto/tls"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +12,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"libvirt.org/go/libvirt"
 )

@@ -1,9 +1,10 @@
 package ldap
 
 import (
-	"devboxgateway/internal/config"
 	"net"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // startClosingLDAPListener starts a loopback TCP listener that immediately

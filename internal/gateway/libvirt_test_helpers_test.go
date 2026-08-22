@@ -1,13 +1,14 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 const (

@@ -1,13 +1,14 @@
 package gateway_test
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/gateway"
-	"devboxgateway/internal/session"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/gateway"
+	"github.com/define42/devbox-gateway/internal/session"
 )
 
 func TestNewHandlerHealth(t *testing.T) {

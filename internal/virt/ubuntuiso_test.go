@@ -1,13 +1,14 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/types"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/types"
 )
 
 const powerTestTimeout = 30 * time.Second

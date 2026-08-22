@@ -3,13 +3,14 @@ package cert
 import (
 	"context"
 	"crypto/tls"
-	"devboxgateway/internal/config"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/caddyserver/certmagic"
 )

@@ -3,11 +3,12 @@ package ldap
 
 import (
 	"crypto/tls"
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/types"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/go-ldap/ldap/v3"
 )

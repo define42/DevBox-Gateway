@@ -1,17 +1,18 @@
 package gateway
 
 import (
-	"devboxgateway/internal/config"
-	"devboxgateway/internal/hash"
-	"devboxgateway/internal/types"
-	"devboxgateway/internal/virt"
-	"devboxgateway/internal/vmname"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	dashboard "devboxgateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
+
+	dashboard "github.com/define42/devbox-gateway/internal/dashboard"
 )
 
 const dashboardVMTestTimeout = 30 * time.Second

@@ -2,8 +2,9 @@ package virt
 
 import (
 	"bytes"
-	"devboxgateway/internal/config"
 	"log"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/google/uuid"
 	"libvirt.org/go/libvirt"

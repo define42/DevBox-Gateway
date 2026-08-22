@@ -1,11 +1,12 @@
 package session
 
 import (
-	"devboxgateway/internal/types"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"

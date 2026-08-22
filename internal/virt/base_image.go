@@ -2,12 +2,13 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/define42/devbox-gateway/internal/config"
 )
 
 // isBaseImageName reports whether name has a recognised base-image extension

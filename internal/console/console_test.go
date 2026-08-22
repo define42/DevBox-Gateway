@@ -1,13 +1,14 @@
 package console
 
 import (
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/go-chi/chi/v5"
 )

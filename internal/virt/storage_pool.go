@@ -1,13 +1,14 @@
 package virt
 
 import (
-	"devboxgateway/internal/config"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"libvirt.org/go/libvirt"
 )

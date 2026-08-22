@@ -2,12 +2,13 @@ package rdp
 
 import (
 	"crypto/tls"
-	"devboxgateway/internal/cert"
-	"devboxgateway/internal/config"
 	"io"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/cert"
+	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/tomatome/grdp/protocol/x224"
 )

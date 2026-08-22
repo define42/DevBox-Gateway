@@ -1,13 +1,14 @@
 package console
 
 import (
-	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/gorilla/websocket"
 	"libvirt.org/go/libvirt"

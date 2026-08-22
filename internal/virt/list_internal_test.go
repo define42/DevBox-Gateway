@@ -1,12 +1,13 @@
 package virt
 
 import (
-	"devboxgateway/internal/hash"
 	"fmt"
 	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/hash"
 
 	"libvirt.org/go/libvirt"
 )
