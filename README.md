@@ -574,6 +574,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 ├── cmd/devbox-gateway/  Minimal process entrypoint.
 ├── internal/
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
+│   ├── cloudinit/   NoCloud document and seed ISO generation.
 │   ├── config/      Environment-backed settings registry (the only place env
 │   │                vars may be read from).
 │   ├── console/     Serial console and noVNC WebSocket handlers.
