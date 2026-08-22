@@ -26,9 +26,9 @@ var ErrEmptyPassword = errors.New("ldap: password must not be empty")
 // connection anonymous and allow the subsequent search to run without a bind.
 var ErrEmptyIdentifier = errors.New("ldap: login identifier must not be empty")
 
-// Configured reports whether an LDAP directory is configured. When LDAP_URL is
-// empty the gateway runs in local-users-only mode (see internal/localauth) and
-// callers should skip LDAP entirely rather than attempt a dial.
+// Configured reports whether the required LDAP directory URL is present. Boot
+// validation rejects an empty URL; this helper also lets login-page rendering
+// fail closed when exercised independently in tests.
 func Configured(settings *config.Settings) bool {
 	return strings.TrimSpace(settings.Get(config.LDAP_URL)) != ""
 }

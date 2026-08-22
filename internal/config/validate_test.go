@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestValidateLDAPURLAcceptsDefault(t *testing.T) {
+	if err := ValidateLDAPURL(NewSettings(false)); err != nil {
+		t.Fatalf("expected default LDAP_URL to be valid, got %v", err)
+	}
+}
+
+func TestValidateLDAPURLRejectsEmpty(t *testing.T) {
+	for _, value := range []string{"", "   "} {
+		t.Setenv(LDAP_URL, value)
+		err := ValidateLDAPURL(NewSettings(false))
+		if err == nil {
+			t.Fatalf("expected empty LDAP_URL (%q) to be rejected", value)
+		}
+		if !strings.Contains(err.Error(), LDAP_URL) {
+			t.Fatalf("expected error to name LDAP_URL, got %v", err)
+		}
+	}
+}
+
+func TestValidateLDAPURLRejectsNilSettings(t *testing.T) {
+	if err := ValidateLDAPURL(nil); err == nil {
+		t.Fatal("expected nil settings to be rejected")
+	}
+}
+
 func TestValidateFrontDomainAcceptsDefault(t *testing.T) {
 	// The default FRONT_DOMAIN is non-empty, so a freshly built settings object
 	// passes without any override.

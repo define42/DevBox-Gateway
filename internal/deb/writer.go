@@ -108,8 +108,8 @@ func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 // packageFiles returns the install manifest. Modes are fixed here rather than
 // copied from the source files so the package is deterministic regardless of the
 // build checkout's umask. The config file is installed 0640 (root read/write, no
-// group or world read) because it can hold secrets such as a LOCAL_USER_SHA256
-// list of password digests. The data archive owns every entry as root:root
+// group or world read) because it can hold secrets such as SNI_HASH_SECRET.
+// The data archive owns every entry as root:root
 // (uid/gid 0), so 0640 keeps the file readable only by root. The other files
 // carry no secrets and use the conventional world-readable modes.
 func packageFiles(o Options) ([]debFile, error) {

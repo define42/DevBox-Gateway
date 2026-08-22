@@ -1,9 +1,7 @@
 package gateway
 
 import (
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -410,13 +408,11 @@ func TestHcovLoginPostRejectsInvalidUsername(t *testing.T) {
 // TestHcovLoginPostPairLockAllowsSameUserFromNewIP verifies that the primary
 // lock follows the username-and-IP pair rather than globally locking the user.
 func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
-	t.Setenv(config.LDAP_URL, "")
-	t.Setenv(config.LOCAL_USER_SHA256, localUserSHA256("hcovlockuser", "secret"))
 	t.Setenv(config.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "1")
 	t.Setenv(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "50")
 	t.Setenv(config.LOGIN_RATE_LIMIT_WINDOW, "1m")
 	t.Setenv(config.LOGIN_RATE_LIMIT_LOCKOUT, "1h")
-	router := NewHandler(session.New(), config.NewSettings(false))
+	router := newTestLoginRouter(t, config.NewSettings(false))
 	failedForm := url.Values{"username": {"hcovlockuser"}, "password": {"wrong"}}.Encode()
 
 	rec := hcovPostLoginForm(t, router, "198.51.100.71:4000", failedForm)
@@ -440,23 +436,19 @@ func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
 	}
 }
 
-func TestHcovLoginPostLocalUserSuccess(t *testing.T) {
-	settings := config.NewSettings(false)
-	digest := sha256.Sum256([]byte("hcovlocal:Secret1!"))
-	if err := settings.OverwriteForTestString(config.LOCAL_USER_SHA256, hex.EncodeToString(digest[:])); err != nil {
-		t.Fatalf("overwrite LOCAL_USER_SHA256: %v", err)
-	}
-	router := NewHandler(session.New(), settings)
+func TestHcovLoginPostFailsClosedWithoutLDAP(t *testing.T) {
+	t.Setenv(config.LDAP_URL, "")
+	router := NewHandler(session.New(), config.NewSettings(false))
 
-	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"hcovlocal"}, "password": {"Secret1!"}}.Encode())
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"hcovuser"}, "password": {"Secret1!"}}.Encode())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected failed login page, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/api/dashboard" {
-		t.Fatalf("expected redirect to /api/dashboard, got %q", loc)
+	if !strings.Contains(rec.Body.String(), "Invalid credentials.") {
+		t.Fatalf("expected invalid credentials message, got %q", rec.Body.String())
 	}
-	if !responseSetsSessionCookie(rec.Result()) {
-		t.Fatal("expected successful login to set a session cookie")
+	if responseSetsSessionCookie(rec.Result()) {
+		t.Fatal("expected failed LDAP login not to create a session")
 	}
 }
 

@@ -179,6 +179,9 @@ func loadBootSettings() (*config.Settings, error) {
 	}
 
 	settings := config.NewSettings(true)
+	if err := config.ValidateLDAPURL(settings); err != nil {
+		return nil, err
+	}
 
 	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
 	// routing label; with it empty every RDP connection is rejected while the

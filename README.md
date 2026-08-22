@@ -36,7 +36,6 @@ else is treated as an RDP X.224 Connection Request.
 - [Configuration](#configuration)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
-  - [Local users](#local-users)
   - [Libvirt and VM storage](#libvirt-and-vm-storage)
 - [Building from source](#building-from-source)
 - [Testing and linting](#testing-and-linting)
@@ -343,7 +342,7 @@ file**, which keeps container and development overrides working.
 | `VDI_AUTO_SHUTDOWN_HOURS` | `0`                                                                                                              | Shut down a running VDI after this many hours without use. A VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard; the timestamp is persisted in the domain metadata so it survives gateway restarts. The guest is first asked to power off (ACPI power button) and is force-stopped if still running 5 minutes later. Set `<=0` to disable auto-shutdown (the default). |
 | `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `VM_MEMORY_MIB`           | `4096`                                                                                                           | Memory in MiB assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
-| `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | LDAP server URL.                                                                                  |
+| `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | Required LDAP server URL. The gateway refuses to start when empty.                                |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |
 | `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Domain appended to bare usernames before they are substituted into `LDAP_USER_FILTER`.            |
@@ -351,7 +350,6 @@ file**, which keeps container and development overrides working.
 | `ADMIN_GROUP`             | _(empty)_                                                                                                        | Single LDAP group whose direct members receive administrator access at login. Accepts a bare name or full DN and matches `memberOf` case-insensitively. Empty disables administrator access. |
 | `LDAP_STARTTLS`           | `false`                                                                                                          | When `true`, upgrade plain LDAP connections with StartTLS.                                        |
 | `LDAP_SKIP_TLS_VERIFY`    | `false`                                                                                                          | When `true`, skip TLS certificate verification against the LDAP server.                           |
-| `LOCAL_USER_SHA256`       | _(empty)_                                                                                                        | `;`-delimited list of `sha256("username:password")` hex digests for local users authenticated without LDAP. Checked before LDAP. |
 | `LOGIN_RATE_LIMIT_MAX_ATTEMPTS` | `5`                                                                                                      | Maximum failed attempts per username-and-client-IP pair within `LOGIN_RATE_LIMIT_WINDOW`. Set `<=0` to disable login throttling. |
 | `LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS` | `50`                                                                                                  | Higher password-spray limit across all usernames from one client IP. Set `<=0` to disable only the IP-wide limit. |
 | `LOGIN_RATE_LIMIT_WINDOW` | `5m`                                                                                                             | Rolling window for failed login attempt counting.                                                 |
@@ -425,42 +423,7 @@ Both access and administrator group checks use direct membership only — nested
 group membership is not resolved, so the group must appear directly in the
 user's `memberOf`. Directories where `memberOf` is an operational attribute
 (e.g. OpenLDAP's `memberof` overlay) are supported; the gateway requests the
-attribute explicitly. `LOCAL_USER_SHA256` users bypass LDAP entirely and are
-always non-administrators; `ADMIN_GROUP` never promotes a local login by
-username.
-
-### Local users
-
-Alongside LDAP, a small set of accounts can be authenticated offline against a
-static list of digests in `LOCAL_USER_SHA256` — useful for a break-glass login
-or a deployment without a directory. Each entry is the lowercase hex
-`sha256("<username>:<password>")`, and multiple entries are separated by `;`.
-
-Generate a digest:
-
-```sh
-printf '%s:%s' alice 's3cret' | sha256sum
-```
-
-Then configure one or more (whitespace around entries is ignored):
-
-```sh
-LOCAL_USER_SHA256=2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b;<another-digest>
-```
-
-Local users are checked **before** LDAP, so a successful local match skips the
-directory entirely (no LDAP round-trip, and it keeps working if LDAP is down). A
-login that doesn't match any digest falls through to LDAP as usual. Leave
-`LOCAL_USER_SHA256` empty to disable local users. Because the credential is a
-plain salt-less digest, treat the config file as a secret and use strong,
-unique passwords.
-
-**Local users only (no LDAP).** Set `LDAP_URL=` (empty) to run without a
-directory at all. The gateway then authenticates solely against
-`LOCAL_USER_SHA256` and never attempts an LDAP connection — a login that matches
-no digest is simply rejected. With the default non-empty `LDAP_URL`, the gateway
-still treats LDAP as a fallback, so for a clean local-only deployment clear
-`LDAP_URL` as well.
+attribute explicitly.
 
 ### Libvirt and VM storage
 
@@ -607,7 +570,6 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
 │   ├── hash/        Password/credential hashing helpers.
 │   ├── ldap/        LDAP login authentication.
-│   ├── localauth/   Local password authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── rpm/         RPM package construction and manifests.
 │   ├── session/     Cookie session manager and middleware.

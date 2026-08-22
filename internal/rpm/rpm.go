@@ -143,7 +143,7 @@ type packageFile struct {
 
 // packageFiles returns the install manifest. The config file is installed 0640
 // (root read/write, no group or world read) because it can hold secrets such as
-// a LOCAL_USER_SHA256 list of password digests. Combined with the root:root
+// SNI_HASH_SECRET. Combined with the root:root
 // owner set in addPackageFiles, that keeps the file readable only by root. The
 // remaining files carry no secrets and use the conventional world-readable
 // modes. The LICENSE file is bundled when present; packaging tolerates its

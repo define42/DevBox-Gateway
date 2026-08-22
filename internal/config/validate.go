@@ -7,6 +7,20 @@ import (
 	"strings"
 )
 
+// ValidateLDAPURL ensures the required LDAP authentication backend is set.
+// Without another authentication mechanism, starting with an empty LDAP_URL
+// would leave every user unable to log in, so reject that configuration at
+// boot instead of serving a permanently unusable login page.
+func ValidateLDAPURL(settings *Settings) error {
+	if settings == nil {
+		return fmt.Errorf("settings is nil")
+	}
+	if strings.TrimSpace(settings.Get(LDAP_URL)) == "" {
+		return fmt.Errorf("%s must be set; LDAP is the required authentication backend", LDAP_URL)
+	}
+	return nil
+}
+
 // ValidateFrontDomain ensures FRONT_DOMAIN is set. It is required for RDP SNI
 // routing: every VM is reached at an opaque "<label>.<FRONT_DOMAIN>" host, and
 // the RDP front handler resolves a connection by stripping that suffix to

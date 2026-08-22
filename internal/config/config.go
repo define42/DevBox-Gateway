@@ -173,7 +173,6 @@ func (s *Settings) setAuthDefaults() {
 	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
-	s.SetSecretString(LOCAL_USER_SHA256, "';'-delimited list of sha256(\"username:password\") hex digests for local users authenticated without LDAP", "")
 	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username-and-client-IP pair within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)
 	s.SetInt(LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "Maximum failed login attempts allowed across all usernames from one client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables the IP-wide limit", 50)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
@@ -500,7 +499,6 @@ const (
 	LDAP_USER_DOMAIN                 = "LDAP_USER_DOMAIN"
 	LDAP_STARTTLS                    = "LDAP_STARTTLS"
 	LDAP_SKIP_TLS_VERIFY             = "LDAP_SKIP_TLS_VERIFY"
-	LOCAL_USER_SHA256                = "LOCAL_USER_SHA256"
 	LOGIN_RATE_LIMIT_MAX_ATTEMPTS    = "LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
 	LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS = "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS"
 	LOGIN_RATE_LIMIT_WINDOW          = "LOGIN_RATE_LIMIT_WINDOW"

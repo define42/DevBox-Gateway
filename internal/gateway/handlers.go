@@ -17,7 +17,6 @@ import (
 	"github.com/define42/devbox-gateway/internal/hash"
 	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/ldap"
-	"github.com/define42/devbox-gateway/internal/localauth"
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
@@ -84,7 +83,18 @@ func validateLoginUsername(username string) (string, error) {
 	return vmname.ValidateUsername(username)
 }
 
+type loginAuthenticator func(username, password string, settings *config.Settings) (*identity.User, error)
+
 func handleLoginPost(sessionManager *session.Manager, settings *config.Settings, loginLimiter *loginRateLimiter) http.HandlerFunc {
+	return handleLoginPostWithAuthenticator(sessionManager, settings, loginLimiter, ldap.AuthenticateAccess)
+}
+
+func handleLoginPostWithAuthenticator(
+	sessionManager *session.Manager,
+	settings *config.Settings,
+	loginLimiter *loginRateLimiter,
+	authenticate loginAuthenticator,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Gate login behind the same-origin check that guards logout and every
 		// dashboard POST. Without it the endpoint is open to login CSRF: an
@@ -125,7 +135,7 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.Settings,
 			return
 		}
 
-		user, err := authenticateLogin(username, password, settings)
+		user, err := authenticate(username, password, settings)
 		if err != nil {
 			log.Printf("auth failed for %s: %v", strconv.Quote(username), err)
 			recordFailedLogin(w, settings, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
@@ -152,21 +162,6 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.Settings, loginLi
 		return
 	}
 	serveLogin(w, settings, message)
-}
-
-// authenticateLogin authorizes a login attempt. Local users (matched against the
-// LOCAL_USER_SHA256 digests) are checked first so the gateway works without a
-// directory and without an LDAP round-trip; otherwise the credentials are
-// validated against LDAP.
-func authenticateLogin(username, password string, settings *config.Settings) (*identity.User, error) {
-	if localauth.Validate(username, password, settings) {
-		return identity.New(username)
-	}
-	if !ldap.Configured(settings) {
-		// Local-users-only mode: no directory to fall back to.
-		return nil, errors.New("invalid credentials")
-	}
-	return ldap.AuthenticateAccess(username, password, settings)
 }
 
 // completeLogin establishes the authenticated session for a user whose

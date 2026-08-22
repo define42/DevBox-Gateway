@@ -1,8 +1,7 @@
 package gateway
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
 )
 
@@ -73,7 +73,7 @@ func TestLoginRateLimiterSuccessClearsPairButNotIPSprayBucket(t *testing.T) {
 }
 
 func TestLoginPostRateLimitsFailedAttempts(t *testing.T) {
-	router := newLocalLoginRouter(t)
+	router := newTestLoginRouter(t, newRateLimitTestSettings(t))
 	remoteAddr := "192.0.2.44:12345"
 
 	rec := postLogin(t, router, remoteAddr, "alice", "wrong")
@@ -102,7 +102,7 @@ func TestLoginPostRateLimitsFailedAttempts(t *testing.T) {
 }
 
 func TestLoginPostSuccessClearsFailedAttempts(t *testing.T) {
-	router := newLocalLoginRouter(t)
+	router := newTestLoginRouter(t, newRateLimitTestSettings(t))
 	remoteAddr := "192.0.2.55:12345"
 
 	rec := postLogin(t, router, remoteAddr, "alice", "wrong")
@@ -133,12 +133,22 @@ func newTestLoginRateLimiter(t *testing.T) *loginRateLimiter {
 	return limiter
 }
 
-func newLocalLoginRouter(t *testing.T) http.Handler {
+func newTestLoginRouter(t *testing.T, settings *config.Settings) http.Handler {
 	t.Helper()
-	t.Setenv(config.LDAP_URL, "")
-	t.Setenv(config.LOCAL_USER_SHA256, localUserSHA256("alice", "secret"))
-	settings := newRateLimitTestSettings(t)
-	return NewHandler(session.New(), settings)
+
+	sessionManager := session.New()
+	handler := handleLoginPostWithAuthenticator(
+		sessionManager,
+		settings,
+		newLoginRateLimiter(settings),
+		func(username, password string, _ *config.Settings) (*identity.User, error) {
+			if password != "secret" {
+				return nil, errors.New("invalid test credentials")
+			}
+			return identity.New(username)
+		},
+	)
+	return sessionManager.LoadAndSave(sessionManager.EnforceClientIP(handler))
 }
 
 func newRateLimitTestSettings(t *testing.T) *config.Settings {
@@ -166,9 +176,4 @@ func postLogin(t *testing.T, router http.Handler, remoteAddr, username, password
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
-}
-
-func localUserSHA256(username, password string) string {
-	sum := sha256.Sum256([]byte(username + ":" + password))
-	return hex.EncodeToString(sum[:])
 }
