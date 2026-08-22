@@ -571,22 +571,26 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 
 ```
 .
-├── cmd/devbox-gateway/  Minimal process entrypoint.
+├── cmd/
+│   ├── devbox-gateway/  Minimal gateway process entrypoint.
+│   ├── mkdeb/           Debian package builder.
+│   └── mkrpm/           RPM package builder.
 ├── internal/
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
 │   ├── cloudinit/   NoCloud document and seed ISO generation.
 │   ├── config/      Environment-backed settings registry (the only place env
 │   │                vars may be read from).
 │   ├── console/     Serial console and noVNC WebSocket handlers.
-│   ├── contextKey/  Typed context-key helpers.
 │   ├── dashboard/   Dashboard HTML / JSON rendering and VM listing.
 │   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
 │   ├── hash/        Password/credential hashing helpers.
 │   ├── ldap/        LDAP login authentication.
+│   ├── localauth/   Local password authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── session/     Cookie session manager and middleware.
 │   ├── types/       Shared types (e.g. authenticated user).
-│   └── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
+│   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
+│   └── vmname/      VM name construction and validation.
 ├── ui/              TypeScript sources for the dashboard.
 ├── static/          Embedded static assets, including the compiled dashboard.js.
 ├── testldap/        glauth config + cert/key used for local LDAP.

@@ -1,9 +1,9 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a Go module for an HTTPS RDP gateway. Core application entrypoints and handlers live at the repository root (`main.go`, `handlers.go`, `dashboard.go`, `console.go`), with supporting packages under `internal/`.
+This repository is a Go module for an HTTPS RDP gateway. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb` and `cmd/mkrpm` build native packages. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, and `console`, `dashboard`, `rdp`, and `session` for their respective features.
 
-UI source lives in `ui/`, and the compiled browser asset is `static/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Most tests are root-level `*_test.go` files, including integration coverage such as `integration_test.go`, `ldap_integration_test.go`, and `novnc_page_test.go`.
+UI source lives in `ui/`, and the compiled browser asset is `static/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Tests are co-located with their packages; integration coverage is concentrated in `internal/gateway`, `internal/rdp`, and `internal/virt`.
 
 ## Build, Test, and Development Commands
 - `make run`: stop any existing stack, build the Docker images, and start the local gateway + LDAP services with Docker Compose.
