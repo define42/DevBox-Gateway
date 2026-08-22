@@ -29,12 +29,12 @@ var ErrEmptyIdentifier = errors.New("ldap login identifier must not be empty")
 // Configured reports whether an LDAP directory is configured. When LDAP_URL is
 // empty the gateway runs in local-users-only mode (see internal/localauth) and
 // callers should skip LDAP entirely rather than attempt a dial.
-func Configured(settings *config.SettingsType) bool {
+func Configured(settings *config.Settings) bool {
 	return strings.TrimSpace(settings.Get(config.LDAP_URL)) != ""
 }
 
 // AuthenticateAccess authenticates a user against LDAP and returns the gateway user model.
-func AuthenticateAccess(username, password string, settings *config.SettingsType) (*identity.User, error) {
+func AuthenticateAccess(username, password string, settings *config.Settings) (*identity.User, error) {
 	// Reject empty passwords before dialing or binding so an empty-password
 	// anonymous bind can never authenticate a user. See ErrEmptyPassword.
 	if password == "" {
@@ -92,7 +92,7 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 // ';' so full DNs — which contain commas — survive intact; a list without any
 // ';' is split on ',' too, which suits bare group names. An empty setting
 // yields no groups, meaning everyone with a matching directory entry may log in.
-func requiredGroups(settings *config.SettingsType) []string {
+func requiredGroups(settings *config.Settings) []string {
 	raw := settings.Get(config.LDAP_REQUIRED_GROUPS)
 	separator := ";"
 	if !strings.Contains(raw, ";") && !strings.Contains(raw, "=") {
@@ -131,7 +131,7 @@ func memberOfAny(entry *ldap.Entry, groups []string) bool {
 // LDAP_REQUIRED_GROUPS, for display on the login page: bare entries as-is, DN
 // entries reduced to their first RDN value ("cn=vdi-users,ou=groups,dc=..." →
 // "vdi-users"). Empty when LDAP is not configured or no groups are required.
-func RequiredGroupNames(settings *config.SettingsType) []string {
+func RequiredGroupNames(settings *config.Settings) []string {
 	if !Configured(settings) {
 		return nil
 	}
@@ -165,7 +165,7 @@ func searchFilter(template, identifier string) string {
 	return fmt.Sprintf(template, ldap.EscapeFilter(identifier))
 }
 
-func loginIdentifier(username string, settings *config.SettingsType) string {
+func loginIdentifier(username string, settings *config.Settings) string {
 	userMailDomain := settings.Get(config.LDAP_USER_DOMAIN)
 
 	mail := username
@@ -180,7 +180,7 @@ func loginIdentifier(username string, settings *config.SettingsType) string {
 	return mail
 }
 
-func dialLDAP(settings *config.SettingsType) (*ldap.Conn, error) {
+func dialLDAP(settings *config.Settings) (*ldap.Conn, error) {
 	ldapURL := settings.Get(config.LDAP_URL)
 	insecureSkipVerify := settings.IsTrue(config.LDAP_SKIP_TLS_VERIFY)
 	startTLS := settings.IsTrue(config.LDAP_STARTTLS)

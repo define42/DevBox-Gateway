@@ -10,10 +10,10 @@ import (
 
 // newBaseImageSettings returns settings whose BaseImageDir is seeded with the
 // given files (name -> contents). A nil map leaves the directory absent.
-func newBaseImageSettings(t *testing.T, files map[string][]byte) *config.SettingsType {
+func newBaseImageSettings(t *testing.T, files map[string][]byte) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}

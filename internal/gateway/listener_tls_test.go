@@ -31,12 +31,12 @@ func waitHandleHTTPSDone(t *testing.T, done <-chan struct{}) {
 	}
 }
 
-func newTestTLSManager(t *testing.T) (*cert.TLSManager, *config.SettingsType) {
+func newTestTLSManager(t *testing.T) (*cert.TLSManager, *config.Settings) {
 	t.Helper()
 	t.Setenv(config.ACME_ENABLE, "false")
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)

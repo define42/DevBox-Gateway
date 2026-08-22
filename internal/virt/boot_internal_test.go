@@ -12,9 +12,9 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-func bootLimitSettings(t *testing.T, limit int) *config.SettingsType {
+func bootLimitSettings(t *testing.T, limit int) *config.Settings {
 	t.Helper()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, limit); err != nil {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}

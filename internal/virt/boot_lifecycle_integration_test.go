@@ -18,10 +18,10 @@ import (
 
 const bootLifecycleTimeout = 30 * time.Second
 
-func newBootTestSettings(t *testing.T) *config.SettingsType {
+func newBootTestSettings(t *testing.T) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -31,7 +31,7 @@ func newBootTestSettings(t *testing.T) *config.SettingsType {
 	return settings
 }
 
-func configureIsolatedBootStorage(t *testing.T, settings *config.SettingsType) {
+func configureIsolatedBootStorage(t *testing.T, settings *config.Settings) {
 	t.Helper()
 
 	rootDir := newLibvirtAccessibleTempDir(t, "devboxgateway-root-")

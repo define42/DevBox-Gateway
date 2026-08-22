@@ -73,7 +73,7 @@ func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, config.NewSettingType(false), w, r, user, "dogood")
+		completeLogin(sessionManager, config.NewSettings(false), w, r, user, "dogood")
 		storedHash, ok := sessionManager.PasswordHashFromContext(r.Context())
 		if !ok {
 			t.Error("expected completeLogin to store the login password hash in the session")

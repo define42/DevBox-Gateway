@@ -38,10 +38,10 @@ func waitForDashboardVM(t *testing.T, user, name string, timeout time.Duration) 
 	return dashboard.VM{}
 }
 
-func newDashboardVMSettings(t *testing.T) *config.SettingsType {
+func newDashboardVMSettings(t *testing.T) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -55,7 +55,7 @@ func newDashboardVMSettings(t *testing.T) *config.SettingsType {
 	return settings
 }
 
-func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, string) {
+func createDashboardVM(t *testing.T, settings *config.Settings) (string, string) {
 	t.Helper()
 
 	suffix := time.Now().UnixNano() % 1_000_000
@@ -85,7 +85,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 	return username, vmName
 }
 
-func assertDashboardVMRow(t *testing.T, settings *config.SettingsType, row dashboard.VM, wantDisplayName string) {
+func assertDashboardVMRow(t *testing.T, settings *config.Settings, row dashboard.VM, wantDisplayName string) {
 	t.Helper()
 
 	if row.DisplayName != wantDisplayName {

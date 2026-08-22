@@ -24,7 +24,7 @@ const sniHashSecretBytes = 32
 //
 // Persisting keeps the secret stable across restarts so previously issued
 // .rdp files keep routing to the right VM.
-func EnsureSNIHashSecret(settings *SettingsType) error {
+func EnsureSNIHashSecret(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}

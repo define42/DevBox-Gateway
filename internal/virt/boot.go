@@ -16,7 +16,7 @@ import (
 // 'default' NAT network are ready for VM operations. The base image check runs
 // first, before any libvirt connection, so an empty image library fails the boot
 // fast with a clear error.
-func InitVirt(settings *config.SettingsType) error {
+func InitVirt(settings *config.Settings) error {
 	if err := storage.EnsureBaseImagesAvailable(settings); err != nil {
 		return err
 	}

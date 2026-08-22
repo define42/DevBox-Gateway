@@ -243,7 +243,7 @@ func TestCovxHandshakeFrontTLSFailure(t *testing.T) {
 
 func TestCovxNegotiateFrontRDPReadCRQFailure(t *testing.T) {
 	InitLogging()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	client, server := net.Pipe()
 	_ = client.Close()
 
@@ -255,7 +255,7 @@ func TestCovxNegotiateFrontRDPReadCRQFailure(t *testing.T) {
 
 func TestCovxNegotiateFrontRDPWriteCCFFailure(t *testing.T) {
 	InitLogging()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	client, server := net.Pipe()
 	go func() {
 		if err := writeTPKT(client, buildClientCRQ(x224.PROTOCOL_SSL)); err != nil {
@@ -351,7 +351,7 @@ func TestCovxResolveBackendAddrBranches(t *testing.T) {
 
 func TestCovxHandleRDPClientClosesBeforeCRQ(t *testing.T) {
 	InitLogging()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	client, server := net.Pipe()
 
 	done := make(chan struct{})

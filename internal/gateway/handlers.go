@@ -84,7 +84,7 @@ func validateLoginUsername(username string) (string, error) {
 	return vmname.ValidateUsername(username)
 }
 
-func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsType, loginLimiter *loginRateLimiter) http.HandlerFunc {
+func handleLoginPost(sessionManager *session.Manager, settings *config.Settings, loginLimiter *loginRateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Gate login behind the same-origin check that guards logout and every
 		// dashboard POST. Without it the endpoint is open to login CSRF: an
@@ -137,7 +137,7 @@ func handleLoginPost(sessionManager *session.Manager, settings *config.SettingsT
 	}
 }
 
-func rejectRateLimitedLogin(w http.ResponseWriter, settings *config.SettingsType, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
+func rejectRateLimitedLogin(w http.ResponseWriter, settings *config.Settings, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
 	retryAfter, limited := loginLimiter.RetryAfter(username, remoteAddr)
 	if !limited {
 		return false
@@ -146,7 +146,7 @@ func rejectRateLimitedLogin(w http.ResponseWriter, settings *config.SettingsType
 	return true
 }
 
-func recordFailedLogin(w http.ResponseWriter, settings *config.SettingsType, loginLimiter *loginRateLimiter, username, remoteAddr, message string) {
+func recordFailedLogin(w http.ResponseWriter, settings *config.Settings, loginLimiter *loginRateLimiter, username, remoteAddr, message string) {
 	if retryAfter := loginLimiter.RecordFailure(username, remoteAddr); retryAfter > 0 {
 		serveLoginRateLimited(w, settings, retryAfter)
 		return
@@ -158,7 +158,7 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.SettingsType, log
 // LOCAL_USER_SHA256 digests) are checked first so the gateway works without a
 // directory and without an LDAP round-trip; otherwise the credentials are
 // validated against LDAP.
-func authenticateLogin(username, password string, settings *config.SettingsType) (*identity.User, error) {
+func authenticateLogin(username, password string, settings *config.Settings) (*identity.User, error) {
 	if localauth.Validate(username, password, settings) {
 		return identity.New(username)
 	}
@@ -172,7 +172,7 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 // completeLogin establishes the authenticated session for a user whose
 // credentials have just been verified. Any session-establishment failure is a
 // server-side error that aborts the login.
-func completeLogin(sessionManager *session.Manager, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, user *identity.User, password string) {
+func completeLogin(sessionManager *session.Manager, settings *config.Settings, w http.ResponseWriter, r *http.Request, user *identity.User, password string) {
 	if err := establishSession(r.Context(), sessionManager, user, r.RemoteAddr, password); err != nil {
 		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
 		serveLogin(w, settings, "Login failed.")
@@ -193,16 +193,16 @@ func establishSession(ctx context.Context, sessionManager *session.Manager, user
 	return sessionManager.CreateSession(ctx, user, remoteAddr, loginPasswordHash)
 }
 
-func serveLogin(w http.ResponseWriter, settings *config.SettingsType, message string) {
+func serveLogin(w http.ResponseWriter, settings *config.Settings, message string) {
 	serveLoginStatus(w, settings, message, http.StatusOK)
 }
 
-func serveLoginRateLimited(w http.ResponseWriter, settings *config.SettingsType, retryAfter time.Duration) {
+func serveLoginRateLimited(w http.ResponseWriter, settings *config.Settings, retryAfter time.Duration) {
 	w.Header().Set("Retry-After", loginRetryAfterSeconds(retryAfter))
 	serveLoginStatus(w, settings, loginLocked, http.StatusTooManyRequests)
 }
 
-func serveLoginStatus(w http.ResponseWriter, settings *config.SettingsType, message string, status int) {
+func serveLoginStatus(w http.ResponseWriter, settings *config.Settings, message string, status int) {
 	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -222,7 +222,7 @@ func serveLoginStatus(w http.ResponseWriter, settings *config.SettingsType, mess
 // is unset (or LDAP is not configured), so the box only appears when a group
 // requirement is actually enforced. Group names are HTML-escaped because they
 // come from operator configuration, not from request input.
-func loginGroupsHTML(settings *config.SettingsType) string {
+func loginGroupsHTML(settings *config.Settings) string {
 	names := ldap.RequiredGroupNames(settings)
 	if len(names) == 0 {
 		return ""
@@ -244,7 +244,7 @@ func setNoCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Expires", expiresValue)
 }
 
-func handleLoginGet(settings *config.SettingsType) http.HandlerFunc {
+func handleLoginGet(settings *config.Settings) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		serveLogin(w, settings, "")
 	}
@@ -372,10 +372,10 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 // NewHandler constructs the gateway's HTTP application.
-func NewHandler(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
+func NewHandler(sessionManager *session.Manager, settings *config.Settings) http.Handler {
 	router := chi.NewRouter()
 	loginLimiter := newLoginRateLimiter(settings)
-	if settings.GetBool(config.DEBUG_CONNECTIONS) {
+	if settings.Bool(config.DEBUG_CONNECTIONS) {
 		router.Use(debugConnectionLogger)
 	}
 	router.Use(securityHeaders)
@@ -422,7 +422,7 @@ func noCacheStaticFileServer() http.Handler {
 	})
 }
 
-func registerAPI(api huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
+func registerAPI(api huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	group := huma.NewGroup(api, "/api")
 	group.UseMiddleware(sessionManager.SessionMiddleware())
 
@@ -511,7 +511,7 @@ func registerDashboardPageRoute(group huma.API) {
 	})
 }
 
-func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
+func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	registerHiddenGet(group, "/dashboard/data", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
 		user, ok := sessionManager.UserFromContext(req.Context())
@@ -544,7 +544,7 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 // either: the guest account is provisioned with the salted sha512_crypt hash
 // of the user's own gateway login password, captured at login and held in the
 // in-memory session (never in cleartext).
-func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.SettingsType) (virt.VMCreateRequest, bool) {
+func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.Settings) (virt.VMCreateRequest, bool) {
 	if err := parseFormWithBodyLimit(w, req); err != nil {
 		log.Printf("dashboard form parse failed: %v", err)
 		dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
@@ -596,7 +596,7 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	}, true
 }
 
-func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
+func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	registerHiddenPost(group, "/dashboard", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
 		input, ok := parseCreateVMInput(w, req, sessionManager, settings)
@@ -624,7 +624,7 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 	})
 }
 
-func dashboardCreateResult(name, vmName string, err error, settings *config.SettingsType) (int, dashboard.ActionResponse) {
+func dashboardCreateResult(name, vmName string, err error, settings *config.Settings) (int, dashboard.ActionResponse) {
 	switch {
 	case errors.Is(err, virt.ErrVMAlreadyExists):
 		return http.StatusConflict, dashboard.ActionResponse{
@@ -656,7 +656,7 @@ func dashboardCreateResult(name, vmName string, err error, settings *config.Sett
 // the connection), and returns the .rdp connection file as a download. Making
 // the download an explicit, authenticated, same-origin POST is what narrows RDP
 // authorization to a deliberate action instead of any standing dashboard session.
-func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.SettingsType) {
+func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	registerHiddenPost(group, "/dashboard/rdp", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
 		name, ok := authorizeDashboardVMAction(req, w, sessionManager, "dashboard rdp", "connect to")
@@ -800,7 +800,7 @@ func validateGuestUsername(raw, fallback string) (string, error) {
 // currently offered by the gateway. The authoritative path-traversal guard
 // lives in virt.BootNewVM; this exists to return a friendly 400 instead of a
 // generic create failure when the selection is empty or unknown.
-func validateBaseImage(raw string, settings *config.SettingsType) (string, error) {
+func validateBaseImage(raw string, settings *config.Settings) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("base image is required")

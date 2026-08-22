@@ -25,7 +25,7 @@ func CreateUbuntuSeedISOToPool(
 
 // CreateUbuntuSeedISOToPoolWithSettings builds and uploads a seed ISO using explicit settings.
 func CreateUbuntuSeedISOToPoolWithSettings(
-	settings *config.SettingsType,
+	settings *config.Settings,
 	conn *libvirt.Connect,
 	storagePoolName string,
 	volumeName string,

@@ -12,12 +12,12 @@ import (
 type DiskCopyProgressFunc = storage.DiskCopyProgressFunc
 
 // ListBaseImages returns the selectable images in the configured base-image directory.
-func ListBaseImages(settings *config.SettingsType) ([]string, error) {
+func ListBaseImages(settings *config.Settings) ([]string, error) {
 	return storage.ListBaseImages(settings)
 }
 
 // EnsureBaseImagesAvailable returns an error when no selectable base image exists.
-func EnsureBaseImagesAvailable(settings *config.SettingsType) error {
+func EnsureBaseImagesAvailable(settings *config.Settings) error {
 	return storage.EnsureBaseImagesAvailable(settings)
 }
 

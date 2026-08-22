@@ -127,7 +127,7 @@ func TestNewTLSManagerWithoutACME(t *testing.T) {
 	t.Setenv(config.ACME_ENABLE, "false")
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	tm, err := NewTLSManager(settings, nil)
 	if err != nil {
@@ -151,7 +151,7 @@ func TestLoadOrGenerateCertNoFiles(t *testing.T) {
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.ACME_ENABLE, "false")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	cert, err := LoadOrGenerateCert(settings)
 	if err != nil {
@@ -166,7 +166,7 @@ func TestLoadOrGenerateCertOnlyOnePath(t *testing.T) {
 	t.Setenv(config.CERT_FILE, "/tmp/cert.pem")
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.ACME_ENABLE, "false")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	_, err := LoadOrGenerateCert(settings)
 	if err == nil {
@@ -179,7 +179,7 @@ func TestLoadOrGenerateCertFromFiles(t *testing.T) {
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.ACME_ENABLE, "false")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	generated, err := LoadOrGenerateCert(settings)
 	if err != nil {
 		t.Fatalf("generate cert pair: %v", err)
@@ -202,7 +202,7 @@ func TestLoadOrGenerateCertFromFiles(t *testing.T) {
 
 	t.Setenv(config.CERT_FILE, certPath)
 	t.Setenv(config.KEY_FILE, keyPath)
-	settings = config.NewSettingType(false)
+	settings = config.NewSettings(false)
 
 	loaded, err := LoadOrGenerateCert(settings)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestNewTLSManagerACMERequiresFrontDomain(t *testing.T) {
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if _, err := NewTLSManager(settings, noVMNames); err == nil {
 		t.Fatal("expected ACME-enabled TLS manager without front domain to fail")
 	}
@@ -253,7 +253,7 @@ func TestNewTLSManagerACMERequiresVMNameProvider(t *testing.T) {
 	t.Setenv(config.ACME_ENABLE, "true")
 	t.Setenv(config.FRONT_DOMAIN, "vdi.example.test")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	_, err := NewTLSManager(settings, nil)
 	if err == nil {
 		t.Fatal("expected ACME-enabled TLS manager without VM name provider to fail")
@@ -274,7 +274,7 @@ func TestNewTLSManagerACMEDefersIssuance(t *testing.T) {
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	tm, err := NewTLSManager(settings, noVMNames)
 	if err != nil {
 		t.Fatalf("NewTLSManager: %v", err)
@@ -301,7 +301,7 @@ func TestStartManagingStaticNoop(t *testing.T) {
 	t.Setenv(config.CERT_FILE, "")
 	t.Setenv(config.KEY_FILE, "")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	tm, err := NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("NewTLSManager: %v", err)
@@ -323,7 +323,7 @@ func TestUpdateDomainsNoChange(t *testing.T) {
 	)
 	t.Setenv(config.FRONT_DOMAIN, frontDomain)
 	t.Setenv(config.SNI_HASH_SECRET, secret)
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	want := managedDomainList([]string{vmName}, frontDomain, []byte(secret))
 	providerCalls := 0
 

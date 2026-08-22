@@ -37,7 +37,7 @@ func FilePath() string {
 // and lines beginning with '#' are ignored, an optional leading "export " is
 // stripped, and a value may be wrapped in matching single or double quotes.
 //
-// Call this before NewSettingType so the parsed values feed the normal
+// Call this before NewSettings so the parsed values feed the normal
 // environment-backed setting resolution.
 func LoadConfigFile(path string) error {
 	f, err := os.Open(path) // #nosec G304 -- path is an operator-provided config file location.

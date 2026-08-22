@@ -40,7 +40,7 @@ type dashboardServerMessage struct {
 // pushes, avoiding a second long-lived SSE connection. Browsers do not expose
 // protocol-level ping/pong to JavaScript, so RTT still uses explicit ping/pong
 // messages while WebSocket control frames keep the transport alive.
-func HandleDashboardWS(sessionManager *session.Manager, settings *config.SettingsType) http.HandlerFunc {
+func HandleDashboardWS(sessionManager *session.Manager, settings *config.Settings) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
@@ -75,7 +75,7 @@ func HandleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 func bridgeDashboardControlSocket(
 	ws *websocket.Conn,
 	username string,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	sessionDeadline time.Time,
 ) {
 	configureWebsocketKeepalive(ws, dashboardControlReadLimit)
@@ -154,7 +154,7 @@ func writeDashboardMessages(
 func publishDashboardVMUpdates(
 	ctx context.Context,
 	username string,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	outbound chan<- dashboardServerMessage,
 	done chan<- struct{},
 ) {
@@ -193,7 +193,7 @@ func publishDashboardVMUpdates(
 func queueDashboardDataUpdate(
 	ctx context.Context,
 	username string,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	outbound chan<- dashboardServerMessage,
 ) bool {
 	data, err := dashboard.DataForUser(settings, username)

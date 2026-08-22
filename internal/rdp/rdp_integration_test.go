@@ -297,7 +297,7 @@ func startBackendServer(t *testing.T, host string, handler func(net.Conn)) func(
 	}
 }
 
-func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *config.SettingsType) {
+func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *config.Settings) {
 	t.Helper()
 
 	t.Setenv(config.ACME_ENABLE, "false")
@@ -305,7 +305,7 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.FRONT_DOMAIN, frontDomain)
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
@@ -321,7 +321,7 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 func backendTLSCert(t *testing.T) tls.Certificate {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	certificate, err := cert.LoadOrGenerateCert(settings)
 	if err != nil {
 		t.Fatalf("load backend certificate: %v", err)
@@ -395,7 +395,7 @@ func expectTLSOnlyBackendCRQ(t *testing.T, raw net.Conn) bool {
 	return true
 }
 
-func startHandleRDPTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType, remoteIP string) (net.Conn, <-chan struct{}) {
+func startHandleRDPTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, remoteIP string) (net.Conn, <-chan struct{}) {
 	t.Helper()
 
 	client, server := net.Pipe()

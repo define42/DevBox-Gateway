@@ -148,7 +148,7 @@ func (s *autoShutdownSweeper) stopIdleVM(vm VMInfo, idleFor time.Duration) {
 // force-stopped if still running after autoShutdownGracePeriod. When the
 // setting is unset or non-positive the feature is disabled and the returned
 // stop function is a no-op.
-func StartAutoShutdownWorker(settings *config.SettingsType) (stop func()) {
+func StartAutoShutdownWorker(settings *config.Settings) (stop func()) {
 	idleAfter := config.VDIAutoShutdownAfter(settings)
 	if idleAfter <= 0 {
 		return func() {}

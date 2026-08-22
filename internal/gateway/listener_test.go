@@ -103,7 +103,7 @@ func TestBufferedConnRead(t *testing.T) {
 }
 
 func TestServeListenerReturnsWhenClosed(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
@@ -138,7 +138,7 @@ func TestServeListenerReturnsWhenClosed(t *testing.T) {
 }
 
 func TestServeListenerRetriesTimeoutAccept(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
@@ -213,7 +213,7 @@ func (l *flakyAcceptListener) Addr() net.Addr {
 // be retried with backoff, not treated as fatal, and the loop must still
 // return nil once the listener closes.
 func TestServeListenerSurvivesTemporaryAcceptError(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	ln := &flakyAcceptListener{failures: 3}
 
 	errCh := make(chan error, 1)
@@ -236,7 +236,7 @@ func TestServeListenerSurvivesTemporaryAcceptError(t *testing.T) {
 }
 
 func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
@@ -272,7 +272,7 @@ func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 }
 
 func TestHandleSharedConnPeekFailure(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
@@ -305,7 +305,7 @@ func TestHandleSharedConnPeekFailure(t *testing.T) {
 
 func TestHandleSharedConnSetupDeadlineClosesIdleClient(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "50ms")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -328,7 +328,7 @@ func TestHandleSharedConnSetupDeadlineClosesIdleClient(t *testing.T) {
 
 func TestOpenFrontListener(t *testing.T) {
 	t.Setenv(config.LISTEN_ADDR, "127.0.0.1:0")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	ln, err := openFrontListener(settings)
 	if err != nil {

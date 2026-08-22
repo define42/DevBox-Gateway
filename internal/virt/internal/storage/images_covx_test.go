@@ -10,10 +10,10 @@ import (
 
 // viocovBrokenBaseImageSettings points BASE_IMAGE_DIR at a regular file so
 // reading the "directory" fails with an error other than not-exist.
-func viocovBrokenBaseImageSettings(t *testing.T) *config.SettingsType {
+func viocovBrokenBaseImageSettings(t *testing.T) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	filePath := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write placeholder file: %v", err)

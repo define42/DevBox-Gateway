@@ -45,7 +45,7 @@ func newLibvirtAccessibleTempDir(t *testing.T, prefix string) string {
 // stageExistingBaseImageFromDefaultRoot makes a real, bootable base image
 // available in the settings' BaseImageDir and returns the staged file name (for
 // BootNewVM), downloading to a shared cache when not already present locally.
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settings) string {
 	t.Helper()
 
 	if settings == nil {

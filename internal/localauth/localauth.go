@@ -24,7 +24,7 @@ const digestSeparator = ";"
 // Generate a digest for an account with, e.g.:
 //
 //	printf '%s:%s' alice 's3cret' | sha256sum
-func Validate(username, password string, settings *config.SettingsType) bool {
+func Validate(username, password string, settings *config.Settings) bool {
 	raw := strings.TrimSpace(settings.Get(config.LOCAL_USER_SHA256))
 	if raw == "" {
 		return false

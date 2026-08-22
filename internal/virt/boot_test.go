@@ -149,12 +149,12 @@ func waitForVNCSocket(t *testing.T, vmName string, timeout time.Duration) {
 	t.Fatalf("VNC for %s was not ready within %s: %v", vmName, timeout, lastErr)
 }
 
-func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
+func newConsoleSocketSettings(t *testing.T) *config.Settings {
 	t.Helper()
 
 	rootDir := newLibvirtAccessibleTempDir(t, "devboxgateway-console-root-")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir) != nil {
 		t.Fatalf("Failed to overwrite DATA_ROOT_DIR for test")
 	}
@@ -169,7 +169,7 @@ func newConsoleSocketSettings(t *testing.T) *config.SettingsType {
 // into the settings' BaseImageDir and returns its file name (for BootNewVM). It
 // is best-effort: when no source image is found it returns "" and the caller's
 // BootNewVM will fail clearly.
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settings) string {
 	t.Helper()
 
 	if settings == nil {

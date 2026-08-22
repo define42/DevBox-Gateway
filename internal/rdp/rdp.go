@@ -82,7 +82,7 @@ type frontRDPConnection struct {
 }
 
 // HandleRDP handles a single RDP connection over TLS.
-func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) {
+func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) {
 	started := time.Now()
 	debugf("new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
 
@@ -318,7 +318,7 @@ func tlsVersionLabel(version uint16) string {
 	}
 }
 
-func negotiateFrontRDP(raw net.Conn, frontTLS *cert.TLSManager, settings *config.SettingsType, started time.Time) (*frontRDPConnection, bool) {
+func negotiateFrontRDP(raw net.Conn, frontTLS *cert.TLSManager, settings *config.Settings, started time.Time) (*frontRDPConnection, bool) {
 	crq, ok := readClientConnectionRequest(raw)
 	if !ok {
 		return nil, false
@@ -400,7 +400,7 @@ func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Tim
 	return clientTLS, sni, true
 }
 
-func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.SettingsType) (string, bool) {
+func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.Settings) (string, bool) {
 	frontDomain := strings.TrimSpace(settings.Get(config.FRONT_DOMAIN))
 	if frontDomain != "" {
 		debugf("enforcing front domain %q", frontDomain)
@@ -479,7 +479,7 @@ func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool
 	return backendAddr, true
 }
 
-func dialBackendRDP(backendAddr, sni string, settings *config.SettingsType) (*tls.Conn, bool) {
+func dialBackendRDP(backendAddr, sni string, settings *config.Settings) (*tls.Conn, bool) {
 	backendRaw, err := dialBackendTCP(backendAddr, settings)
 	if err != nil {
 		return nil, false
@@ -493,8 +493,8 @@ func dialBackendRDP(backendAddr, sni string, settings *config.SettingsType) (*tl
 	return backendTLS, true
 }
 
-func dialBackendTCP(backendAddr string, settings *config.SettingsType) (net.Conn, error) {
-	d := net.Dialer{Timeout: settings.GetDuration(config.TIMEOUT)}
+func dialBackendTCP(backendAddr string, settings *config.Settings) (net.Conn, error) {
+	d := net.Dialer{Timeout: settings.Duration(config.TIMEOUT)}
 	debugf("dialing backend %s", backendAddr)
 
 	backendRaw, err := d.Dial("tcp", backendAddr)
@@ -504,7 +504,7 @@ func dialBackendTCP(backendAddr string, settings *config.SettingsType) (net.Conn
 	}
 
 	debugf("backend TCP connected to %s", backendAddr)
-	_ = backendRaw.SetDeadline(time.Now().Add(settings.GetDuration(config.TIMEOUT)))
+	_ = backendRaw.SetDeadline(time.Now().Add(settings.Duration(config.TIMEOUT)))
 	return backendRaw, nil
 }
 

@@ -49,7 +49,7 @@ func TestStoragePoolConfigAndPathHelpers(t *testing.T) {
 		t.Fatalf("expected default pool path %q, got %q", filepath.Clean(config.VirtStoragePoolPath(nil)), poolPath)
 	}
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, "custom"); err != nil {
 		t.Fatalf("overwrite pool name: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestInitVirtRequiresBaseImage(t *testing.T) {
 	})
 
 	t.Run("empty library", func(t *testing.T) {
-		settings := config.NewSettingType(false)
+		settings := config.NewSettings(false)
 		if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
 			t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 		}

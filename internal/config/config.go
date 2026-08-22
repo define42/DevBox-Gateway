@@ -15,7 +15,7 @@ import (
 // Kind identifies the underlying value type stored in a setting.
 type Kind uint8
 
-// Kind values supported by SettingsType.
+// Kind values supported by Settings.
 const (
 	// KindString stores plain string values.
 	KindString Kind = iota
@@ -44,8 +44,8 @@ type Setting struct {
 	Secret bool
 }
 
-// SettingsType holds the process configuration keyed by environment-backed setting ID.
-type SettingsType struct {
+// Settings holds the process configuration keyed by environment-backed setting ID.
+type Settings struct {
 	m map[string]*Setting
 }
 
@@ -106,9 +106,9 @@ const (
 	vncDataSubdir       = "vnc"
 )
 
-// NewSettingType builds the gateway settings from defaults and environment overrides.
-func NewSettingType(printSettings bool) *SettingsType {
-	s := &SettingsType{m: make(map[string]*Setting)}
+// NewSettings builds the gateway settings from defaults and environment overrides.
+func NewSettings(printSettings bool) *Settings {
+	s := &Settings{m: make(map[string]*Setting)}
 
 	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
@@ -164,7 +164,7 @@ func NewSettingType(printSettings bool) *SettingsType {
 	return s
 }
 
-func (s *SettingsType) setAuthDefaults() {
+func (s *Settings) setAuthDefaults() {
 	s.SetString(LDAP_URL, "LDAP server url", "ldaps://ldap:389")
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
@@ -180,7 +180,7 @@ func (s *SettingsType) setAuthDefaults() {
 }
 
 // DataRootDir resolves the root directory for gateway-managed data.
-func DataRootDir(settings *SettingsType) string {
+func DataRootDir(settings *Settings) string {
 	rootDir := DefaultDataRootDir
 	if settings != nil {
 		if configuredRoot := strings.TrimSpace(settings.Get(DATA_ROOT_DIR)); configuredRoot != "" {
@@ -191,19 +191,19 @@ func DataRootDir(settings *SettingsType) string {
 }
 
 // ACMEStorageDir resolves the ACME storage directory below the data root.
-func ACMEStorageDir(settings *SettingsType) string {
+func ACMEStorageDir(settings *Settings) string {
 	return filepath.Join(DataRootDir(settings), acmeDataSubdir)
 }
 
 // ImageDir resolves the VM image directory below the data root.
-func ImageDir(settings *SettingsType) string {
+func ImageDir(settings *Settings) string {
 	return filepath.Join(DataRootDir(settings), imageDataSubdir)
 }
 
 // BaseImageDir resolves the directory holding selectable base VDI images. An
 // explicit BASE_IMAGE_DIR overrides the default <DATA_ROOT_DIR>/baseimages so
 // operators can bind-mount an image library wherever they like.
-func BaseImageDir(settings *SettingsType) string {
+func BaseImageDir(settings *Settings) string {
 	if settings != nil {
 		if configured := strings.TrimSpace(settings.Get(BASE_IMAGE_DIR)); configured != "" {
 			return filepath.Clean(configured)
@@ -213,27 +213,27 @@ func BaseImageDir(settings *SettingsType) string {
 }
 
 // SerialSocketDir resolves the VM serial socket directory below the data root.
-func SerialSocketDir(settings *SettingsType) string {
+func SerialSocketDir(settings *Settings) string {
 	return filepath.Join(DataRootDir(settings), serialDataSubdir)
 }
 
 // VNCSocketDir resolves the VM VNC socket directory below the data root.
-func VNCSocketDir(settings *SettingsType) string {
+func VNCSocketDir(settings *Settings) string {
 	return filepath.Join(DataRootDir(settings), vncDataSubdir)
 }
 
 // VirtStoragePoolPath resolves the libvirt storage pool path below the data root.
-func VirtStoragePoolPath(settings *SettingsType) string {
+func VirtStoragePoolPath(settings *Settings) string {
 	return ImageDir(settings)
 }
 
 // MaxVDIPerUser resolves the maximum number of VDIs (VMs) a single user may
 // own at once. A missing setting falls back to DefaultMaxVDIPerUser; a
 // configured value <=0 disables the limit, reported as 0.
-func MaxVDIPerUser(settings *SettingsType) int {
+func MaxVDIPerUser(settings *Settings) int {
 	limit := DefaultMaxVDIPerUser
 	if settings != nil && settings.Has(MAX_VDI_PER_USER) {
-		limit = settings.GetInt(MAX_VDI_PER_USER)
+		limit = settings.Int(MAX_VDI_PER_USER)
 	}
 	if limit <= 0 {
 		return 0
@@ -244,11 +244,11 @@ func MaxVDIPerUser(settings *SettingsType) int {
 // VDIAutoShutdownAfter resolves how long a running VDI may go unused before
 // the gateway shuts it down, from VDI_AUTO_SHUTDOWN_HOURS. A missing or
 // non-positive setting disables auto-shutdown, reported as 0.
-func VDIAutoShutdownAfter(settings *SettingsType) time.Duration {
+func VDIAutoShutdownAfter(settings *Settings) time.Duration {
 	if settings == nil {
 		return 0
 	}
-	hours := settings.GetInt(VDI_AUTO_SHUTDOWN_HOURS)
+	hours := settings.Int(VDI_AUTO_SHUTDOWN_HOURS)
 	if hours <= 0 {
 		return 0
 	}
@@ -258,10 +258,10 @@ func VDIAutoShutdownAfter(settings *SettingsType) time.Duration {
 // VMDiskCapacityBytes resolves the virtual disk capacity, in bytes, for newly
 // created VM volumes. A non-positive or missing VM_DISK_SIZE_GB falls back to
 // DefaultVMDiskSizeGB.
-func VMDiskCapacityBytes(settings *SettingsType) uint64 {
+func VMDiskCapacityBytes(settings *Settings) uint64 {
 	sizeGB := DefaultVMDiskSizeGB
 	if settings != nil {
-		if configured := settings.GetInt(VM_DISK_SIZE_GB); configured > 0 {
+		if configured := settings.Int(VM_DISK_SIZE_GB); configured > 0 {
 			sizeGB = configured
 		}
 	}
@@ -271,9 +271,9 @@ func VMDiskCapacityBytes(settings *SettingsType) uint64 {
 // VMVCPUCount resolves the number of virtual CPUs assigned to every VM. VM
 // resources are operator-defined only: users cannot choose or change them. A
 // non-positive or missing VM_VCPU_COUNT falls back to DefaultVMVCPUCount.
-func VMVCPUCount(settings *SettingsType) int {
+func VMVCPUCount(settings *Settings) int {
 	if settings != nil {
-		if configured := settings.GetInt(VM_VCPU_COUNT); configured > 0 {
+		if configured := settings.Int(VM_VCPU_COUNT); configured > 0 {
 			return configured
 		}
 	}
@@ -283,9 +283,9 @@ func VMVCPUCount(settings *SettingsType) int {
 // VMMemoryMiB resolves the memory, in MiB, assigned to every VM. VM resources
 // are operator-defined only: users cannot choose or change them. A
 // non-positive or missing VM_MEMORY_MIB falls back to DefaultVMMemoryMiB.
-func VMMemoryMiB(settings *SettingsType) int {
+func VMMemoryMiB(settings *Settings) int {
 	if settings != nil {
-		if configured := settings.GetInt(VM_MEMORY_MIB); configured > 0 {
+		if configured := settings.Int(VM_MEMORY_MIB); configured > 0 {
 			return configured
 		}
 	}
@@ -295,7 +295,7 @@ func VMMemoryMiB(settings *SettingsType) int {
 // ---- Setters ----
 
 // SetString registers a string setting and resolves its effective value.
-func (s *SettingsType) SetString(id, description, defaultValue string) {
+func (s *Settings) SetString(id, description, defaultValue string) {
 	raw := defaultValue
 	if v, ok := os.LookupEnv(id); ok {
 		raw = v
@@ -312,14 +312,14 @@ func (s *SettingsType) SetString(id, description, defaultValue string) {
 
 // SetSecretString registers a string setting whose value is masked in the
 // printed settings table. Use it for credentials so secrets do not leak into
-// process logs; Get/GetString still return the real value to feature code.
-func (s *SettingsType) SetSecretString(id, description, defaultValue string) {
+// process logs; Get/String still return the real value to feature code.
+func (s *Settings) SetSecretString(id, description, defaultValue string) {
 	s.SetString(id, description, defaultValue)
 	s.m[id].Secret = true
 }
 
 // SetInt registers an integer setting and resolves its effective value.
-func (s *SettingsType) SetInt(id, description string, defaultValue int) {
+func (s *Settings) SetInt(id, description string, defaultValue int) {
 	value := defaultValue
 	rawUsed := strconv.Itoa(defaultValue)
 
@@ -340,7 +340,7 @@ func (s *SettingsType) SetInt(id, description string, defaultValue int) {
 }
 
 // SetBool registers a boolean setting and resolves its effective value.
-func (s *SettingsType) SetBool(id, description string, defaultValue bool) {
+func (s *Settings) SetBool(id, description string, defaultValue bool) {
 	value := defaultValue
 	rawUsed := strconv.FormatBool(defaultValue)
 
@@ -361,7 +361,7 @@ func (s *SettingsType) SetBool(id, description string, defaultValue bool) {
 }
 
 // SetDuration registers a duration setting and resolves its effective value.
-func (s *SettingsType) SetDuration(id, description string, defaultValue time.Duration) {
+func (s *Settings) SetDuration(id, description string, defaultValue time.Duration) {
 	value := defaultValue
 	rawUsed := defaultValue.String()
 
@@ -384,16 +384,16 @@ func (s *SettingsType) SetDuration(id, description string, defaultValue time.Dur
 // ---- Getters (no fallbacks) ----
 
 // Has reports whether the named setting exists.
-func (s *SettingsType) Has(id string) bool {
+func (s *Settings) Has(id string) bool {
 	_, ok := s.m[id]
 	return ok
 }
 
 // Get returns the setting value as a string.
-func (s *SettingsType) Get(id string) string { return s.GetString(id) }
+func (s *Settings) Get(id string) string { return s.String(id) }
 
-// GetString returns the setting value as a string.
-func (s *SettingsType) GetString(id string) string {
+// String returns the setting value as a string.
+func (s *Settings) String(id string) string {
 	st, ok := s.m[id]
 	if !ok {
 		return ""
@@ -412,8 +412,8 @@ func (s *SettingsType) GetString(id string) string {
 	}
 }
 
-// GetInt returns the setting value as an int.
-func (s *SettingsType) GetInt(id string) int {
+// Int returns the setting value as an int.
+func (s *Settings) Int(id string) int {
 	st, ok := s.m[id]
 	if !ok {
 		return 0
@@ -433,8 +433,8 @@ func (s *SettingsType) GetInt(id string) int {
 	return parsed
 }
 
-// GetBool returns the setting value as a bool.
-func (s *SettingsType) GetBool(id string) bool {
+// Bool returns the setting value as a bool.
+func (s *Settings) Bool(id string) bool {
 	st, ok := s.m[id]
 	if !ok {
 		return false
@@ -455,12 +455,12 @@ func (s *SettingsType) GetBool(id string) bool {
 }
 
 // IsTrue reports whether the named setting resolves to true.
-func (s *SettingsType) IsTrue(id string) bool {
-	return s.GetBool(id)
+func (s *Settings) IsTrue(id string) bool {
+	return s.Bool(id)
 }
 
-// GetDuration returns the setting value as a duration.
-func (s *SettingsType) GetDuration(id string) time.Duration {
+// Duration returns the setting value as a duration.
+func (s *Settings) Duration(id string) time.Duration {
 	st, ok := s.m[id]
 	if !ok {
 		return 0
@@ -520,7 +520,7 @@ const (
 )
 
 // OverwriteForTestString replaces a string setting value for tests.
-func (s *SettingsType) OverwriteForTestString(id, value string) error {
+func (s *Settings) OverwriteForTestString(id, value string) error {
 	if st, ok := s.m[id]; ok {
 		if st.Kind != KindString {
 			return &SettingTypeMismatchError{ID: id, Expected: KindString, Actual: st.Kind}
@@ -533,7 +533,7 @@ func (s *SettingsType) OverwriteForTestString(id, value string) error {
 }
 
 // OverwriteForTestInt replaces an int setting value for tests.
-func (s *SettingsType) OverwriteForTestInt(id string, value int) error {
+func (s *Settings) OverwriteForTestInt(id string, value int) error {
 	if st, ok := s.m[id]; ok {
 		if st.Kind != KindInt {
 			return &SettingTypeMismatchError{ID: id, Expected: KindInt, Actual: st.Kind}
@@ -546,7 +546,7 @@ func (s *SettingsType) OverwriteForTestInt(id string, value int) error {
 }
 
 // OverwriteForTestBool replaces a bool setting value for tests.
-func (s *SettingsType) OverwriteForTestBool(id string, value bool) error {
+func (s *Settings) OverwriteForTestBool(id string, value bool) error {
 	if st, ok := s.m[id]; ok {
 		if st.Kind != KindBool {
 			return &SettingTypeMismatchError{ID: id, Expected: KindBool, Actual: st.Kind}
@@ -559,7 +559,7 @@ func (s *SettingsType) OverwriteForTestBool(id string, value bool) error {
 }
 
 // OverwriteForTestDuration replaces a duration setting value for tests.
-func (s *SettingsType) OverwriteForTestDuration(id string, value time.Duration) error {
+func (s *Settings) OverwriteForTestDuration(id string, value time.Duration) error {
 	if st, ok := s.m[id]; ok {
 		if st.Kind != KindDuration {
 			return &SettingTypeMismatchError{ID: id, Expected: KindDuration, Actual: st.Kind}

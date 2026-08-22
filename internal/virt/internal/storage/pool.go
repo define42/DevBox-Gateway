@@ -14,7 +14,7 @@ import (
 )
 
 // PoolConfig returns the configured libvirt storage pool name and path.
-func PoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
+func PoolConfig(settings *config.Settings) (poolName string, poolPath string) {
 	poolName = config.DefaultVirtStoragePoolName
 	poolPath = config.VirtStoragePoolPath(nil)
 	if settings == nil {

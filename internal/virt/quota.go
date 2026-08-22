@@ -57,7 +57,7 @@ var (
 // there would stall VM creation for every user until restart; with the mutex
 // released, a wedged fallback fails only its own request once keepalive kills
 // the connection (see connectLibvirt).
-func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, owner string) (release func(), err error) {
+func reserveUserVMSlot(conn *libvirt.Connect, settings *config.Settings, owner string) (release func(), err error) {
 	return reserveUserVMSlotWithCounter(conn, settings, owner, cachedVMCountForQuota)
 }
 
@@ -75,7 +75,7 @@ func cachedVMCountForQuota(owner string) (int, bool) {
 
 func reserveUserVMSlotWithCounter(
 	conn *libvirt.Connect,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	owner string,
 	cachedCount func(string) (int, bool),
 ) (release func(), err error) {

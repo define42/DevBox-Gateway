@@ -317,14 +317,14 @@ func TestAutoShutdownSweepPrunesDepartedVMsButNotOnEmptyListing(t *testing.T) {
 }
 
 func TestStartAutoShutdownWorkerDisabledByDefault(_ *testing.T) {
-	stop := StartAutoShutdownWorker(config.NewSettingType(false))
+	stop := StartAutoShutdownWorker(config.NewSettings(false))
 	// The returned no-op stop must be safe to call, repeatedly.
 	stop()
 	stop()
 }
 
 func TestStartAutoShutdownWorkerStartsAndStops(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.VDI_AUTO_SHUTDOWN_HOURS, 4); err != nil {
 		t.Fatalf("enable auto-shutdown: %v", err)
 	}

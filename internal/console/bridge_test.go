@@ -231,7 +231,7 @@ func readDashboardMessageType(t *testing.T, conn *websocket.Conn, wantType strin
 func TestBridgeDashboardControlSocketMultiplexesVMsAndPongs(t *testing.T) {
 	clientWS, serverWS, cleanup := newWebsocketPair(t)
 	defer cleanup()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	baseImageDir := t.TempDir()
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, baseImageDir); err != nil {
 		t.Fatalf("overwrite base image directory: %v", err)

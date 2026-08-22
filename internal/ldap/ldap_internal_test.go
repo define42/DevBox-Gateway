@@ -15,7 +15,7 @@ func TestAuthenticateAccessRejectsEmptyPassword(t *testing.T) {
 	// guard were ever removed the test fails fast on a dial error rather than
 	// authenticating or hanging.
 	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("johndoe", "", settings)
 	if user != nil {
@@ -31,7 +31,7 @@ func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
 	// rejected before any LDAP connection is attempted.
 	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
 	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("", "nonempty-password", settings)
 	if user != nil {
@@ -44,19 +44,19 @@ func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
 
 func TestConfigured(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "ldaps://ldap:389")
-	if !Configured(config.NewSettingType(false)) {
+	if !Configured(config.NewSettings(false)) {
 		t.Fatal("expected Configured=true when LDAP_URL is set")
 	}
 
 	t.Setenv(config.LDAP_URL, "   ")
-	if Configured(config.NewSettingType(false)) {
+	if Configured(config.NewSettings(false)) {
 		t.Fatal("expected Configured=false when LDAP_URL is blank")
 	}
 }
 
 func TestLoginIdentifierAppendsDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if got := loginIdentifier("alice", settings); got != "alice@example.test" {
 		t.Fatalf("expected alice@example.test, got %q", got)
@@ -65,7 +65,7 @@ func TestLoginIdentifierAppendsDomain(t *testing.T) {
 
 func TestLoginIdentifierAppendsDomainWithAtPrefix(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "@example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if got := loginIdentifier("alice", settings); got != "alice@example.test" {
 		t.Fatalf("expected alice@example.test, got %q", got)
@@ -74,7 +74,7 @@ func TestLoginIdentifierAppendsDomainWithAtPrefix(t *testing.T) {
 
 func TestLoginIdentifierKeepsExistingDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if got := loginIdentifier("alice@other.test", settings); got != "alice@other.test" {
 		t.Fatalf("expected unmodified address, got %q", got)
@@ -83,7 +83,7 @@ func TestLoginIdentifierKeepsExistingDomain(t *testing.T) {
 
 func TestLoginIdentifierWithoutDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if got := loginIdentifier("alice", settings); got != "alice" {
 		t.Fatalf("expected unmodified username, got %q", got)
@@ -129,7 +129,7 @@ func TestRequiredGroupsParsing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(config.LDAP_REQUIRED_GROUPS, tc.raw)
-			settings := config.NewSettingType(false)
+			settings := config.NewSettings(false)
 
 			got := requiredGroups(settings)
 			if len(got) == 0 && len(tc.want) == 0 {

@@ -55,7 +55,7 @@ func TestSeedISOCreate(t *testing.T) {
 func TestCreateUbuntuSeedISOToPool(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	rootDir := t.TempDir()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -131,7 +131,7 @@ func waitForDomainActiveState(t *testing.T, name string, want bool, timeout time
 }
 
 func TestPowerLifecycle(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestEnsureStoragePoolRejectsInvalidArguments(t *testing.T) {
 }
 
 func TestStoragePoolConfigUsesDerivedImageDir(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	rootDir := filepath.Join(t.TempDir(), "gateway-root")
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)

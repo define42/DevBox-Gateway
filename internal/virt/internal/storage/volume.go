@@ -67,7 +67,7 @@ func CopyAndResizeVolume(
 // CopyAndResizeVolumeWithSettings creates and resizes a volume using explicit settings.
 func CopyAndResizeVolumeWithSettings(
 	conn *libvirt.Connect,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	storagePoolName string,
 	volumeName string,
 	sourceImagePath string,
@@ -79,7 +79,7 @@ func CopyAndResizeVolumeWithSettings(
 // CopyAndResizeVolumeWithSettingsAndProgress creates and resizes a volume while reporting copy progress.
 func CopyAndResizeVolumeWithSettingsAndProgress(
 	conn *libvirt.Connect,
-	settings *config.SettingsType,
+	settings *config.Settings,
 	storagePoolName string,
 	volumeName string,
 	sourceImagePath string,
@@ -116,7 +116,7 @@ func CopyAndResizeVolumeWithSettingsAndProgress(
 }
 
 // CreateQCOW2Volume creates an empty qcow2 volume in pool.
-func CreateQCOW2Volume(settings *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64) (*libvirt.StorageVol, error) {
+func CreateQCOW2Volume(settings *config.Settings, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64) (*libvirt.StorageVol, error) {
 	volXML, err := VolumeCreateXMLWithSettings(settings, pool, volumeName, capacityBytes, "qcow2")
 	if err != nil {
 		return nil, err

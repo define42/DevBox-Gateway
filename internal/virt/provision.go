@@ -136,7 +136,7 @@ func (s vmProvisionSpec) startConfig() VMStartConfig {
 // storage pool. It takes no locks and reserves nothing. On error the returned
 // spec still carries the composed VDI name when composition succeeded, so
 // callers can report which VM the failure was about.
-func prepareVMCreation(req VMCreateRequest, settings *config.SettingsType) (vmProvisionSpec, error) {
+func prepareVMCreation(req VMCreateRequest, settings *config.Settings) (vmProvisionSpec, error) {
 	var spec vmProvisionSpec
 	if req.Owner == nil {
 		return spec, fmt.Errorf("vm owner is required")
@@ -177,7 +177,7 @@ func prepareVMCreation(req VMCreateRequest, settings *config.SettingsType) (vmPr
 // with owner metadata. Preparation (prepareVMCreation) validates the request
 // and resolves the provisioning plan without locks; the per-name locked phase
 // (provisionAndStartVM) then provisions storage and starts the domain.
-func BootNewVM(req VMCreateRequest, settings *config.SettingsType) (vmName string, err error) {
+func BootNewVM(req VMCreateRequest, settings *config.Settings) (vmName string, err error) {
 	return BootNewVMWithProgress(req, settings, nil)
 }
 
@@ -185,7 +185,7 @@ func BootNewVM(req VMCreateRequest, settings *config.SettingsType) (vmName strin
 // selected base image's disk-copy byte progress. A nil callback disables
 // reporting. The callback is observational: callers should return promptly and
 // must not call back into VM create/remove operations.
-func BootNewVMWithProgress(req VMCreateRequest, settings *config.SettingsType, report DiskCopyProgressFunc) (vmName string, err error) {
+func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, report DiskCopyProgressFunc) (vmName string, err error) {
 	spec, err := prepareVMCreation(req, settings)
 	if err != nil {
 		return spec.vmName, err
@@ -219,7 +219,7 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.SettingsType, r
 // hold vmNameLocks.Lock(spec.vmName) for the whole call. It checks the name is
 // free, reserves the owner's quota slot, clears leftover artifacts, provisions
 // the disk and seed volumes, and starts the domain.
-func provisionAndStartVM(conn *libvirt.Connect, settings *config.SettingsType, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
 	if err := ensureVMNameAvailable(conn, spec.vmName); err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.SettingsType, s
 }
 
 // RemoveVM deletes the named VM, its disks, and any leftover console sockets.
-func RemoveVM(name string, settings *config.SettingsType) error {
+func RemoveVM(name string, settings *config.Settings) error {
 	// Take the per-name lock so a remove and a create of the same VDI name
 	// cannot interleave (see vmNameLocks): the destroy and volume deletion below
 	// must not run against a name another goroutine is mid-provisioning.
@@ -293,7 +293,7 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso s
 // provisionBootVolumes creates the VM's disk (cloned from the resolved base
 // image) and its cloud-init seed ISO in the storage pool. A nil report
 // disables disk-copy progress reporting.
-func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
 	if err := storage.CopyAndResizeVolumeWithSettingsAndProgress(
 		conn,
 		settings,

@@ -9,7 +9,7 @@ import (
 func TestEnsureSNIHashSecretRespectsExplicitValue(t *testing.T) {
 	t.Setenv(DATA_ROOT_DIR, t.TempDir())
 	t.Setenv(SNI_HASH_SECRET, "explicit-secret")
-	s := NewSettingType(false)
+	s := NewSettings(false)
 
 	if err := EnsureSNIHashSecret(s); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -25,7 +25,7 @@ func TestEnsureSNIHashSecretRespectsExplicitValue(t *testing.T) {
 func TestEnsureSNIHashSecretGeneratesAndPersists(t *testing.T) {
 	dataRoot := t.TempDir()
 	t.Setenv(DATA_ROOT_DIR, dataRoot)
-	s := NewSettingType(false)
+	s := NewSettings(false)
 
 	if err := EnsureSNIHashSecret(s); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -44,7 +44,7 @@ func TestEnsureSNIHashSecretGeneratesAndPersists(t *testing.T) {
 	}
 
 	// A fresh settings instance over the same data root reuses the secret.
-	s2 := NewSettingType(false)
+	s2 := NewSettings(false)
 	if err := EnsureSNIHashSecret(s2); err != nil {
 		t.Fatalf("unexpected error on reload: %v", err)
 	}

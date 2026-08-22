@@ -127,7 +127,7 @@ func covxWaitForVM(t *testing.T, owner string) {
 }
 
 func TestWriteRDPFileNotFound(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	rec := httptest.NewRecorder()
 	WriteRDPFile(rec, settings, fmt.Sprintf("covx-nobody-%d", time.Now().UnixNano()), "covx-missing-vm")
@@ -153,7 +153,7 @@ func TestWriteRDPFileWithLibvirtVM(t *testing.T) {
 
 	t.Setenv(config.FRONT_DOMAIN, covxFrontDomain)
 	t.Setenv(config.SNI_HASH_SECRET, covxSNISecret)
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	t.Run("download", func(t *testing.T) {
 		rec := httptest.NewRecorder()
@@ -204,7 +204,7 @@ func assertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, owner, vmNa
 
 func TestRDPConnectHostWithoutFrontDomain(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if got := rdpConnectHost(settings, "covx-vm"); got != "covx-vm" {
 		t.Fatalf("expected bare VM name without a front domain, got %q", got)

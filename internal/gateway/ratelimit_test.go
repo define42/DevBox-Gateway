@@ -141,13 +141,13 @@ func newLocalLoginRouter(t *testing.T) http.Handler {
 	return NewHandler(session.New(), settings)
 }
 
-func newRateLimitTestSettings(t *testing.T) *config.SettingsType {
+func newRateLimitTestSettings(t *testing.T) *config.Settings {
 	t.Helper()
 	t.Setenv(config.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "2")
 	t.Setenv(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "4")
 	t.Setenv(config.LOGIN_RATE_LIMIT_WINDOW, "1m")
 	t.Setenv(config.LOGIN_RATE_LIMIT_LOCKOUT, "1h")
-	return config.NewSettingType(false)
+	return config.NewSettings(false)
 }
 
 func postLogin(t *testing.T, router http.Handler, remoteAddr, username, password string) *httptest.ResponseRecorder {

@@ -26,7 +26,7 @@ func IsBaseImageName(name string) bool {
 // extension is one of .img/.qcow2/.raw are returned. A missing directory yields
 // an empty list (not an error) so callers can treat "directory absent" the same
 // as "no images yet".
-func ListBaseImages(settings *config.SettingsType) ([]string, error) {
+func ListBaseImages(settings *config.Settings) ([]string, error) {
 	dir := config.BaseImageDir(settings)
 
 	entries, err := os.ReadDir(dir)
@@ -70,7 +70,7 @@ func IsBareFileName(name string) bool {
 // "."/"..") and must match one of the images currently in the base-image
 // directory. This is the single guard against path traversal or selecting an
 // arbitrary host file.
-func ResolveBaseImagePath(settings *config.SettingsType, selected string) (string, error) {
+func ResolveBaseImagePath(settings *config.Settings, selected string) (string, error) {
 	selected = strings.TrimSpace(selected)
 	if selected == "" {
 		return "", fmt.Errorf("base image is required")
@@ -94,7 +94,7 @@ func ResolveBaseImagePath(settings *config.SettingsType, selected string) (strin
 // EnsureBaseImagesAvailable returns an error when no selectable base image
 // exists, so the gateway refuses to boot with an empty image library instead of
 // silently having nothing to clone VMs from.
-func EnsureBaseImagesAvailable(settings *config.SettingsType) error {
+func EnsureBaseImagesAvailable(settings *config.Settings) error {
 	images, err := ListBaseImages(settings)
 	if err != nil {
 		return err

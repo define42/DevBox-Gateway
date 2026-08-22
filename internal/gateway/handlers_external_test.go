@@ -14,7 +14,7 @@ import (
 func TestNewHandlerHealth(t *testing.T) {
 	handler := gateway.NewHandler(
 		session.New(),
-		config.NewSettingType(false),
+		config.NewSettings(false),
 	)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(

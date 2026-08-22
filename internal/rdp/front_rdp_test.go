@@ -73,7 +73,7 @@ func TestWriteFrontConnectionConfirmFailure(t *testing.T) {
 
 func TestDialBackendTCPFailureReturnsError(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "200ms")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	// Find a port nobody is listening on by binding then immediately closing.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -91,7 +91,7 @@ func TestDialBackendTCPFailureReturnsError(t *testing.T) {
 
 func TestDialBackendRDPReturnsFalseOnDialFailure(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "200ms")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -110,7 +110,7 @@ func TestDialBackendRDPReturnsFalseOnDialFailure(t *testing.T) {
 func TestDialBackendRDPReturnsFalseOnTLSNegotiationFailure(t *testing.T) {
 	InitLogging()
 	t.Setenv(config.TIMEOUT, "2s")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	// Accept a TCP connection but close it immediately so the CRQ write fails.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -147,7 +147,7 @@ func TestDialBackendRDPReturnsFalseOnTLSNegotiationFailure(t *testing.T) {
 
 func TestValidateFrontSNIRejectsMismatch(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	_, ok := validateFrontSNI(strings.ToLower("vm.other.example"), addr, settings)
 	if ok {
@@ -157,7 +157,7 @@ func TestValidateFrontSNIRejectsMismatch(t *testing.T) {
 
 func TestValidateFrontSNIRequiresSubdomain(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	_, ok := validateFrontSNI("example.test", addr, settings)
 	if ok {
@@ -168,7 +168,7 @@ func TestValidateFrontSNIRequiresSubdomain(t *testing.T) {
 func TestValidateFrontSNIAcceptsValidSubdomain(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	t.Setenv(config.SNI_HASH_SECRET, "test-secret")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
 	label := hash.RoutingLabel([]byte("test-secret"), "vm")
@@ -193,7 +193,7 @@ func TestValidateFrontSNIAcceptsValidSubdomain(t *testing.T) {
 func TestValidateFrontSNIRejectsUnknownLabel(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	t.Setenv(config.SNI_HASH_SECRET, "test-secret")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
 	original := vmNameByLabelLookup

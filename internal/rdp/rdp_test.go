@@ -44,7 +44,7 @@ func TestHandleRDPRejectsClientWithoutTLS(t *testing.T) {
 	}()
 
 	done := make(chan struct{})
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	go func() {
 		HandleRDP(server, nil, nil, settings)
 		close(done)
@@ -60,7 +60,7 @@ func TestHandleRDPRejectsClientWithoutTLS(t *testing.T) {
 func TestHandleRDPRejectsSNIMismatch(t *testing.T) {
 	InitLogging()
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)

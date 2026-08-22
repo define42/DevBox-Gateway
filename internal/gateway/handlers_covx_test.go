@@ -163,10 +163,10 @@ func hcovSeedBaseImage(t *testing.T, dir string) string {
 // storage pool with a placeholder base image staged, so create-VM requests get
 // past form validation and fail (or conflict) deterministically inside
 // virt.BootNewVM without downloading anything.
-func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.SettingsType, string) {
+func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.Settings, string) {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "hcov-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -229,7 +229,7 @@ func hcovAssertAction(t *testing.T, rec *httptest.ResponseRecorder, wantCode int
 // hcovRouterWithoutSessionAuth registers the dashboard routes without the huma
 // session middleware (but with the scs session loader), so the handlers' own
 // "no authenticated user" branches are reachable.
-func hcovRouterWithoutSessionAuth(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
+func hcovRouterWithoutSessionAuth(sessionManager *session.Manager, settings *config.Settings) http.Handler {
 	router := chi.NewRouter()
 	router.Use(sessionManager.LoadAndSave)
 	apiCfg := huma.DefaultConfig("HcovCoverage", "1.0.0")
@@ -324,7 +324,7 @@ func TestHcovRequestScheme(t *testing.T) {
 
 func TestHcovServeLoginStatusWriteFailure(t *testing.T) {
 	w := &hcovFailingResponseWriter{}
-	serveLoginStatus(w, config.NewSettingType(false), "hcov", http.StatusOK)
+	serveLoginStatus(w, config.NewSettings(false), "hcov", http.StatusOK)
 
 	if w.status != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, w.status)
@@ -346,7 +346,7 @@ func hcovPostLoginForm(t *testing.T, handler http.Handler, remoteAddr, body stri
 }
 
 func TestHcovLoginPostRejectsOversizedFormBody(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 	body := "username=" + strings.Repeat("a", maxFormBodyBytes) + "&password=x"
 
 	rec := hcovPostLoginForm(t, router, "", body)
@@ -359,7 +359,7 @@ func TestHcovLoginPostRejectsOversizedFormBody(t *testing.T) {
 }
 
 func TestHcovLoginPostMissingCredentials(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 
 	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {""}, "password": {""}}.Encode())
 	if rec.Code != http.StatusOK {
@@ -371,7 +371,7 @@ func TestHcovLoginPostMissingCredentials(t *testing.T) {
 }
 
 func TestHcovLoginPostRejectsInvalidUsername(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 
 	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"bad name"}, "password": {"pw"}}.Encode())
 	if rec.Code != http.StatusOK {
@@ -391,7 +391,7 @@ func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
 	t.Setenv(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "50")
 	t.Setenv(config.LOGIN_RATE_LIMIT_WINDOW, "1m")
 	t.Setenv(config.LOGIN_RATE_LIMIT_LOCKOUT, "1h")
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 	failedForm := url.Values{"username": {"hcovlockuser"}, "password": {"wrong"}}.Encode()
 
 	rec := hcovPostLoginForm(t, router, "198.51.100.71:4000", failedForm)
@@ -416,7 +416,7 @@ func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
 }
 
 func TestHcovLoginPostLocalUserSuccess(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	digest := sha256.Sum256([]byte("hcovlocal:Secret1!"))
 	if err := settings.OverwriteForTestString(config.LOCAL_USER_SHA256, hex.EncodeToString(digest[:])); err != nil {
 		t.Fatalf("overwrite LOCAL_USER_SHA256: %v", err)
@@ -449,7 +449,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.AddCookie(cookie)
 	handler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		completeLogin(sessionManager, config.NewSettingType(false), w, r, user, "hcovpass")
+		completeLogin(sessionManager, config.NewSettings(false), w, r, user, "hcovpass")
 	}))
 	handler.ServeHTTP(rec, req)
 
@@ -464,7 +464,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 	sessionManager := session.New()
 	sessionManager.Store = hcovDeleteFailStore{inner: sessionManager.Store}
-	router := NewHandler(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, "hcovlogout")
 	closed := 0
 	sessionManager.RegisterUserConnection("hcovlogout", func() { closed++ })
@@ -495,7 +495,7 @@ func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 }
 
 func TestHcovDebugConnectionLoggerRequests(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestBool(config.DEBUG_CONNECTIONS, true); err != nil {
 		t.Fatalf("overwrite DEBUG_CONNECTIONS: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestHcovDebugConnectionLoggerRequests(t *testing.T) {
 
 func TestHcovDashboardDataToleratesBaseImageListFailure(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	notADir := filepath.Join(t.TempDir(), "hcov-not-a-dir")
 	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write blocker file: %v", err)
@@ -556,7 +556,7 @@ func TestHcovDashboardDataToleratesBaseImageListFailure(t *testing.T) {
 
 func TestHcovDashboardDataListsSeededBaseImages(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	dir := t.TempDir()
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, dir); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_DIR: %v", err)
@@ -581,7 +581,7 @@ func TestHcovDashboardDataListsSeededBaseImages(t *testing.T) {
 
 func TestHcovDashboardRoutesRequireLoginWithoutSessionMiddleware(t *testing.T) {
 	sessionManager := session.New()
-	router := hcovRouterWithoutSessionAuth(sessionManager, config.NewSettingType(false))
+	router := hcovRouterWithoutSessionAuth(sessionManager, config.NewSettings(false))
 
 	rec := hcovGet(t, router, nil, "/api/dashboard/data")
 	if rec.Code != http.StatusUnauthorized {
@@ -601,7 +601,7 @@ func TestHcovDashboardRoutesRequireLoginWithoutSessionMiddleware(t *testing.T) {
 
 func TestHcovDashboardRDPRejectsBadAndUnownedNames(t *testing.T) {
 	sessionManager := session.New()
-	router := NewHandler(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovnoown"))
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {""}})
@@ -642,7 +642,7 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	hcovDefineOwnedDomain(t, domainName, user)
 
 	sessionManager := session.New()
-	router := NewHandler(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
 	form := url.Values{"vm_name": {domainName}}
 
@@ -672,7 +672,7 @@ func TestHcovDashboardStartThenShutdown(t *testing.T) {
 	hcovDefineOwnedDomain(t, domainName, user)
 
 	sessionManager := session.New()
-	router := NewHandler(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
 	nameForm := url.Values{"vm_name": {domainName}}
 
@@ -691,7 +691,7 @@ func TestHcovDashboardRemoveFailsWithoutStoragePool(t *testing.T) {
 	domainName := user + vmname.Separator + "gone"
 	hcovDefineOwnedDomain(t, domainName, user)
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, hcovUniqueName("hcov-nopool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestHcovDashboardCreateFailsOnStoragePoolPathConflict(t *testing.T) {
 }
 
 func TestHcovDashboardCreateFormValidationErrors(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	dir := t.TempDir()
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, dir); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_DIR: %v", err)
@@ -785,7 +785,7 @@ func TestHcovDashboardCreateFormValidationErrors(t *testing.T) {
 }
 
 func TestHcovValidateBaseImage(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	dir := t.TempDir()
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, dir); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_DIR: %v", err)
@@ -802,7 +802,7 @@ func TestHcovValidateBaseImage(t *testing.T) {
 		t.Fatalf("expected not-available error, got %v", err)
 	}
 
-	broken := config.NewSettingType(false)
+	broken := config.NewSettings(false)
 	notADir := filepath.Join(t.TempDir(), "hcov-file")
 	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write blocker file: %v", err)

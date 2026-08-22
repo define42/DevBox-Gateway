@@ -25,11 +25,11 @@ func vbtcovNewUser(t *testing.T, name string) *identity.User {
 // vbtcovSettingsWithDummyImage returns settings with an isolated data root, a
 // unique storage pool name, and a tiny placeholder base image; it returns the
 // settings, the data root, and the seeded image name.
-func vbtcovSettingsWithDummyImage(t *testing.T) (*config.SettingsType, string, string) {
+func vbtcovSettingsWithDummyImage(t *testing.T) (*config.Settings, string, string) {
 	t.Helper()
 
 	rootDir := t.TempDir()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -43,7 +43,7 @@ func vbtcovSettingsWithDummyImage(t *testing.T) (*config.SettingsType, string, s
 // vbtcovBlockPoolPathWithFile occupies the settings' storage pool path with a
 // regular file so ensureStoragePool fails at MkdirAll, before any libvirt
 // domain work.
-func vbtcovBlockPoolPathWithFile(t *testing.T, settings *config.SettingsType) {
+func vbtcovBlockPoolPathWithFile(t *testing.T, settings *config.Settings) {
 	t.Helper()
 
 	poolPath := config.VirtStoragePoolPath(settings)
@@ -103,7 +103,7 @@ func TestVbtcovBootNewVMStoragePoolFailure(t *testing.T) {
 }
 
 func TestVbtcovRemoveVMMissingPool(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("cvbt-rm-pool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
@@ -147,10 +147,10 @@ func TestVbtcovDestroyExistingDomainTransient(t *testing.T) {
 	}
 }
 
-func vbtcovLimitSettings(t *testing.T, limit int) *config.SettingsType {
+func vbtcovLimitSettings(t *testing.T, limit int) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.MAX_VDI_PER_USER, limit); err != nil {
 		t.Fatalf("overwrite MAX_VDI_PER_USER: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	pool, poolName, _ := vbtcovEnsureTestPool(t, conn, "cvbt-provision-pool")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.VM_DISK_SIZE_GB, 1); err != nil {
 		t.Fatalf("overwrite VM_DISK_SIZE_GB: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	pool, poolName, _ := vbtcovEnsureTestPool(t, conn, "cvbt-provok-pool")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.VM_DISK_SIZE_GB, 1); err != nil {
 		t.Fatalf("overwrite VM_DISK_SIZE_GB: %v", err)
 	}

@@ -80,7 +80,7 @@ func covxDashboardServer(t *testing.T, manager *session.Manager) *httptest.Serve
 	router.Use(manager.LoadAndSave)
 	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(manager))
 	router.Get("/api/dashboard/vnc/{name}/ws", HandleDashboardVNCWS(manager))
-	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, config.NewSettingType(false)))
+	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, config.NewSettings(false)))
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)

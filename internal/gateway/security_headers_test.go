@@ -11,7 +11,7 @@ import (
 
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	router := NewHandler(sessionManager, settings)
 
 	want := map[string]string{

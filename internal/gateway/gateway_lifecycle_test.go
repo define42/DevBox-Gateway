@@ -32,7 +32,7 @@ type gatewayTestServer struct {
 	close   func()
 }
 
-func startGatewayTestServer(t *testing.T, settings *config.SettingsType) gatewayTestServer {
+func startGatewayTestServer(t *testing.T, settings *config.Settings) gatewayTestServer {
 	t.Helper()
 
 	vmInventory := virt.NewInventory()

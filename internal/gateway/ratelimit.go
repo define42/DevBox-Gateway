@@ -30,7 +30,7 @@ type loginRateLimiter struct {
 	now         func() time.Time
 }
 
-func newLoginRateLimiter(settings *config.SettingsType) *loginRateLimiter {
+func newLoginRateLimiter(settings *config.Settings) *loginRateLimiter {
 	limiter := &loginRateLimiter{
 		attempts: make(map[string]*loginAttemptBucket),
 		now:      time.Now,
@@ -39,10 +39,10 @@ func newLoginRateLimiter(settings *config.SettingsType) *loginRateLimiter {
 		return limiter
 	}
 
-	limiter.maxAttempts = settings.GetInt(config.LOGIN_RATE_LIMIT_MAX_ATTEMPTS)
-	limiter.maxIPAttempts = settings.GetInt(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS)
-	limiter.window = settings.GetDuration(config.LOGIN_RATE_LIMIT_WINDOW)
-	limiter.lockout = settings.GetDuration(config.LOGIN_RATE_LIMIT_LOCKOUT)
+	limiter.maxAttempts = settings.Int(config.LOGIN_RATE_LIMIT_MAX_ATTEMPTS)
+	limiter.maxIPAttempts = settings.Int(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS)
+	limiter.window = settings.Duration(config.LOGIN_RATE_LIMIT_WINDOW)
+	limiter.lockout = settings.Duration(config.LOGIN_RATE_LIMIT_LOCKOUT)
 	return limiter
 }
 

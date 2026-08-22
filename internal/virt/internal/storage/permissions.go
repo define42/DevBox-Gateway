@@ -64,7 +64,7 @@ func VolumeCreateXML(pool *libvirt.StoragePool, volumeName string, capacityBytes
 }
 
 // VolumeCreateXMLWithSettings returns a libvirt volume definition using explicit settings.
-func VolumeCreateXMLWithSettings(_ *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
+func VolumeCreateXMLWithSettings(_ *config.Settings, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
 	poolPath, err := PoolTargetPath(pool)
 	if err != nil {
 		return "", err
@@ -132,7 +132,7 @@ func PoolTargetPath(pool *libvirt.StoragePool) (string, error) {
 }
 
 // ApplyVolumePermissions applies the gateway's fixed mode to a volume file.
-func ApplyVolumePermissions(_ *config.SettingsType, vol *libvirt.StorageVol) error {
+func ApplyVolumePermissions(_ *config.Settings, vol *libvirt.StorageVol) error {
 	volPath, err := vol.GetPath()
 	if err != nil {
 		return fmt.Errorf("get volume path: %w", err)

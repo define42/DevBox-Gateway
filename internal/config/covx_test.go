@@ -45,7 +45,7 @@ func TestCovxEnsureSNIHashSecretReadError(t *testing.T) {
 
 	t.Setenv(DATA_ROOT_DIR, rootAsFile)
 	t.Setenv(SNI_HASH_SECRET, "")
-	s := NewSettingType(false)
+	s := NewSettings(false)
 
 	err := EnsureSNIHashSecret(s)
 	if err == nil || !strings.Contains(err.Error(), "read SNI hash secret") {
@@ -55,7 +55,7 @@ func TestCovxEnsureSNIHashSecretReadError(t *testing.T) {
 
 func TestCovxEnsureSNIHashSecretMissingSetting(t *testing.T) {
 	dataRoot := t.TempDir()
-	s := &SettingsType{m: map[string]*Setting{
+	s := &Settings{m: map[string]*Setting{
 		DATA_ROOT_DIR: {Kind: KindString, S: dataRoot, Raw: dataRoot},
 	}}
 
@@ -99,7 +99,7 @@ func TestCovxLoadOrCreateSNIHashSecretWriteError(t *testing.T) {
 	}
 }
 
-func TestCovxNewSettingTypePrintMasksSecrets(t *testing.T) {
+func TestCovxNewSettingsPrintMasksSecrets(t *testing.T) {
 	const secretValue = "covx-secret-value"
 	t.Setenv(LOCAL_USER_SHA256, secretValue)
 
@@ -117,7 +117,7 @@ func TestCovxNewSettingTypePrintMasksSecrets(t *testing.T) {
 		outCh <- string(data)
 	}()
 
-	s := NewSettingType(true)
+	s := NewSettings(true)
 	_ = w.Close()
 	os.Stdout = oldStdout
 	out := <-outCh
@@ -134,7 +134,7 @@ func TestCovxNewSettingTypePrintMasksSecrets(t *testing.T) {
 }
 
 func TestCovxOverwriteForTestStringMissingAndHappy(t *testing.T) {
-	s := &SettingsType{m: map[string]*Setting{}}
+	s := &Settings{m: map[string]*Setting{}}
 
 	err := s.OverwriteForTestString("MISSING", "value")
 	var notFound *SettingNotFoundError

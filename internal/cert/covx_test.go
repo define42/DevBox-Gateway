@@ -39,7 +39,7 @@ func TestConfigureACMEDefaultsWithEmailAndCA(t *testing.T) {
 	t.Setenv(config.ACME_EMAIL, "ops@covx.example.test")
 	t.Setenv(config.ACME_CA, "staging")
 	t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	configureACMEDefaults(settings)
 
@@ -63,7 +63,7 @@ func TestStartManagingBeginsBackgroundManagement(t *testing.T) {
 	t.Setenv(config.ACME_EMAIL, "")
 	t.Setenv(config.ACME_CA, "")
 	t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	tm, err := NewTLSManager(settings, noVMNames)
 	if err != nil {
@@ -88,7 +88,7 @@ func TestStartManagingBeginsBackgroundManagement(t *testing.T) {
 func TestWorkerTickUpdatesDomains(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "covx-tick.example.test")
 	t.Setenv(config.SNI_HASH_SECRET, "covx-secret")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	magic := certmagic.NewDefault()
 	// On-demand allowlisting keeps the periodic ManageSync entirely offline.
@@ -124,7 +124,7 @@ func TestWorkerTickUpdatesDomains(t *testing.T) {
 func TestUpdateDomainsManageSyncError(t *testing.T) {
 	t.Setenv(config.FRONT_DOMAIN, "covx-err.example.test")
 	t.Setenv(config.SNI_HASH_SECRET, "covx-secret")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	// A regular file as the storage path makes every storage access fail with
 	// ENOTDIR, so ManageSync errors out quickly without any network I/O.

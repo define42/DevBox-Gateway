@@ -15,10 +15,10 @@ func digest(username, password string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func settingsWith(t *testing.T, value string) *config.SettingsType {
+func settingsWith(t *testing.T, value string) *config.Settings {
 	t.Helper()
 	t.Setenv(config.LOCAL_USER_SHA256, value)
-	return config.NewSettingType(false)
+	return config.NewSettings(false)
 }
 
 func TestValidateEmptyConfig(t *testing.T) {

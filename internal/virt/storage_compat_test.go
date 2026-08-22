@@ -18,7 +18,7 @@ type (
 	storageVolumePermissionsXML = storage.PermissionsXML
 )
 
-func storagePoolConfig(settings *config.SettingsType) (string, string) {
+func storagePoolConfig(settings *config.Settings) (string, string) {
 	return storage.PoolConfig(settings)
 }
 
@@ -77,7 +77,7 @@ func storageVolCreateXML(
 }
 
 func storageVolCreateXMLWithSettings(
-	settings *config.SettingsType,
+	settings *config.Settings,
 	pool *libvirt.StoragePool,
 	volumeName string,
 	capacityBytes uint64,
@@ -108,12 +108,12 @@ func storagePoolTargetPath(pool *libvirt.StoragePool) (string, error) {
 	return storage.PoolTargetPath(pool)
 }
 
-func applyStorageVolPermissions(settings *config.SettingsType, vol *libvirt.StorageVol) error {
+func applyStorageVolPermissions(settings *config.Settings, vol *libvirt.StorageVol) error {
 	return storage.ApplyVolumePermissions(settings, vol)
 }
 
 func createQCOW2Volume(
-	settings *config.SettingsType,
+	settings *config.Settings,
 	pool *libvirt.StoragePool,
 	volumeName string,
 	capacityBytes uint64,

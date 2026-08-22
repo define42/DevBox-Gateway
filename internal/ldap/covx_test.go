@@ -37,7 +37,7 @@ func TestDialLDAPStartTLSFailure(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "ldap://"+addr)
 	t.Setenv(config.LDAP_STARTTLS, "true")
 	t.Setenv(config.LDAP_SKIP_TLS_VERIFY, "true")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	conn, err := dialLDAP(settings)
 	if err == nil {
@@ -57,7 +57,7 @@ func TestAuthenticateAccessDialFailure(t *testing.T) {
 
 	t.Setenv(config.LDAP_URL, "ldap://"+addr)
 	t.Setenv(config.LDAP_STARTTLS, "false")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("covxuser", "covxpassword", settings)
 	if user != nil {

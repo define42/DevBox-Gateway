@@ -32,7 +32,7 @@ type VMNameProvider func() []string
 // TLSManager owns the frontend TLS configuration and ACME domain updates.
 type TLSManager struct {
 	magic          *certmagic.Config
-	settings       *config.SettingsType
+	settings       *config.Settings
 	vmNames        VMNameProvider
 	tlsConfig      *tls.Config
 	initialDomains []string
@@ -129,7 +129,7 @@ func (tm *TLSManager) setManagedDomains(domains []string) {
 // certificates: the caller must invoke StartManaging once the front listener is
 // accepting connections, so that ACME TLS-ALPN-01 validation can be answered.
 // vmNames is required only when ACME is enabled.
-func NewTLSManager(settings *config.SettingsType, vmNames VMNameProvider) (*TLSManager, error) {
+func NewTLSManager(settings *config.Settings, vmNames VMNameProvider) (*TLSManager, error) {
 	acmeEnabled := settings.IsTrue(config.ACME_ENABLE)
 	if acmeEnabled && vmNames == nil {
 		return nil, errors.New("cert: vm name provider is required when acme is enabled")
@@ -149,7 +149,7 @@ func NewTLSManager(settings *config.SettingsType, vmNames VMNameProvider) (*TLSM
 }
 
 // LoadOrGenerateCert loads the configured certificate pair or creates a self-signed fallback.
-func LoadOrGenerateCert(settings *config.SettingsType) (tls.Certificate, error) {
+func LoadOrGenerateCert(settings *config.Settings) (tls.Certificate, error) {
 	certPath := settings.Get(config.CERT_FILE)
 	keyPath := settings.Get(config.KEY_FILE)
 	acmeEnabled := settings.IsTrue(config.ACME_ENABLE)
@@ -172,7 +172,7 @@ func IsACMETLSALPN(protocol string) bool {
 	return protocol == acmez.ACMETLS1Protocol
 }
 
-func newStaticTLSManager(settings *config.SettingsType, fallback tls.Certificate) *TLSManager {
+func newStaticTLSManager(settings *config.Settings, fallback tls.Certificate) *TLSManager {
 	frontTLS := &tls.Config{
 		Certificates: []tls.Certificate{fallback},
 	}
@@ -187,7 +187,7 @@ func newStaticTLSManager(settings *config.SettingsType, fallback tls.Certificate
 }
 
 func newACMETLSManager(
-	settings *config.SettingsType,
+	settings *config.Settings,
 	fallback tls.Certificate,
 	vmNames VMNameProvider,
 ) (*TLSManager, error) {
@@ -240,7 +240,7 @@ func (tm *TLSManager) StartManaging() error {
 	return nil
 }
 
-func configureACMEDefaults(settings *config.SettingsType) {
+func configureACMEDefaults(settings *config.Settings) {
 	certmagic.DefaultACME.Agreed = true
 	certmagic.DefaultACME.DisableHTTPChallenge = true
 

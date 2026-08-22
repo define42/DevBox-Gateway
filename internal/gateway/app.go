@@ -105,10 +105,10 @@ func bootGateway() (*gatewayRuntime, error) {
 	}
 
 	sessionManager := session.New()
-	sessionManager.SetUserConnectionLimit(settings.GetInt(config.MAX_CONNECTIONS_PER_USER))
+	sessionManager.SetUserConnectionLimit(settings.Int(config.MAX_CONNECTIONS_PER_USER))
 
 	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
-	debugConns := settings.GetBool(config.DEBUG_CONNECTIONS)
+	debugConns := settings.Bool(config.DEBUG_CONNECTIONS)
 	consolepkg.SetDebugLogging(debugConns)
 	virt.SetVNCDebugLogging(debugConns)
 	rdp.SetDebugLogging(debugConns)
@@ -166,7 +166,7 @@ func bootGateway() (*gatewayRuntime, error) {
 // /etc/devbox-gateway/devbox-gateway.conf, overridable via CONFIG_FILE), with
 // explicit environment variables taking precedence so containers and
 // development setups can override individual values.
-func loadBootSettings() (*config.SettingsType, error) {
+func loadBootSettings() (*config.Settings, error) {
 	if err := config.LoadConfigFile(config.FilePath()); err != nil {
 		return nil, fmt.Errorf("failed to load config file: %w", err)
 	}
@@ -178,7 +178,7 @@ func loadBootSettings() (*config.SettingsType, error) {
 		return nil, err
 	}
 
-	settings := config.NewSettingType(true)
+	settings := config.NewSettings(true)
 
 	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
 	// routing label; with it empty every RDP connection is rejected while the

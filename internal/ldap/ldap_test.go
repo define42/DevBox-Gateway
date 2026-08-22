@@ -16,7 +16,7 @@ import (
 
 func TestDialLDAPInvalidURL(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "://bad-url")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	if _, err := dialLDAP(settings); err == nil {
 		t.Fatal("expected invalid LDAP URL to fail")
@@ -31,7 +31,7 @@ func TestDialLDAPWithGlauth(t *testing.T) {
 	defer cleanup()
 
 	applyLDAPSettings(t, ldapURL)
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	conn, err := dialLDAP(settings)
 	if err != nil {
@@ -48,7 +48,7 @@ func TestAuthenticateAccessWithUserDomainSuffix(t *testing.T) {
 	defer cleanup()
 
 	applyLDAPSettings(t, ldapURL)
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("johndoe", "dogood", settings)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestAuthenticateAccessWithExplicitEmail(t *testing.T) {
 
 	applyLDAPSettings(t, ldapURL)
 	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("johndoe@example.com", "dogood", settings)
 	if err != nil {
@@ -88,7 +88,7 @@ func TestAuthenticateAccessRejectsUnexpectedDomain(t *testing.T) {
 
 	applyLDAPSettings(t, ldapURL)
 	t.Setenv(config.LDAP_USER_DOMAIN, "@wrong.test")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	_, err := AuthenticateAccess("johndoe", "dogood", settings)
 	if err == nil {
@@ -108,7 +108,7 @@ func TestAuthenticateAccessUserNotFoundAfterBind(t *testing.T) {
 
 	applyLDAPSettings(t, ldapURL)
 	t.Setenv(config.LDAP_USER_FILTER, "(&(mail=%s)(cn=does-not-exist))")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	_, err := AuthenticateAccess("johndoe", "dogood", settings)
 	if err == nil {
@@ -128,7 +128,7 @@ func TestAuthenticateAccessRequiredGroupMember(t *testing.T) {
 
 	applyLDAPSettings(t, ldapURL)
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "some-other-group, team10_r")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess("johndoe", "dogood", settings)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestAuthenticateAccessRequiredGroupNotMember(t *testing.T) {
 
 	applyLDAPSettings(t, ldapURL)
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	_, err := AuthenticateAccess("johndoe", "dogood", settings)
 	if err == nil {

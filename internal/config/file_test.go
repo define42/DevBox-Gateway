@@ -63,11 +63,11 @@ DEBUG_CONNECTIONS=true
 	}
 
 	// And the settings layer picks them up.
-	settings := NewSettingType(false)
+	settings := NewSettings(false)
 	if got := settings.Get(LISTEN_ADDR); got != ":8443" {
 		t.Fatalf("settings LISTEN_ADDR = %q, want :8443", got)
 	}
-	if !settings.GetBool(DEBUG_CONNECTIONS) {
+	if !settings.Bool(DEBUG_CONNECTIONS) {
 		t.Fatalf("settings DEBUG_CONNECTIONS = false, want true")
 	}
 }

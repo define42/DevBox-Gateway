@@ -26,7 +26,7 @@ func TestLDAPAuthenticateWithGlauthConfig(t *testing.T) {
 	t.Setenv("LDAP_STARTTLS", "false")
 	t.Setenv("LDAP_USER_DOMAIN", "@example.com")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	u, err := ldap.AuthenticateAccess("testuser", "dogood", settings)
 	if err != nil {
 		t.Fatalf("unexpected auth failure: %v", err)
@@ -48,7 +48,7 @@ func TestLDAPAuthenticateJohndoeSingleNamespace(t *testing.T) {
 	t.Setenv("LDAP_STARTTLS", "false")
 	t.Setenv("LDAP_USER_DOMAIN", "@example.com")
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	u, err := ldap.AuthenticateAccess("johndoe", "dogood", settings)
 	if err != nil {

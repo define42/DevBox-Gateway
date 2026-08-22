@@ -95,10 +95,10 @@ func usePermissiveLibvirtVolumeMode(t *testing.T) {
 	t.Helper()
 }
 
-func newInitVirtSettings(t *testing.T, rootDir string) *config.SettingsType {
+func newInitVirtSettings(t *testing.T, rootDir string) *config.Settings {
 	t.Helper()
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
@@ -114,7 +114,7 @@ func newInitVirtSettings(t *testing.T, rootDir string) *config.SettingsType {
 // seedDummyBaseImage writes a tiny placeholder image into the library so checks
 // that only need a non-empty library (e.g. InitVirt) pass without downloading a
 // real image. It returns the seeded file name.
-func seedDummyBaseImage(t *testing.T, settings *config.SettingsType) string {
+func seedDummyBaseImage(t *testing.T, settings *config.Settings) string {
 	t.Helper()
 
 	dir := config.BaseImageDir(settings)
@@ -132,7 +132,7 @@ func seedDummyBaseImage(t *testing.T, settings *config.SettingsType) string {
 // available in the settings' BaseImageDir and returns the staged file name to
 // pass to BootNewVM. It is idempotent so callers can use it both to satisfy the
 // boot-time library check and to learn the selectable image name.
-func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.SettingsType) string {
+func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settings) string {
 	t.Helper()
 
 	if settings == nil {

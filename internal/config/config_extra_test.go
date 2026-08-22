@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestGetStringFormatsAllKinds(t *testing.T) {
-	s := &SettingsType{m: map[string]*Setting{}}
+func TestStringFormatsAllKinds(t *testing.T) {
+	s := &Settings{m: map[string]*Setting{}}
 	s.SetString("S", "string", "hello")
 	s.SetInt("I", "int", 7)
 	s.SetBool("B", "bool", true)
@@ -20,20 +20,20 @@ func TestGetStringFormatsAllKinds(t *testing.T) {
 		"D": "0s",
 	}
 	for id, want := range tests {
-		if got := s.GetString(id); got != want {
-			t.Fatalf("GetString(%s)=%q, want %q", id, got, want)
+		if got := s.String(id); got != want {
+			t.Fatalf("String(%s)=%q, want %q", id, got, want)
 		}
 	}
 
 	// Unknown kind falls back to Raw.
 	s.m["X"] = &Setting{Kind: Kind(99), Raw: "raw"}
-	if got := s.GetString("X"); got != "raw" {
-		t.Fatalf("GetString(X)=%q, want raw", got)
+	if got := s.String("X"); got != "raw" {
+		t.Fatalf("String(X)=%q, want raw", got)
 	}
 }
 
 func TestOverwriteForTestStringMismatch(t *testing.T) {
-	s := &SettingsType{m: map[string]*Setting{}}
+	s := &Settings{m: map[string]*Setting{}}
 	s.SetInt("I", "int", 7)
 	err := s.OverwriteForTestString("I", "hello")
 	if err == nil {

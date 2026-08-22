@@ -14,7 +14,7 @@ import (
 	"github.com/define42/devbox-gateway/internal/vmname"
 )
 
-func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.SettingsType {
+func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Settings {
 	t.Helper()
 
 	t.Setenv(config.LDAP_URL, ldapURL)
@@ -25,7 +25,7 @@ func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Setting
 	t.Setenv(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-"))
 	t.Setenv(config.VIRT_STORAGE_POOL_NAME, "gateway-test-"+uniqueGatewayVMShortName("pool"))
 
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	stageExistingBaseImageFromDefaultRoot(t, settings)
 	return settings
 }

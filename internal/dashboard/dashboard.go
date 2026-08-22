@@ -134,8 +134,8 @@ func GenerateRDPContent(server, username string) string {
 // opaque HMAC routing label under FRONT_DOMAIN, or the bare VM name when no
 // front domain is configured, so the downloaded .rdp file routes to the right VM
 // without leaking the username-hostname in the cleartext TLS SNI.
-func rdpConnectHost(settings *config.SettingsType, vmName string) string {
-	domain := strings.TrimSpace(settings.GetString(config.FRONT_DOMAIN))
+func rdpConnectHost(settings *config.Settings, vmName string) string {
+	domain := strings.TrimSpace(settings.String(config.FRONT_DOMAIN))
 	if domain == "" {
 		return vmName
 	}
@@ -146,7 +146,7 @@ func rdpConnectHost(settings *config.SettingsType, vmName string) string {
 // RDPFileForUser builds the .rdp download (filename and body) for the named VM,
 // resolved from the requesting user's own VM list so callers cannot mint a file
 // for a VM the user does not own. ok is false when the VM is not in that list.
-func RDPFileForUser(settings *config.SettingsType, user, vmName string) (filename string, content []byte, ok bool) {
+func RDPFileForUser(settings *config.Settings, user, vmName string) (filename string, content []byte, ok bool) {
 	for _, vm := range virt.NewInventory().VMs(user) {
 		if vm.Name != vmName {
 			continue
@@ -164,7 +164,7 @@ func RDPFileForUser(settings *config.SettingsType, user, vmName string) (filenam
 // WriteRDPFile writes the named VM's .rdp connection file as an attachment
 // download. The caller is responsible for authenticating the session and
 // verifying ownership (and for recording the RDP connect grant) before calling.
-func WriteRDPFile(w http.ResponseWriter, settings *config.SettingsType, user, vmName string) {
+func WriteRDPFile(w http.ResponseWriter, settings *config.Settings, user, vmName string) {
 	filename, content, ok := RDPFileForUser(settings, user, vmName)
 	if !ok {
 		WriteJSON(w, http.StatusNotFound, ActionResponse{OK: false, Error: "VM not found."})
@@ -187,7 +187,7 @@ func ListDashboardVMs(user string) ([]VM, error) {
 
 // DataForUser builds the complete dashboard snapshot shared by the initial HTTP
 // response and subsequent WebSocket updates.
-func DataForUser(settings *config.SettingsType, user string) (DataResponse, error) {
+func DataForUser(settings *config.Settings, user string) (DataResponse, error) {
 	response := DataResponse{
 		Filename:          DefaultRDPFilename,
 		Username:          user,

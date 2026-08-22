@@ -270,7 +270,7 @@ func TestMcovSingleConnListenerCloseWithConnAccepted(t *testing.T) {
 }
 
 func TestMcovServeListenerStopsOnPermanentAcceptError(t *testing.T) {
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	acceptErr := errors.New("mcov accept failure")
 	ln := &mcovListener{acceptErr: acceptErr}
 
@@ -299,7 +299,7 @@ func (c *mcovDeadlineFailConn) SetDeadline(time.Time) error {
 
 func TestMcovSetSetupDeadlineZeroTimeout(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "0s")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -312,7 +312,7 @@ func TestMcovSetSetupDeadlineZeroTimeout(t *testing.T) {
 
 func TestMcovSetSetupDeadlineError(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "10s")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -361,7 +361,7 @@ func TestMcovHandleSharedConnDebugLogging(t *testing.T) {
 
 func TestMcovHandleSharedConnEarlyExits(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "50ms")
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 
 	t.Run("peek timeout", func(t *testing.T) {
 		// The client stays idle, so the 50ms setup deadline expires inside the

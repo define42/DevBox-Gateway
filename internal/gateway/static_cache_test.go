@@ -12,7 +12,7 @@ import (
 
 func TestStaticFilesDisableCaching(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	router := NewHandler(sessionManager, settings)
 
 	req := httptest.NewRequest(http.MethodGet, "/static/novnc/vnc.html", nil)
@@ -39,7 +39,7 @@ func TestStaticFilesDisableCaching(t *testing.T) {
 
 func TestVendoredDashboardAssetsServed(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	router := NewHandler(sessionManager, settings)
 
 	for _, path := range []string{
@@ -66,7 +66,7 @@ func TestVendoredDashboardAssetsServed(t *testing.T) {
 
 func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	router := NewHandler(sessionManager, settings)
 
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
@@ -88,7 +88,7 @@ func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
 
 func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 	sessionManager := session.New()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	router := NewHandler(sessionManager, settings)
 
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
@@ -117,7 +117,7 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 }
 
 func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -147,7 +147,7 @@ func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
 }
 
 func TestDashboardJavaScriptStreamsCreationProgress(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettings(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

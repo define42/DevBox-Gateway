@@ -196,7 +196,7 @@ func (c *slotTrackedConn) Close() error {
 
 // openFrontListener binds LISTEN_ADDR and returns the listener that feeds the
 // gateway accept loop.
-func openFrontListener(settings *config.SettingsType) (net.Listener, error) {
+func openFrontListener(settings *config.Settings) (net.Listener, error) {
 	listen := settings.Get(config.LISTEN_ADDR)
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
@@ -217,14 +217,14 @@ func openFrontListener(settings *config.SettingsType) (net.Listener, error) {
 // of hanging unserved in the accept backlog, and saturation shows up in the
 // logs. A value <=0 disables that cap; both <=0 restores the previous
 // unbounded behavior.
-func limitListenerConnections(ln net.Listener, settings *config.SettingsType) net.Listener {
+func limitListenerConnections(ln net.Listener, settings *config.Settings) net.Listener {
 	// The per-source cap wraps the raw listener, inside the global cap, so a
 	// connection rejected for one greedy source never consumes a global slot.
-	if perSource := settings.GetInt(config.MAX_CONNECTIONS_PER_SOURCE); perSource > 0 {
+	if perSource := settings.Int(config.MAX_CONNECTIONS_PER_SOURCE); perSource > 0 {
 		log.Printf("limiting to %d concurrent front connections per source address", perSource)
 		ln = newPerSourceLimitListener(ln, perSource)
 	}
-	maxConns := settings.GetInt(config.MAX_CONCURRENT_CONNECTIONS)
+	maxConns := settings.Int(config.MAX_CONCURRENT_CONNECTIONS)
 	if maxConns <= 0 {
 		return ln
 	}
@@ -264,7 +264,7 @@ func nextAcceptRetryDelay(err error, current time.Duration) (time.Duration, bool
 // the listener is closed (normal shutdown) and the error on any other
 // permanent Accept failure, so the caller can take the process down and let
 // systemd restart it instead of leaving a zombie holding a dead listener.
-func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.SettingsType) error {
+func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) error {
 	var retryDelay time.Duration
 	for {
 		c, err := ln.Accept()
@@ -288,7 +288,7 @@ func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager,
 	}
 }
 
-func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.SettingsType) {
+func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.Settings) {
 	defer func() { _ = raw.Close() }()
 
 	// Defense in depth: this goroutine parses attacker-controlled bytes (the RDP
@@ -316,13 +316,13 @@ func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler,
 	conn := &bufferedConn{Conn: raw, r: br}
 
 	if first[0] == tlsHandshakeRecordType {
-		if settings.GetBool(config.DEBUG_CONNECTIONS) {
+		if settings.Bool(config.DEBUG_CONNECTIONS) {
 			log.Printf("debug-conn: accepted TLS/HTTPS connection from %s", raw.RemoteAddr())
 		}
 		handleHTTPS(conn, frontTLS, mux, settings)
 		return
 	}
-	if settings.GetBool(config.DEBUG_CONNECTIONS) {
+	if settings.Bool(config.DEBUG_CONNECTIONS) {
 		log.Printf("debug-conn: accepted RDP connection from %s", raw.RemoteAddr())
 	}
 	rdp.HandleRDP(conn, frontTLS, sessionManager, settings)
@@ -337,11 +337,11 @@ const tlsHandshakeRecordType = 0x16
 // upgraded they hijack the connection and manage their own deadlines.
 const httpIdleTimeout = 120 * time.Second
 
-func setSetupDeadline(conn net.Conn, settings *config.SettingsType) bool {
+func setSetupDeadline(conn net.Conn, settings *config.Settings) bool {
 	if conn == nil || settings == nil {
 		return true
 	}
-	timeout := settings.GetDuration(config.TIMEOUT)
+	timeout := settings.Duration(config.TIMEOUT)
 	if timeout <= 0 {
 		return true
 	}
@@ -376,7 +376,7 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
-func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.SettingsType) {
+func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.Settings) {
 	// TLS handshake with client; get SNI
 	clientTLS := tls.Server(raw, frontTLS.TLSConfig())
 	if err := clientTLS.Handshake(); err != nil {
@@ -397,8 +397,8 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 
 	srv := &http.Server{
 		Handler:           withRequestScheme(mux, "https"),
-		ReadTimeout:       settings.GetDuration(config.TIMEOUT),
-		ReadHeaderTimeout: settings.GetDuration(config.TIMEOUT),
+		ReadTimeout:       settings.Duration(config.TIMEOUT),
+		ReadHeaderTimeout: settings.Duration(config.TIMEOUT),
 		IdleTimeout:       httpIdleTimeout,
 		// WriteTimeout is deliberately unset. This server multiplexes the
 		// dashboard's long-lived WebSocket consoles (serial/VNC/ping), which hijack

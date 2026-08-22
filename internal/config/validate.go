@@ -14,7 +14,7 @@ import (
 // validation rejects every RDP connection even though the dashboard would still
 // hand out .rdp files — leaving the gateway in a state where RDP can never
 // succeed. Fail fast at boot instead of starting in that broken state.
-func ValidateFrontDomain(settings *SettingsType) error {
+func ValidateFrontDomain(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}

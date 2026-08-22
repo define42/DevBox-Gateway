@@ -12,9 +12,9 @@ import (
 // newLimitTestSettings builds settings with the global and per-source
 // connection caps set explicitly so each limiter can be exercised in
 // isolation.
-func newLimitTestSettings(t *testing.T, maxConns, perSource int) *config.SettingsType {
+func newLimitTestSettings(t *testing.T, maxConns, perSource int) *config.Settings {
 	t.Helper()
-	settings := config.NewSettingType(false)
+	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestInt(config.MAX_CONCURRENT_CONNECTIONS, maxConns); err != nil {
 		t.Fatalf("set max concurrent connections: %v", err)
 	}
