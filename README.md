@@ -106,8 +106,9 @@ Requirements on the host:
 - A `virbr0` bridge for the macvlan network (the default libvirt NAT bridge).
 - Write access to `/data/` on the host (used for ACME data, VM images, and
   serial / VNC sockets).
-- At least one base disk image in `/data/baseimages` (`.img`, `.qcow2`, or
-  `.raw`). The gateway will not start with an empty library — see
+- At least one QCOW2 base disk image in `/data/baseimages`, named with an
+  `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
+  valid QCOW2 image — see
   [Libvirt and VM storage](#libvirt-and-vm-storage) for a download example.
 
 Start the stack:
@@ -337,7 +338,7 @@ file**, which keeps container and development overrides working.
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
-| `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable base VDI images (`.img`, `.qcow2`, `.raw`). Users pick one per VM in the dashboard. The gateway refuses to start if it is empty. |
+| `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
 | `MAX_VDI_PER_USER`        | `10`                                                                                                             | Maximum number of VDIs (VMs) each user may own at once. Creating another VM is refused once the user owns this many. Set `<=0` to disable the per-user limit. |
 | `VDI_AUTO_SHUTDOWN_HOURS` | `0`                                                                                                              | Shut down a running VDI after this many hours without use. A VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard; the timestamp is persisted in the domain metadata so it survives gateway restarts. The guest is first asked to power off (ACPI power button) and is force-stopped if still running 5 minutes later. Set `<=0` to disable auto-shutdown (the default). |
 | `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
@@ -418,6 +419,12 @@ of every persistent VM known to the gateway, grouped by its recorded owner. VMs
 without owner metadata appear under **Unowned**. Administrators can start, stop,
 restart, and remove any VM in this inventory, including **Unowned** entries.
 RDP, serial-console, and noVNC access to another user's VM remain owner-only.
+The administrator page also has a **Base Images** button. Its modal lists the
+current image library and lets administrators upload QCOW2 images named `.img`,
+`.qcow2`, or `.raw` and delete existing images. Uploads are streamed, validated
+using the QCOW2 magic header, never overwrite a file with the same name, and are
+limited to the configured `VM_DISK_SIZE_GB` capacity. The modal also shows the
+filesystem space currently available in the configured base-image directory.
 
 Both access and administrator group checks use direct membership only — nested
 group membership is not resolved, so the group must appear directly in the
@@ -439,16 +446,21 @@ The dashboard manages VMs through libvirt. The gateway expects:
   autostart automatically if it is missing — handy on a fresh modular-libvirt
   host (e.g. Rocky/RHEL 9) that ships without it.
 - A base image library directory (`BASE_IMAGE_DIR`, default
-  `$DATA_ROOT_DIR/baseimages`) containing at least one `.img`, `.qcow2`, or
-  `.raw` disk image.
+  `$DATA_ROOT_DIR/baseimages`) containing at least one QCOW2 disk image named
+  `.img`, `.qcow2`, or `.raw`.
 - Network reachability from the gateway container to each VM's RDP port over
   the `virbr0` bridge. The compose file attaches the gateway to a macvlan on
   `virbr0` with a fixed address of `192.168.122.254`.
 
-Base images are operator-supplied: place one or more disk images in
-`BASE_IMAGE_DIR`, and the dashboard create form lets each user pick which image
-to clone for a new VM. **If the directory contains no usable image at startup,
-the gateway fails to boot** with a clear error, so populate it first.
+Base images can be supplied by placing QCOW2 images in `BASE_IMAGE_DIR` or by
+uploading them from the administrator's **Base Images** modal. The filename may
+end in `.img`, `.qcow2`, or `.raw`; content is accepted only when its first four
+bytes match the QCOW2 magic header (`51 46 49 fb`). The dashboard create form
+lets each user pick which image to clone for a new VM. **If the directory
+contains no valid QCOW2 image at startup, the gateway fails to boot** with a
+clear error, so populate it first. An administrator can delete the final image
+at runtime, but VM creation then remains unavailable and another image must be
+uploaded before the gateway can restart successfully.
 
 Before the first run, populate the library, for example (Docker Compose, which
 uses `/data`):

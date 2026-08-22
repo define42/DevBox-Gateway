@@ -176,14 +176,14 @@ func hcovSeedBaseImage(t *testing.T, dir string) string {
 		t.Fatalf("create base image dir %s: %v", dir, err)
 	}
 	const name = "hcov-base.img"
-	if err := os.WriteFile(filepath.Join(dir, name), []byte("hcov placeholder"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("QFI\xfbhcov placeholder"), 0o644); err != nil {
 		t.Fatalf("seed base image: %v", err)
 	}
 	return name
 }
 
 // hcovVirtCreateSettings builds settings pointing at an isolated data root and
-// storage pool with a placeholder base image staged, so create-VM requests get
+// storage pool with a tiny QCOW2-header base image staged, so create-VM requests get
 // past form validation and fail (or conflict) deterministically inside
 // virt.BootNewVM without downloading anything.
 func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.Settings, string) {

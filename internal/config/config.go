@@ -113,7 +113,7 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
 
-	s.SetString(BASE_IMAGE_DIR, "Directory of selectable base VDI images (.img/.qcow2/.raw); must contain at least one image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
+	s.SetString(BASE_IMAGE_DIR, "Directory of selectable QCOW2 base VDI images named .img/.qcow2/.raw; must contain at least one valid image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
 	s.SetInt(VM_DISK_SIZE_GB, "Virtual disk capacity in GiB for newly created VM qcow2 volumes; the base image is grown to this size (qcow2 is thin-provisioned, so the host file only consumes written data). Values <=0 fall back to the default", DefaultVMDiskSizeGB)
 	s.SetInt(VM_VCPU_COUNT, "Number of virtual CPUs assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMVCPUCount)
 	s.SetInt(VM_MEMORY_MIB, "Memory in MiB assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMMemoryMiB)

@@ -236,7 +236,7 @@ func TestBridgeDashboardControlSocketMultiplexesVMsAndPongs(t *testing.T) {
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, baseImageDir); err != nil {
 		t.Fatalf("overwrite base image directory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(baseImageDir, "desktop.qcow2"), []byte("image"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(baseImageDir, "desktop.qcow2"), []byte("QFI\xfbimage"), 0o600); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 

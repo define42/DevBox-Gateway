@@ -134,6 +134,16 @@ func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
 		"unowned VM group":             `"Unowned"`,
 		"admin lifecycle table mode":   `appendVMTable(section, vmsByOwner.get(owner) || [], { connections: false, lifecycle: true })`,
 		"hidden create action":         `openCreateButtonEl.hidden = adminView`,
+		"base image manager button":    `id="base-images-button" type="button" hidden`,
+		"base image manager modal":     `id="base-images-modal" class="terminal-modal" hidden`,
+		"available image storage":      `id="base-image-available-storage" aria-live="polite"`,
+		"base image list endpoint":     `"/api/admin/base-images"`,
+		"base image delete endpoint":   `"/api/admin/base-images/delete"`,
+		"streamed upload form":         `const body = new FormData()`,
+		"upload progress":              `xhr.upload.onprogress = (event) =>`,
+		"QCOW2 upload requirement":     `QCOW2 content required; filenames may end in .img, .qcow2, or .raw.`,
+		"available storage API field":  `availableStorageBytes`,
+		"exact delete confirmation":    `Type the base image name "${name}" to confirm deletion:`,
 	} {
 		if !strings.Contains(body, fragment) {
 			t.Fatalf("expected dashboard JavaScript to include %s", description)

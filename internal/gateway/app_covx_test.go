@@ -47,7 +47,7 @@ func mcovCleanupStoragePool(t *testing.T, name string) {
 
 // mcovBootEnv points bootGateway at a fully self-contained environment: a
 // missing config file, an ephemeral loopback listen address, a temp data root,
-// a placeholder base image, and a unique storage pool removed again on cleanup.
+// a tiny QCOW2-header base image, and a unique storage pool removed again on cleanup.
 // It returns the data root so tests can plant failures inside it.
 func mcovBootEnv(t *testing.T) string {
 	t.Helper()
@@ -68,7 +68,7 @@ func mcovBootEnv(t *testing.T) string {
 		t.Fatalf("create base image dir %s: %v", baseImageDir, err)
 	}
 	imagePath := filepath.Join(baseImageDir, "mcov-base.img")
-	if err := os.WriteFile(imagePath, []byte("placeholder"), 0o644); err != nil {
+	if err := os.WriteFile(imagePath, []byte("QFI\xfbplaceholder"), 0o644); err != nil {
 		t.Fatalf("seed base image %s: %v", imagePath, err)
 	}
 	t.Setenv(config.BASE_IMAGE_DIR, baseImageDir)

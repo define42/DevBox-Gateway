@@ -426,6 +426,7 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 	registerDashboardDataRoute(group, sessionManager, settings)
 	registerAdminPageRoute(group, sessionManager)
 	registerAdminDataRoute(group, sessionManager, settings)
+	registerAdminBaseImageRoutes(group, sessionManager, settings)
 	registerDashboardCreateRoute(group, sessionManager, settings)
 	registerDashboardRDPRoute(group, sessionManager, settings)
 	for _, spec := range []dashboardVMActionSpec{

@@ -23,7 +23,7 @@ func vbtcovNewUser(t *testing.T, name string) *identity.User {
 }
 
 // vbtcovSettingsWithDummyImage returns settings with an isolated data root, a
-// unique storage pool name, and a tiny placeholder base image; it returns the
+// unique storage pool name, and a tiny QCOW2-header base image; it returns the
 // settings, the data root, and the seeded image name.
 func vbtcovSettingsWithDummyImage(t *testing.T) (*config.Settings, string, string) {
 	t.Helper()

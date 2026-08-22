@@ -11,6 +11,9 @@ const JITTER_GREEN_MAX_MS = 20;
 const JITTER_YELLOW_MAX_MS = 50;
 const LOGIN_PATH = "/login";
 const ADMIN_PATH = "/api/admin";
+const ADMIN_BASE_IMAGES_PATH = "/api/admin/base-images";
+const ADMIN_BASE_IMAGES_DELETE_PATH = "/api/admin/base-images/delete";
+const HTTP_STATUS_UNAUTHORIZED = 401;
 
 // The dashboard and administrator inventory share this bundle. Keep the path
 // check deliberately narrow so an unrelated route below /api/admin is not
@@ -97,6 +100,13 @@ type DashboardActionResponse = {
     error?: string;
 };
 
+type AdminBaseImagesResponse = {
+    baseImages?: string[];
+    maxUploadBytes?: number;
+    availableStorageBytes?: number;
+    error?: string;
+};
+
 type DashboardCreationStreamEvent = {
     type?: unknown;
     copiedBytes?: unknown;
@@ -141,6 +151,20 @@ type DashboardInfoState = {
     vmState: string;
 };
 
+type DashboardBaseImageManagerState = {
+    open: boolean;
+    images: string[];
+    maxUploadBytes: number;
+    availableStorageBytes: number | null;
+    loading: boolean;
+    busy: boolean;
+    phase: "idle" | "uploading" | "finalizing";
+    percent: number | null;
+    deleting: string;
+    error: string;
+    message: string;
+};
+
 type DashboardState = {
     vms: DashboardVM[];
     filename: string;
@@ -155,6 +179,7 @@ type DashboardState = {
     vnc: DashboardVNCState;
     create: DashboardCreateState;
     info: DashboardInfoState;
+    baseImageManager: DashboardBaseImageManagerState;
 };
 
 type RequestResult<T> = {
@@ -204,6 +229,19 @@ const state: DashboardState = {
         lastUsed: "",
         vmState: "",
     },
+    baseImageManager: {
+        open: false,
+        images: [],
+        maxUploadBytes: 0,
+        availableStorageBytes: null,
+        loading: false,
+        busy: false,
+        phase: "idle",
+        percent: null,
+        deleting: "",
+        error: "",
+        message: "",
+    },
 };
 
 let loadInFlight = false;
@@ -221,6 +259,21 @@ function formatMemoryGB(memoryMiB?: number | string | null): string {
     const gb = Number(memoryMiB) / 1024;
     const formatted = Number.isInteger(gb) ? gb.toFixed(0) : gb.toFixed(1);
     return `${formatted} GB`;
+}
+
+function formatBytes(bytes?: number | null): string {
+    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
+        return "";
+    }
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    const digits = value >= 10 || unit === 0 ? 0 : 1;
+    return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
 // formatCreatedAt turns the RFC3339 UTC timestamp stored on the VM into a
@@ -347,6 +400,7 @@ function bootstrap(): void {
               <span id="rtt-indicator" class="badge rounded-pill text-bg-secondary rtt-indicator" title="Live round-trip time to the gateway" aria-live="polite"><i class="bi bi-activity me-1" aria-hidden="true"></i>RTT: &ndash;&ndash;</span>
               <span id="jitter-indicator" class="badge rounded-pill text-bg-secondary jitter-indicator" title="Live RTT jitter (variation between samples)" aria-live="polite"><i class="bi bi-graph-up me-1" aria-hidden="true"></i>Jitter: &ndash;&ndash;</span>
               <a class="btn btn-outline-primary btn-sm" id="admin-view-link" href="/api/admin" hidden><i class="bi bi-shield-lock me-1" aria-hidden="true"></i>Admin</a>
+              <button class="btn btn-outline-primary btn-sm" id="base-images-button" type="button" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Base Images</button>
               <a class="btn btn-outline-secondary btn-sm" id="dashboard-view-link" href="/api/dashboard" hidden><i class="bi bi-display me-1" aria-hidden="true"></i>My DevBoxes</a>
               <button class="btn btn-primary" id="open-create-button" type="button"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
               <form method="post" action="/logout" class="m-0">
@@ -425,6 +479,50 @@ function bootstrap(): void {
         </div>
       </div>
     </div>
+    <div id="base-images-modal" class="terminal-modal" hidden aria-hidden="true">
+      <div class="terminal-modal__backdrop" id="base-images-backdrop"></div>
+      <div class="terminal-modal__dialog terminal-modal__dialog--form" role="dialog" aria-modal="true" aria-labelledby="base-images-title">
+        <div class="terminal-modal__body">
+          <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+            <div>
+              <h2 class="h5 mb-1" id="base-images-title">Base Images</h2>
+              <p class="text-body-secondary mb-0">Manage the disk images available when a DevBox is created.</p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="base-images-close" type="button"><i class="bi bi-x-lg me-1" aria-hidden="true"></i>Close</button>
+          </div>
+          <div class="alert alert-danger mb-3 d-none" id="base-images-error" role="alert"></div>
+          <div class="alert alert-success mb-3 d-none" id="base-images-message" role="status"></div>
+          <div class="alert alert-secondary d-flex flex-wrap align-items-center justify-content-between gap-2 py-2 mb-3" role="status">
+            <span><i class="bi bi-device-hdd me-2" aria-hidden="true"></i>Available storage in base-image folder</span>
+            <strong id="base-image-available-storage" aria-live="polite">Loading...</strong>
+          </div>
+          <form class="row g-3 align-items-end mb-4" id="base-image-upload-form">
+            <div class="col-12 col-md-8">
+              <label class="form-label" for="base-image-file">Upload Base Image</label>
+              <input class="form-control" id="base-image-file" name="base_image" type="file" accept=".img,.qcow2,.raw" required>
+              <div class="form-text" id="base-image-upload-limit">QCOW2 content required; filenames may end in .img, .qcow2, or .raw.</div>
+            </div>
+            <div class="col-12 col-md-4 d-grid">
+              <button class="btn btn-primary" id="base-image-upload-button" type="submit"><i class="bi bi-upload me-1" aria-hidden="true"></i>Upload</button>
+            </div>
+          </form>
+          <div class="mb-4 d-none" id="base-image-upload-progress">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+              <span class="d-inline-flex align-items-center gap-2">
+                <span class="spinner-border spinner-border-sm" id="base-image-upload-spinner" aria-hidden="true"></span>
+                <span id="base-image-upload-label" role="status" aria-live="polite" aria-atomic="true">Uploading base image...</span>
+              </span>
+              <span class="text-body-secondary" id="base-image-upload-value" aria-hidden="true"></span>
+            </div>
+            <div class="progress d-none" id="base-image-upload-track">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" id="base-image-upload-bar" role="progressbar" aria-labelledby="base-image-upload-label" aria-valuemin="0" aria-valuemax="100" aria-valuetext="Uploading base image" style="width: 0%"></div>
+            </div>
+          </div>
+          <h3 class="h6">Available Images</h3>
+          <div id="base-images-list" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
     <div id="create-modal" class="terminal-modal" hidden aria-hidden="true">
       <div class="terminal-modal__backdrop" id="create-backdrop"></div>
       <div class="terminal-modal__dialog terminal-modal__dialog--form" role="dialog" aria-modal="true" aria-labelledby="create-title">
@@ -480,6 +578,7 @@ function bootstrap(): void {
     const pageSubtitle = root.querySelector<HTMLParagraphElement>("#page-subtitle");
     const adminViewLink = root.querySelector<HTMLAnchorElement>("#admin-view-link");
     const dashboardViewLink = root.querySelector<HTMLAnchorElement>("#dashboard-view-link");
+    const baseImagesButton = root.querySelector<HTMLButtonElement>("#base-images-button");
     const form = root.querySelector<HTMLFormElement>("#create-form");
     const input = root.querySelector<HTMLInputElement>("#vm-name");
     const usernameInput = root.querySelector<HTMLInputElement>("#vm-username");
@@ -525,12 +624,30 @@ function bootstrap(): void {
     const infoLastUsed = root.querySelector<HTMLElement>("#info-last-used");
     const infoAutoShutdown = root.querySelector<HTMLElement>("#info-auto-shutdown");
     const infoClose = root.querySelector<HTMLButtonElement>("#info-close");
+    const baseImagesModal = root.querySelector<HTMLDivElement>("#base-images-modal");
+    const baseImagesBackdrop = root.querySelector<HTMLDivElement>("#base-images-backdrop");
+    const baseImagesClose = root.querySelector<HTMLButtonElement>("#base-images-close");
+    const baseImagesError = root.querySelector<HTMLDivElement>("#base-images-error");
+    const baseImagesMessage = root.querySelector<HTMLDivElement>("#base-images-message");
+    const baseImageUploadForm = root.querySelector<HTMLFormElement>("#base-image-upload-form");
+    const baseImageFile = root.querySelector<HTMLInputElement>("#base-image-file");
+    const baseImageUploadButton = root.querySelector<HTMLButtonElement>("#base-image-upload-button");
+    const baseImageUploadLimit = root.querySelector<HTMLDivElement>("#base-image-upload-limit");
+    const baseImageAvailableStorage = root.querySelector<HTMLElement>("#base-image-available-storage");
+    const baseImageUploadProgress = root.querySelector<HTMLDivElement>("#base-image-upload-progress");
+    const baseImageUploadSpinner = root.querySelector<HTMLSpanElement>("#base-image-upload-spinner");
+    const baseImageUploadLabel = root.querySelector<HTMLSpanElement>("#base-image-upload-label");
+    const baseImageUploadValue = root.querySelector<HTMLSpanElement>("#base-image-upload-value");
+    const baseImageUploadTrack = root.querySelector<HTMLDivElement>("#base-image-upload-track");
+    const baseImageUploadBar = root.querySelector<HTMLDivElement>("#base-image-upload-bar");
+    const baseImagesList = root.querySelector<HTMLDivElement>("#base-images-list");
 
     if (
         !pageTitle ||
         !pageSubtitle ||
         !adminViewLink ||
         !dashboardViewLink ||
+        !baseImagesButton ||
         !form ||
         !input ||
         !usernameInput ||
@@ -575,7 +692,24 @@ function bootstrap(): void {
         !infoCreated ||
         !infoLastUsed ||
         !infoAutoShutdown ||
-        !infoClose
+        !infoClose ||
+        !baseImagesModal ||
+        !baseImagesBackdrop ||
+        !baseImagesClose ||
+        !baseImagesError ||
+        !baseImagesMessage ||
+        !baseImageUploadForm ||
+        !baseImageFile ||
+        !baseImageUploadButton ||
+        !baseImageUploadLimit ||
+        !baseImageAvailableStorage ||
+        !baseImageUploadProgress ||
+        !baseImageUploadSpinner ||
+        !baseImageUploadLabel ||
+        !baseImageUploadValue ||
+        !baseImageUploadTrack ||
+        !baseImageUploadBar ||
+        !baseImagesList
     ) {
         return;
     }
@@ -584,6 +718,7 @@ function bootstrap(): void {
     const pageSubtitleEl = pageSubtitle;
     const adminViewLinkEl = adminViewLink;
     const dashboardViewLinkEl = dashboardViewLink;
+    const baseImagesButtonEl = baseImagesButton;
     const formEl = form;
     const inputEl = input;
     const usernameInputEl = usernameInput;
@@ -629,6 +764,23 @@ function bootstrap(): void {
     const infoLastUsedEl = infoLastUsed;
     const infoAutoShutdownEl = infoAutoShutdown;
     const infoCloseEl = infoClose;
+    const baseImagesModalEl = baseImagesModal;
+    const baseImagesBackdropEl = baseImagesBackdrop;
+    const baseImagesCloseEl = baseImagesClose;
+    const baseImagesErrorEl = baseImagesError;
+    const baseImagesMessageEl = baseImagesMessage;
+    const baseImageUploadFormEl = baseImageUploadForm;
+    const baseImageFileEl = baseImageFile;
+    const baseImageUploadButtonEl = baseImageUploadButton;
+    const baseImageUploadLimitEl = baseImageUploadLimit;
+    const baseImageAvailableStorageEl = baseImageAvailableStorage;
+    const baseImageUploadProgressEl = baseImageUploadProgress;
+    const baseImageUploadSpinnerEl = baseImageUploadSpinner;
+    const baseImageUploadLabelEl = baseImageUploadLabel;
+    const baseImageUploadValueEl = baseImageUploadValue;
+    const baseImageUploadTrackEl = baseImageUploadTrack;
+    const baseImageUploadBarEl = baseImageUploadBar;
+    const baseImagesListEl = baseImagesList;
 
     let terminalSocket: WebSocket | null = null;
     let terminalInstance: XTermTerminal | null = null;
@@ -647,6 +799,7 @@ function bootstrap(): void {
         }
         adminViewLinkEl.hidden = adminView || !state.isAdmin;
         dashboardViewLinkEl.hidden = !adminView;
+        baseImagesButtonEl.hidden = !adminView;
         openCreateButtonEl.hidden = adminView;
     }
 
@@ -1125,6 +1278,153 @@ function bootstrap(): void {
         renderCreate();
         if (wasOpen) {
             openCreateButtonEl.focus();
+        }
+    }
+
+    function renderBaseImageManager(): void {
+        const manager = state.baseImageManager;
+        baseImagesModalEl.hidden = !manager.open;
+        baseImagesModalEl.setAttribute("aria-hidden", manager.open ? "false" : "true");
+        baseImageUploadFormEl.setAttribute("aria-busy", manager.busy ? "true" : "false");
+        baseImageFileEl.disabled = manager.busy;
+        baseImageUploadButtonEl.disabled = manager.busy;
+
+        if (manager.loading) {
+            baseImageAvailableStorageEl.textContent = "Loading...";
+        } else if (manager.availableStorageBytes === null) {
+            baseImageAvailableStorageEl.textContent = "Unavailable";
+        } else if (manager.availableStorageBytes === 0) {
+            baseImageAvailableStorageEl.textContent = "0 B";
+        } else {
+            baseImageAvailableStorageEl.textContent = formatBytes(manager.availableStorageBytes) || "Unavailable";
+        }
+
+        const limit = formatBytes(manager.maxUploadBytes);
+        baseImageUploadLimitEl.textContent = limit
+            ? `QCOW2 content required; filenames may end in .img, .qcow2, or .raw. Maximum file size: ${limit}.`
+            : "QCOW2 content required; filenames may end in .img, .qcow2, or .raw.";
+
+        if (manager.error) {
+            baseImagesErrorEl.textContent = manager.error;
+            baseImagesErrorEl.classList.remove("d-none");
+        } else {
+            baseImagesErrorEl.textContent = "";
+            baseImagesErrorEl.classList.add("d-none");
+        }
+        if (manager.message) {
+            baseImagesMessageEl.textContent = manager.message;
+            baseImagesMessageEl.classList.remove("d-none");
+        } else {
+            baseImagesMessageEl.textContent = "";
+            baseImagesMessageEl.classList.add("d-none");
+        }
+
+        const uploading = manager.busy && manager.deleting === "";
+        baseImageUploadProgressEl.classList.toggle("d-none", !uploading);
+        if (uploading) {
+            const finalizing = manager.phase === "finalizing";
+            const percent = finalizing ? 100 : manager.percent;
+            baseImageUploadLabelEl.textContent = finalizing
+                ? "Upload complete; adding image to the library..."
+                : "Uploading base image...";
+            baseImageUploadSpinnerEl.classList.toggle("d-none", percent !== null && !finalizing);
+            baseImageUploadTrackEl.classList.toggle("d-none", percent === null);
+            if (percent !== null) {
+                const rounded = Math.max(0, Math.min(100, Math.round(percent)));
+                baseImageUploadValueEl.textContent = `${rounded}%`;
+                baseImageUploadBarEl.style.width = `${rounded}%`;
+                baseImageUploadBarEl.setAttribute("aria-valuenow", `${rounded}`);
+                baseImageUploadBarEl.removeAttribute("aria-valuetext");
+            } else {
+                baseImageUploadValueEl.textContent = "";
+                baseImageUploadBarEl.style.width = "0%";
+                baseImageUploadBarEl.removeAttribute("aria-valuenow");
+                baseImageUploadBarEl.setAttribute("aria-valuetext", "Uploading base image");
+            }
+            setIconLabel(baseImageUploadButtonEl, "bi-upload", "Uploading...");
+        } else {
+            baseImageUploadSpinnerEl.classList.remove("d-none");
+            baseImageUploadTrackEl.classList.add("d-none");
+            baseImageUploadValueEl.textContent = "";
+            baseImageUploadBarEl.style.width = "0%";
+            baseImageUploadBarEl.removeAttribute("aria-valuenow");
+            baseImageUploadBarEl.setAttribute("aria-valuetext", "Uploading base image");
+            setIconLabel(baseImageUploadButtonEl, "bi-upload", "Upload");
+        }
+
+        baseImagesListEl.innerHTML = "";
+        if (manager.loading) {
+            const loading = document.createElement("div");
+            loading.className = "text-body-secondary d-flex align-items-center gap-2 py-2";
+            const spinner = document.createElement("span");
+            spinner.className = "spinner-border spinner-border-sm";
+            spinner.setAttribute("aria-hidden", "true");
+            const label = document.createElement("span");
+            label.textContent = "Loading base images...";
+            loading.append(spinner, label);
+            baseImagesListEl.appendChild(loading);
+            return;
+        }
+        if (manager.images.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "alert alert-warning mb-0";
+            empty.textContent = "No base images are available. Upload one before creating DevBoxes.";
+            baseImagesListEl.appendChild(empty);
+            return;
+        }
+
+        const list = document.createElement("div");
+        list.className = "list-group";
+        for (const name of manager.images) {
+            const row = document.createElement("div");
+            row.className = "list-group-item d-flex flex-wrap align-items-center justify-content-between gap-3";
+            const fileName = document.createElement("span");
+            fileName.className = "font-monospace text-break";
+            fileName.textContent = name;
+            const deleteButton = document.createElement("button");
+            deleteButton.className = "btn btn-outline-danger btn-sm";
+            deleteButton.type = "button";
+            deleteButton.disabled = manager.busy;
+            setIconLabel(
+                deleteButton,
+                manager.deleting === name ? "bi-hourglass-split" : "bi-trash",
+                manager.deleting === name ? "Deleting..." : "Delete",
+            );
+            deleteButton.addEventListener("click", () => {
+                void deleteManagedBaseImage(name);
+            });
+            row.append(fileName, deleteButton);
+            list.appendChild(row);
+        }
+        baseImagesListEl.appendChild(list);
+    }
+
+    function openBaseImageManager(): void {
+        if (!adminView) {
+            return;
+        }
+        closeTerminal();
+        closeVNC();
+        if (state.create.open) {
+            closeCreate();
+        }
+        closeInfo();
+        state.baseImageManager.open = true;
+        if (!state.baseImageManager.busy) {
+            state.baseImageManager.error = "";
+            state.baseImageManager.message = "";
+        }
+        renderBaseImageManager();
+        (state.baseImageManager.busy ? baseImagesCloseEl : baseImageFileEl).focus();
+        void loadManagedBaseImages();
+    }
+
+    function closeBaseImageManager(): void {
+        const wasOpen = state.baseImageManager.open;
+        state.baseImageManager.open = false;
+        renderBaseImageManager();
+        if (wasOpen) {
+            baseImagesButtonEl.focus();
         }
     }
 
@@ -1776,6 +2076,8 @@ function bootstrap(): void {
         clearAction();
         closeTerminal();
         closeVNC();
+        state.baseImageManager.open = false;
+        renderBaseImageManager();
         renderVMList();
         window.location.replace(LOGIN_PATH);
         return null;
@@ -1971,6 +2273,192 @@ function bootstrap(): void {
             return { ok: false, error: CREATION_STATUS_UNKNOWN_ERROR };
         }
         return { ok: true, data: payload as DashboardActionResponse };
+    }
+
+    async function loadManagedBaseImages(): Promise<void> {
+        const manager = state.baseImageManager;
+        if (manager.loading) {
+            return;
+        }
+        manager.loading = true;
+        renderBaseImageManager();
+        try {
+            const result = await requestJSON<AdminBaseImagesResponse>(ADMIN_BASE_IMAGES_PATH);
+            if (!result) {
+                return;
+            }
+            if (!result.ok || !result.data) {
+                manager.error = result.error || "Unable to load base images right now.";
+                return;
+            }
+            manager.images = Array.isArray(result.data.baseImages)
+                ? result.data.baseImages.filter((name): name is string => typeof name === "string")
+                : [];
+            manager.maxUploadBytes = typeof result.data.maxUploadBytes === "number"
+                ? result.data.maxUploadBytes
+                : 0;
+            manager.availableStorageBytes = typeof result.data.availableStorageBytes === "number" &&
+                Number.isFinite(result.data.availableStorageBytes) && result.data.availableStorageBytes >= 0
+                ? result.data.availableStorageBytes
+                : null;
+        } finally {
+            manager.loading = false;
+            renderBaseImageManager();
+        }
+    }
+
+    function requestBaseImageUpload(file: File): Promise<RequestResult<DashboardActionResponse> | null> {
+        return new Promise((resolve) => {
+            const xhr = new XMLHttpRequest();
+            const body = new FormData();
+            body.append("base_image", file, file.name);
+            xhr.open("POST", ADMIN_BASE_IMAGES_PATH);
+            xhr.setRequestHeader("Accept", "application/json");
+            xhr.withCredentials = true;
+
+            xhr.upload.onprogress = (event) => {
+                if (!state.baseImageManager.busy || state.baseImageManager.deleting !== "") {
+                    return;
+                }
+                state.baseImageManager.phase = "uploading";
+                state.baseImageManager.percent = event.lengthComputable && event.total > 0
+                    ? Math.max(0, Math.min(100, event.loaded / event.total * 100))
+                    : null;
+                renderBaseImageManager();
+            };
+            xhr.upload.onload = () => {
+                if (!state.baseImageManager.busy || state.baseImageManager.deleting !== "") {
+                    return;
+                }
+                state.baseImageManager.phase = "finalizing";
+                state.baseImageManager.percent = 100;
+                renderBaseImageManager();
+            };
+            xhr.onerror = () => {
+                resolve({ ok: false, error: "The base image upload was interrupted." });
+            };
+            xhr.onabort = () => {
+                resolve({ ok: false, error: "The base image upload was canceled." });
+            };
+            xhr.onload = () => {
+                let loginRequired = xhr.status === HTTP_STATUS_UNAUTHORIZED;
+                try {
+                    const finalUrl = new URL(xhr.responseURL, window.location.origin);
+                    loginRequired = loginRequired || finalUrl.pathname === LOGIN_PATH;
+                } catch {
+                    // Keep the status-based result when the browser omits responseURL.
+                }
+                if (loginRequired) {
+                    resolve(redirectToLogin());
+                    return;
+                }
+
+                let payload: any = null;
+                try {
+                    payload = JSON.parse(xhr.responseText);
+                } catch {
+                    payload = null;
+                }
+                if (xhr.status < 200 || xhr.status >= 300) {
+                    const message = payload && typeof payload.error === "string"
+                        ? payload.error
+                        : "Base image upload failed.";
+                    resolve({ ok: false, error: message });
+                    return;
+                }
+                resolve({ ok: true, data: payload as DashboardActionResponse });
+            };
+            xhr.send(body);
+        });
+    }
+
+    async function uploadManagedBaseImage(file: File): Promise<void> {
+        const manager = state.baseImageManager;
+        if (manager.busy) {
+            return;
+        }
+        if (file.size === 0) {
+            manager.error = "Base image files cannot be empty.";
+            manager.message = "";
+            renderBaseImageManager();
+            return;
+        }
+        if (manager.maxUploadBytes > 0 && file.size > manager.maxUploadBytes) {
+            manager.error = `The selected file exceeds the ${formatBytes(manager.maxUploadBytes)} upload limit.`;
+            manager.message = "";
+            renderBaseImageManager();
+            return;
+        }
+
+        manager.busy = true;
+        manager.phase = "uploading";
+        manager.percent = null;
+        manager.deleting = "";
+        manager.error = "";
+        manager.message = "";
+        renderBaseImageManager();
+        try {
+            const result = await requestBaseImageUpload(file);
+            if (!result) {
+                return;
+            }
+            if (!result.ok || !result.data || result.data.ok !== true) {
+                manager.error = result.error || result.data?.error || "Base image upload failed.";
+                return;
+            }
+            manager.message = result.data.message || "Base image uploaded.";
+            baseImageFileEl.value = "";
+            await loadManagedBaseImages();
+        } finally {
+            manager.busy = false;
+            manager.phase = "idle";
+            manager.percent = null;
+            renderBaseImageManager();
+        }
+    }
+
+    async function deleteManagedBaseImage(name: string): Promise<void> {
+        const manager = state.baseImageManager;
+        if (manager.busy) {
+            return;
+        }
+        const confirmation = window.prompt(`Type the base image name "${name}" to confirm deletion:`);
+        if (confirmation === null) {
+            return;
+        }
+        if (confirmation !== name) {
+            manager.error = "Deletion canceled: name did not match.";
+            manager.message = "";
+            renderBaseImageManager();
+            return;
+        }
+
+        manager.busy = true;
+        manager.deleting = name;
+        manager.error = "";
+        manager.message = "";
+        renderBaseImageManager();
+        try {
+            const body = new URLSearchParams({ base_image: name });
+            const result = await requestJSON<DashboardActionResponse>(ADMIN_BASE_IMAGES_DELETE_PATH, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: body.toString(),
+            });
+            if (!result) {
+                return;
+            }
+            if (!result.ok || !result.data || result.data.ok !== true) {
+                manager.error = result.error || result.data?.error || "Base image deletion failed.";
+                return;
+            }
+            manager.message = result.data.message || "Base image deleted.";
+            await loadManagedBaseImages();
+        } finally {
+            manager.busy = false;
+            manager.deleting = "";
+            renderBaseImageManager();
+        }
     }
 
     async function loadVMs(): Promise<void> {
@@ -2218,6 +2706,33 @@ function bootstrap(): void {
         openCreate();
     });
 
+    baseImagesButtonEl.addEventListener("click", () => {
+        openBaseImageManager();
+    });
+
+    baseImagesBackdropEl.addEventListener("click", () => {
+        closeBaseImageManager();
+    });
+
+    baseImagesCloseEl.addEventListener("click", () => {
+        closeBaseImageManager();
+    });
+
+    baseImageUploadFormEl.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!baseImageUploadFormEl.reportValidity()) {
+            return;
+        }
+        const file = baseImageFileEl.files?.item(0);
+        if (!file) {
+            state.baseImageManager.error = "Choose a base image to upload.";
+            state.baseImageManager.message = "";
+            renderBaseImageManager();
+            return;
+        }
+        void uploadManagedBaseImage(file);
+    });
+
     createBackdropEl.addEventListener("click", () => {
         closeCreate();
     });
@@ -2244,6 +2759,10 @@ function bootstrap(): void {
     }, 30000);
 
     document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && state.baseImageManager.open) {
+            closeBaseImageManager();
+            return;
+        }
         if (event.key === "Escape" && state.info.open) {
             closeInfo();
             return;
@@ -2276,6 +2795,7 @@ function bootstrap(): void {
     renderTerminal();
     renderVNC();
     renderCreate();
+    renderBaseImageManager();
     updateCreateAvailability();
     renderRTT(null, null);
     void loadVMs().then(() => {
