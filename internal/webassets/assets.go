@@ -1,5 +1,5 @@
-// Package static provides the gateway's embedded browser assets.
-package static
+// Package webassets provides the gateway's embedded browser assets.
+package webassets
 
 import (
 	"embed"

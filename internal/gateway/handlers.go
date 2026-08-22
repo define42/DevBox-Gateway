@@ -21,7 +21,7 @@ import (
 	"github.com/define42/devbox-gateway/internal/types"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
-	"github.com/define42/devbox-gateway/static"
+	"github.com/define42/devbox-gateway/internal/webassets"
 
 	consolepkg "github.com/define42/devbox-gateway/internal/console"
 	dashboard "github.com/define42/devbox-gateway/internal/dashboard"
@@ -32,7 +32,7 @@ import (
 )
 
 func staticFiles() fs.FS {
-	return static.Files()
+	return webassets.Files()
 }
 
 const (

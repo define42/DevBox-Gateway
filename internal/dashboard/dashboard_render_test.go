@@ -13,16 +13,17 @@ import (
 	"testing"
 
 	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/webassets"
 )
 
 func TestRenderDashboardPage(t *testing.T) {
-	expected, err := os.ReadFile(filepath.Clean(filepath.Join("..", "..", "static", "dashboard.html")))
+	expected, err := os.ReadFile(filepath.Clean(filepath.Join("..", "webassets", "dashboard.html")))
 	if err != nil {
-		t.Fatalf("read dashboard page from static directory: %v", err)
+		t.Fatalf("read dashboard page from webassets directory: %v", err)
 	}
 
 	rec := httptest.NewRecorder()
-	RenderDashboardPage(rec, os.DirFS(filepath.Clean(filepath.Join("..", ".."))))
+	RenderDashboardPage(rec, webassets.Files())
 
 	res := rec.Result()
 	defer func() { _ = res.Body.Close() }()
@@ -48,9 +49,9 @@ func TestRenderDashboardPage(t *testing.T) {
 }
 
 func TestDashboardPageUsesVendoredAssets(t *testing.T) {
-	page, err := os.ReadFile(filepath.Clean(filepath.Join("..", "..", "static", "dashboard.html")))
+	page, err := os.ReadFile(filepath.Clean(filepath.Join("..", "webassets", "dashboard.html")))
 	if err != nil {
-		t.Fatalf("read dashboard page from static directory: %v", err)
+		t.Fatalf("read dashboard page from webassets directory: %v", err)
 	}
 	body := string(page)
 	if strings.Contains(body, "cdn.jsdelivr.net") || strings.Contains(body, "https://") || strings.Contains(body, "http://") {
@@ -90,7 +91,7 @@ func (w *errResponseWriter) Write([]byte) (int, error) {
 
 func TestRenderDashboardPageWriteError(t *testing.T) {
 	writer := &errResponseWriter{}
-	RenderDashboardPage(writer, os.DirFS(filepath.Clean(filepath.Join("..", ".."))))
+	RenderDashboardPage(writer, webassets.Files())
 
 	if ct := writer.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("expected text/html content type, got %q", ct)

@@ -27,7 +27,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Copy source
 COPY cmd cmd
 COPY internal internal
-COPY static static
 COPY ui ui
 COPY tsconfig.json ./
 

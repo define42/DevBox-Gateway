@@ -3,14 +3,14 @@
 ## Project Structure & Module Organization
 This repository is a Go module for an HTTPS RDP gateway. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb` and `cmd/mkrpm` are thin native-packaging command adapters. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, `deb` and `rpm` for native package construction, and `console`, `dashboard`, `rdp`, and `session` for their respective features.
 
-UI source lives in `ui/`, and the compiled browser asset is `static/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Tests are co-located with their packages; integration coverage is concentrated in `internal/gateway`, `internal/rdp`, and `internal/virt`.
+UI source lives in `ui/`, and the compiled browser asset is `internal/webassets/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Tests are co-located with their packages; integration coverage is concentrated in `internal/gateway`, `internal/rdp`, and `internal/virt`.
 
 ## Build, Test, and Development Commands
 - `make run`: stop any existing stack, build the Docker images, and start the local gateway + LDAP services with Docker Compose.
 - `make test`: run all Go tests with coverage across packages.
 - `make lint`: run `golangci-lint`.
 - `make gosec`: run `gosec`.
-- `tsc -p tsconfig.json`: rebuild the dashboard TypeScript bundle into `static/dashboard.js`.
+- `tsc -p tsconfig.json`: rebuild the dashboard TypeScript bundle into `internal/webassets/dashboard.js`.
 
 ## Local Run And Login Flow
 For a full local UI run, use `make run`. The gateway listens on `https://localhost` and, when no cert/key are provided, generates a self-signed certificate for the session.

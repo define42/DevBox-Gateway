@@ -497,7 +497,7 @@ Requirements:
 Build the dashboard bundle and the binary locally:
 
 ```sh
-tsc -p tsconfig.json          # compile ui/dashboard.ts → static/dashboard.js
+tsc -p tsconfig.json          # compile ui/dashboard.ts → internal/webassets/dashboard.js
 CGO_ENABLED=1 go build -o devbox-gateway ./cmd/devbox-gateway
 ```
 
@@ -553,7 +553,7 @@ with:
 tsc -p tsconfig.json
 ```
 
-The compiled output is `static/dashboard.js` and is embedded into the binary
+The compiled output is `internal/webassets/dashboard.js` and is embedded into the binary
 via Go's `embed` package.
 
 ## Testing and linting
@@ -594,9 +594,9 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── session/     Cookie session manager and middleware.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
-│   └── vmname/      VM name construction and validation.
+│   ├── vmname/      VM name construction and validation.
+│   └── webassets/   Embedded static assets, including the compiled dashboard.js.
 ├── ui/              TypeScript sources for the dashboard.
-├── static/          Embedded static assets, including the compiled dashboard.js.
 ├── testldap/        glauth config + cert/key used for local LDAP.
 └── Dockerfile, docker-compose.yml, Makefile, tsconfig.json
 ```
