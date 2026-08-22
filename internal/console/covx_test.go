@@ -209,6 +209,18 @@ func TestCovxAdminDashboardWSAuthorization(t *testing.T) {
 	if message.Data == nil || !message.Data.IsAdmin {
 		t.Fatalf("expected admin inventory data, got %+v", message)
 	}
+
+	probe := 123.456
+	if err := conn.WriteJSON(dashboardClientMessage{Type: "ping", ID: &probe}); err != nil {
+		t.Fatalf("write admin ping probe: %v", err)
+	}
+	pong := readDashboardMessageType(t, conn, "pong")
+	if pong.ServerMemory == nil || pong.ServerMemory.TotalBytes == 0 {
+		t.Fatalf("expected admin pong to contain server memory, got %+v", pong.ServerMemory)
+	}
+	if pong.ServerMemory.UsedBytes > pong.ServerMemory.TotalBytes {
+		t.Fatalf("admin pong reported invalid server memory: %+v", pong.ServerMemory)
+	}
 }
 
 func TestCovxDashboardWSUpgradeFailure(t *testing.T) {
@@ -243,6 +255,9 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	pong := readDashboardMessageType(t, conn, "pong")
 	if pong.ID == nil || *pong.ID != probe {
 		t.Fatalf("expected pong ID %v, got %+v", probe, pong.ID)
+	}
+	if pong.ServerMemory != nil {
+		t.Fatalf("ordinary dashboard pong exposed server memory: %+v", pong.ServerMemory)
 	}
 
 	closeWebsocketClient(t, conn)

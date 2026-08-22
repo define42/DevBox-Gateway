@@ -29,16 +29,18 @@ type dashboardClientMessage struct {
 }
 
 type dashboardServerMessage struct {
-	Type  string                  `json:"type"`
-	ID    *float64                `json:"id,omitempty"`
-	Data  *dashboard.DataResponse `json:"data,omitempty"`
-	Error string                  `json:"error,omitempty"`
+	Type         string                  `json:"type"`
+	ID           *float64                `json:"id,omitempty"`
+	Data         *dashboard.DataResponse `json:"data,omitempty"`
+	ServerMemory *dashboard.ServerMemory `json:"serverMemory,omitempty"`
+	Error        string                  `json:"error,omitempty"`
 }
 
 type dashboardView struct {
-	username string
-	isAdmin  bool
-	allVMs   bool
+	username         string
+	isAdmin          bool
+	allVMs           bool
+	readServerMemory func() (dashboard.ServerMemory, error)
 }
 
 // HandleDashboardWS serves the dashboard's shared control websocket. Typed
@@ -90,11 +92,15 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 		}
 		defer unregisterConnection()
 
-		bridgeDashboardControlSocketForView(ws, dashboardView{
+		view := dashboardView{
 			username: user.Name,
 			isAdmin:  user.IsAdmin,
 			allVMs:   adminView,
-		}, settings, sessionDeadline)
+		}
+		if adminView {
+			view.readServerMemory = dashboard.ReadServerMemory
+		}
+		bridgeDashboardControlSocketForView(ws, view, settings, sessionDeadline)
 	}
 }
 
@@ -144,13 +150,30 @@ func bridgeDashboardControlSocketForView(
 		if message.Type != "ping" || message.ID == nil {
 			continue
 		}
-		response := dashboardServerMessage{Type: "pong", ID: message.ID}
+		response := dashboardPong(view, message.ID)
 		select {
 		case outbound <- response:
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func dashboardPong(view dashboardView, id *float64) dashboardServerMessage {
+	response := dashboardServerMessage{Type: "pong", ID: id}
+	if !view.allVMs || view.readServerMemory == nil {
+		return response
+	}
+
+	memory, err := view.readServerMemory()
+	if err != nil {
+		// Pongs run every two seconds while an admin tab is visible. Leave the
+		// optional sample out rather than flooding logs if host statistics are
+		// temporarily unavailable; the browser renders that as an unknown value.
+		return response
+	}
+	response.ServerMemory = &memory
+	return response
 }
 
 func closeDashboardSocketWhenDone(ctx context.Context, ws *websocket.Conn, done chan<- struct{}) {
