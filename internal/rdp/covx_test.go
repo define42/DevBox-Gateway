@@ -349,14 +349,14 @@ func TestCovxResolveBackendAddrBranches(t *testing.T) {
 	}
 }
 
-func TestCovxHandleRDPClientClosesBeforeCRQ(t *testing.T) {
+func TestCovxHandleClientClosesBeforeCRQ(t *testing.T) {
 	InitLogging()
 	settings := config.NewSettings(false)
 	client, server := net.Pipe()
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, nil, nil, settings)
+		Handle(server, nil, nil, settings)
 		close(done)
 	}()
 
@@ -364,12 +364,12 @@ func TestCovxHandleRDPClientClosesBeforeCRQ(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRDPRejectsUnknownRoutingLabel(t *testing.T) {
+func TestCovxHandleRejectsUnknownRoutingLabel(t *testing.T) {
 	InitLogging()
 	stubVMIPs(t, map[string]string{})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, nil, settings, "192.0.2.184")
+	client, done := startHandleTestConnection(t, frontTLS, nil, settings, "192.0.2.184")
 	tlsClient := performFrontHandshake(t, client, "covxunknown.example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -377,14 +377,14 @@ func TestCovxHandleRDPRejectsUnknownRoutingLabel(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRDPDeniesWhenVMHasNoOwner(t *testing.T) {
+func TestCovxHandleDeniesWhenVMHasNoOwner(t *testing.T) {
 	InitLogging()
 	name := covxUniqueName("noown")
 	// Route the label, but never define the domain: owner resolution denies.
 	stubVMIPs(t, map[string]string{name: "127.0.0.71"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, session.New(), settings, "192.0.2.180")
+	client, done := startHandleTestConnection(t, frontTLS, session.New(), settings, "192.0.2.180")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -392,7 +392,7 @@ func TestCovxHandleRDPDeniesWhenVMHasNoOwner(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRDPNoRouteForVM(t *testing.T) {
+func TestCovxHandleNoRouteForVM(t *testing.T) {
 	InitLogging()
 	name := covxUniqueName("norte")
 	// Empty IP means "no trusted route" once authorization has passed.
@@ -402,7 +402,7 @@ func TestCovxHandleRDPNoRouteForVM(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.181:5000", name)
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.181")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.181")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -410,7 +410,7 @@ func TestCovxHandleRDPNoRouteForVM(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRDPBackendDialRefused(t *testing.T) {
+func TestCovxHandleBackendDialRefused(t *testing.T) {
 	InitLogging()
 	name := covxUniqueName("dial")
 	// Nothing listens on this loopback alias, so the dial is refused instantly.
@@ -421,7 +421,7 @@ func TestCovxHandleRDPBackendDialRefused(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.182:5000", name)
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -429,7 +429,7 @@ func TestCovxHandleRDPBackendDialRefused(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRDPRevocationClosesActiveProxy(t *testing.T) {
+func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 	InitLogging()
 	name := covxUniqueName("revk")
 	backendHost := "127.0.0.74"
@@ -445,13 +445,13 @@ func TestCovxHandleRDPRevocationClosesActiveProxy(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.185:5000", name)
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
 	// Wait for the proxy to register the connection, then revoke it: the
-	// registered close callback must terminate HandleRDP.
+	// registered close callback must terminate Handle.
 	deadline := time.Now().Add(5 * time.Second)
 	for sessionManager.CloseUserConnections("alice") == 0 {
 		if time.Now().After(deadline) {

@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	// DashboardHTMLPath is the embedded dashboard HTML template location.
-	DashboardHTMLPath = "static/dashboard.html"
+	// HTMLPath is the embedded dashboard HTML template location.
+	HTMLPath = "static/dashboard.html"
 	// DefaultRDPFilename is the fallback download name sent in dashboard data.
 	DefaultRDPFilename = "rdpgw.rdp"
 )
@@ -69,11 +69,11 @@ type ActionResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// RenderDashboardPage writes the dashboard HTML page to the HTTP response.
-func RenderDashboardPage(w http.ResponseWriter, staticFiles fs.FS) {
+// RenderPage writes the dashboard HTML page to the HTTP response.
+func RenderPage(w http.ResponseWriter, staticFiles fs.FS) {
 	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	dashboardHTML, err := fs.ReadFile(staticFiles, DashboardHTMLPath)
+	dashboardHTML, err := fs.ReadFile(staticFiles, HTMLPath)
 	if err != nil {
 		log.Printf("render dashboard page: %v", err)
 		http.Error(w, "Dashboard template unavailable.", http.StatusInternalServerError)
@@ -179,8 +179,8 @@ func WriteRDPFile(w http.ResponseWriter, settings *config.Settings, user, vmName
 	}
 }
 
-// ListDashboardVMs returns VM rows visible to the given user.
-func ListDashboardVMs(user string) ([]VM, error) {
+// ListVMs returns VM rows visible to the given user.
+func ListVMs(user string) ([]VM, error) {
 	vmList := virt.NewInventory().VMs(user)
 	return buildDashboardRows(vmList, user), nil
 }
@@ -194,7 +194,7 @@ func DataForUser(settings *config.Settings, user string) (DataResponse, error) {
 		AutoShutdownHours: int(config.VDIAutoShutdownAfter(settings) / time.Hour),
 	}
 
-	vmRows, err := ListDashboardVMs(user)
+	vmRows, err := ListVMs(user)
 	if err != nil {
 		return response, err
 	}

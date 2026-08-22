@@ -229,15 +229,15 @@ func assertStorageVolXMLPermissions(t *testing.T, permissions *storageVolumePerm
 	}
 }
 
-func TestInitVirtRequiresBaseImage(t *testing.T) {
+func TestInitRequiresBaseImage(t *testing.T) {
 	t.Run("with image", func(t *testing.T) {
 		rootDir := t.TempDir()
-		settings := newInitVirtSettings(t, rootDir)
+		settings := newInitSettings(t, rootDir)
 		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
 		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
 
-		if err := InitVirt(settings); err != nil {
-			t.Fatalf("InitVirt with a populated image library: %v", err)
+		if err := Init(settings); err != nil {
+			t.Fatalf("Init with a populated image library: %v", err)
 		}
 	})
 
@@ -246,8 +246,8 @@ func TestInitVirtRequiresBaseImage(t *testing.T) {
 		if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
 			t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 		}
-		if err := InitVirt(settings); err == nil {
-			t.Fatal("expected InitVirt to fail with an empty base image library")
+		if err := Init(settings); err == nil {
+			t.Fatal("expected Init to fail with an empty base image library")
 		}
 	})
 }

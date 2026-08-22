@@ -248,12 +248,12 @@ func TestVbtcovResolveGuestCredentials(t *testing.T) {
 	})
 }
 
-func TestVbtcovInitVirtStoragePoolFailure(t *testing.T) {
+func TestVbtcovInitStoragePoolFailure(t *testing.T) {
 	settings, _, _ := vbtcovSettingsWithDummyImage(t)
 	vbtcovBlockPoolPathWithFile(t, settings)
 
-	err := InitVirt(settings)
-	vbtcovRequireErrContains(t, err, "failed to ensure storage pool", "InitVirt with file-blocked pool path")
+	err := Init(settings)
+	vbtcovRequireErrContains(t, err, "failed to ensure storage pool", "Init with file-blocked pool path")
 }
 
 func TestVbtcovEnsureBootStoragePoolFailure(t *testing.T) {

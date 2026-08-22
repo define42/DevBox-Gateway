@@ -29,11 +29,11 @@ func waitDone(t *testing.T, done <-chan struct{}) {
 	case <-done:
 		return
 	case <-time.After(2 * time.Second):
-		t.Fatal("HandleRDP did not return in time")
+		t.Fatal("Handle did not return in time")
 	}
 }
 
-func TestHandleRDPRejectsClientWithoutTLS(t *testing.T) {
+func TestHandleRejectsClientWithoutTLS(t *testing.T) {
 	InitLogging()
 	client, server := net.Pipe()
 	defer func() {
@@ -46,7 +46,7 @@ func TestHandleRDPRejectsClientWithoutTLS(t *testing.T) {
 	done := make(chan struct{})
 	settings := config.NewSettings(false)
 	go func() {
-		HandleRDP(server, nil, nil, settings)
+		Handle(server, nil, nil, settings)
 		close(done)
 	}()
 
@@ -57,7 +57,7 @@ func TestHandleRDPRejectsClientWithoutTLS(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsSNIMismatch(t *testing.T) {
+func TestHandleRejectsSNIMismatch(t *testing.T) {
 	InitLogging()
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	settings := config.NewSettings(false)
@@ -85,7 +85,7 @@ func TestHandleRDPRejectsSNIMismatch(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, nil, settings)
+		Handle(server, frontTLS, nil, settings)
 		close(done)
 	}()
 

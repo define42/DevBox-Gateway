@@ -395,7 +395,7 @@ func expectTLSOnlyBackendCRQ(t *testing.T, raw net.Conn) bool {
 	return true
 }
 
-func startHandleRDPTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, remoteIP string) (net.Conn, <-chan struct{}) {
+func startHandleTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, remoteIP string) (net.Conn, <-chan struct{}) {
 	t.Helper()
 
 	client, server := net.Pipe()
@@ -407,14 +407,14 @@ func startHandleRDPTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessi
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
 	return client, done
 }
 
-func TestHandleRDPSuccessfulProxy(t *testing.T) {
+func TestHandleSuccessfulProxy(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.42"
@@ -441,7 +441,7 @@ func TestHandleRDPSuccessfulProxy(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.100:5000", "vm1")
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100")
 	tlsClient := performFrontHandshake(t, client, "vm1.example.test")
 	defer func() { _ = tlsClient.Close() }()
 
@@ -461,7 +461,7 @@ func TestHandleRDPSuccessfulProxy(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsMissingSubdomain(t *testing.T) {
+func TestHandleRejectsMissingSubdomain(t *testing.T) {
 	InitLogging()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
@@ -471,7 +471,7 @@ func TestHandleRDPRejectsMissingSubdomain(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, nil, settings)
+		Handle(server, frontTLS, nil, settings)
 		close(done)
 	}()
 
@@ -484,7 +484,7 @@ func TestHandleRDPRejectsMissingSubdomain(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsMissingRoute(t *testing.T) {
+func TestHandleRejectsMissingRoute(t *testing.T) {
 	InitLogging()
 
 	stubVMIPs(t, map[string]string{})
@@ -499,7 +499,7 @@ func TestHandleRDPRejectsMissingRoute(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -512,7 +512,7 @@ func TestHandleRDPRejectsMissingRoute(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPBackendDialFailure(t *testing.T) {
+func TestHandleBackendDialFailure(t *testing.T) {
 	InitLogging()
 
 	stubVMIPs(t, map[string]string{"vmdial": "127.0.0.43"})
@@ -527,7 +527,7 @@ func TestHandleRDPBackendDialFailure(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -540,7 +540,7 @@ func TestHandleRDPBackendDialFailure(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsBackendWithoutTLS(t *testing.T) {
+func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.44"
@@ -568,7 +568,7 @@ func TestHandleRDPRejectsBackendWithoutTLS(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -581,7 +581,7 @@ func TestHandleRDPRejectsBackendWithoutTLS(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
+func TestHandleRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.45"
@@ -605,7 +605,7 @@ func TestHandleRDPRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -616,7 +616,7 @@ func TestHandleRDPRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
+func TestHandleRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.46"
@@ -641,7 +641,7 @@ func TestHandleRDPRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -652,7 +652,7 @@ func TestHandleRDPRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
+func TestHandleRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.47"
@@ -677,7 +677,7 @@ func TestHandleRDPRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -688,7 +688,7 @@ func TestHandleRDPRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
+func TestHandleRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.49"
@@ -715,7 +715,7 @@ func TestHandleRDPRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleRDP(server, frontTLS, sessionManager, settings)
+		Handle(server, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
@@ -726,7 +726,7 @@ func TestHandleRDPRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestHandleRDPAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
+func TestHandleAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	InitLogging()
 
 	backendHost := "127.0.0.48"
@@ -747,7 +747,7 @@ func TestHandleRDPAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	issueUserSession(t, sessionManager, "alice", "192.0.2.201:5000")
 	issueUserSession(t, sessionManager, "alice", "192.0.2.107:5001", "vmmulti")
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.107")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.107")
 	tlsClient := performFrontHandshake(t, client, "vmmulti.example.test")
 	defer func() { _ = tlsClient.Close() }()
 

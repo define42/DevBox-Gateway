@@ -25,9 +25,9 @@ func RoutingLabel(secret []byte, vmName string) string {
 	return hex.EncodeToString(mac.Sum(nil))[:routingLabelLen]
 }
 
-// CloudInitPasswordHash generates a /etc/shadow compatible
+// CloudInitPassword generates a /etc/shadow compatible
 // SHA-512 ($6$) password hash for cloud-init.
-func CloudInitPasswordHash(password string) (string, error) {
+func CloudInitPassword(password string) (string, error) {
 	saltGen := sha512_crypt.GetSalt()
 	salt := saltGen.GenerateWRounds(16, 5000)
 	c := sha512_crypt.New()

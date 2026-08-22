@@ -81,8 +81,8 @@ type frontRDPConnection struct {
 	hostname string
 }
 
-// HandleRDP handles a single RDP connection over TLS.
-func HandleRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) {
+// Handle handles a single RDP connection over TLS.
+func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) {
 	started := time.Now()
 	debugf("new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
 

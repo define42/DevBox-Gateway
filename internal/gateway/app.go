@@ -113,7 +113,7 @@ func bootGateway() (*gatewayRuntime, error) {
 	virt.SetVNCDebugLogging(debugConns)
 	rdp.SetDebugLogging(debugConns)
 
-	if err := virt.InitVirt(settings); err != nil {
+	if err := virt.Init(settings); err != nil {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
 	}
 

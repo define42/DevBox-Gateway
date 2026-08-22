@@ -186,7 +186,7 @@ func completeLogin(sessionManager *session.Manager, settings *config.Settings, w
 // request: the hash is stored in the in-memory session and later seeds the
 // guest account when the user creates a VDI; the cleartext is never retained.
 func establishSession(ctx context.Context, sessionManager *session.Manager, user *identity.User, remoteAddr, password string) error {
-	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
+	loginPasswordHash, err := hash.CloudInitPassword(password)
 	if err != nil {
 		return err
 	}
@@ -507,7 +507,7 @@ func requireSameOriginDashboardPost(body dashboardRouteBody) dashboardRouteBody 
 func registerDashboardPageRoute(group huma.API) {
 	registerHiddenGet(group, "/dashboard", func(ctx huma.Context) {
 		_, w := humachi.Unwrap(ctx)
-		dashboard.RenderDashboardPage(w, staticFiles())
+		dashboard.RenderPage(w, staticFiles())
 	})
 }
 

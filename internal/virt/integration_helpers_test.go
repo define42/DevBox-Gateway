@@ -95,7 +95,7 @@ func usePermissiveLibvirtVolumeMode(t *testing.T) {
 	t.Helper()
 }
 
-func newInitVirtSettings(t *testing.T, rootDir string) *config.Settings {
+func newInitSettings(t *testing.T, rootDir string) *config.Settings {
 	t.Helper()
 
 	settings := config.NewSettings(false)
@@ -105,14 +105,14 @@ func newInitVirtSettings(t *testing.T, rootDir string) *config.Settings {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("virt-test-pool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	// InitVirt only requires a non-empty image library (it does not clone), so a
+	// Init only requires a non-empty image library (it does not clone), so a
 	// tiny placeholder avoids a real multi-gigabyte download here.
 	seedDummyBaseImage(t, settings)
 	return settings
 }
 
 // seedDummyBaseImage writes a tiny placeholder image into the library so checks
-// that only need a non-empty library (e.g. InitVirt) pass without downloading a
+// that only need a non-empty library (e.g. Init) pass without downloading a
 // real image. It returns the seeded file name.
 func seedDummyBaseImage(t *testing.T, settings *config.Settings) string {
 	t.Helper()

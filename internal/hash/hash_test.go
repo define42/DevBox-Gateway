@@ -39,8 +39,8 @@ func TestRoutingLabelVariesByNameAndSecret(t *testing.T) {
 	}
 }
 
-func TestCloudInitPasswordHash(t *testing.T) {
-	hash, err := CloudInitPasswordHash("testpassword")
+func TestCloudInitPassword(t *testing.T) {
+	hash, err := CloudInitPassword("testpassword")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,12 +53,12 @@ func TestCloudInitPasswordHash(t *testing.T) {
 	}
 }
 
-func TestCloudInitPasswordHashDifferentPasswords(t *testing.T) {
-	h1, err := CloudInitPasswordHash("password1")
+func TestCloudInitPasswordDifferentPasswords(t *testing.T) {
+	h1, err := CloudInitPassword("password1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	h2, err := CloudInitPasswordHash("password2")
+	h2, err := CloudInitPassword("password2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,12 +67,12 @@ func TestCloudInitPasswordHashDifferentPasswords(t *testing.T) {
 	}
 }
 
-func TestCloudInitPasswordHashDifferentSalts(t *testing.T) {
-	h1, err := CloudInitPasswordHash("same")
+func TestCloudInitPasswordDifferentSalts(t *testing.T) {
+	h1, err := CloudInitPassword("same")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	h2, err := CloudInitPasswordHash("same")
+	h2, err := CloudInitPassword("same")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

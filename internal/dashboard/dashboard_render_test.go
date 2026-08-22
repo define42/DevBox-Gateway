@@ -16,14 +16,14 @@ import (
 	"github.com/define42/devbox-gateway/internal/webassets"
 )
 
-func TestRenderDashboardPage(t *testing.T) {
+func TestRenderPage(t *testing.T) {
 	expected, err := os.ReadFile(filepath.Clean(filepath.Join("..", "webassets", "dashboard.html")))
 	if err != nil {
 		t.Fatalf("read dashboard page from webassets directory: %v", err)
 	}
 
 	rec := httptest.NewRecorder()
-	RenderDashboardPage(rec, webassets.Files())
+	RenderPage(rec, webassets.Files())
 
 	res := rec.Result()
 	defer func() { _ = res.Body.Close() }()
@@ -89,18 +89,18 @@ func (w *errResponseWriter) Write([]byte) (int, error) {
 	return 0, errors.New("write failed")
 }
 
-func TestRenderDashboardPageWriteError(t *testing.T) {
+func TestRenderPageWriteError(t *testing.T) {
 	writer := &errResponseWriter{}
-	RenderDashboardPage(writer, webassets.Files())
+	RenderPage(writer, webassets.Files())
 
 	if ct := writer.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
 		t.Fatalf("expected text/html content type, got %q", ct)
 	}
 }
 
-func TestRenderDashboardPageMissingTemplate(t *testing.T) {
+func TestRenderPageMissingTemplate(t *testing.T) {
 	rec := httptest.NewRecorder()
-	RenderDashboardPage(rec, embed.FS{})
+	RenderPage(rec, embed.FS{})
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected %d, got %d", http.StatusInternalServerError, rec.Code)
@@ -110,9 +110,9 @@ func TestRenderDashboardPageMissingTemplate(t *testing.T) {
 	}
 }
 
-func TestDashboardHTMLPathValid(t *testing.T) {
-	if valid := fs.ValidPath(DashboardHTMLPath); !valid {
-		t.Fatalf("invalid dashboard HTML embedded path: %q", DashboardHTMLPath)
+func TestHTMLPathValid(t *testing.T) {
+	if valid := fs.ValidPath(HTMLPath); !valid {
+		t.Fatalf("invalid dashboard HTML embedded path: %q", HTMLPath)
 	}
 }
 

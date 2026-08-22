@@ -22,9 +22,9 @@ func waitForDashboardVM(t *testing.T, user, name string, timeout time.Duration) 
 
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		rows, err := dashboard.ListDashboardVMs(user)
+		rows, err := dashboard.ListVMs(user)
 		if err != nil {
-			t.Fatalf("dashboard.ListDashboardVMs(%q): %v", user, err)
+			t.Fatalf("dashboard.ListVMs(%q): %v", user, err)
 		}
 		for _, row := range rows {
 			if row.Name == name && row.State == "running" {
@@ -118,7 +118,7 @@ func assertRDPFileContent(t *testing.T, content, wantConnectHost, username strin
 	}
 }
 
-func TestListDashboardVMs(t *testing.T) {
+func TestListVMs(t *testing.T) {
 	virt.NewInventory()
 
 	settings := newDashboardVMSettings(t)

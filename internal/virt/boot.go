@@ -12,11 +12,11 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-// InitVirt ensures a base image library exists and the libvirt storage pool and
+// Init ensures a base image library exists and the libvirt storage pool and
 // 'default' NAT network are ready for VM operations. The base image check runs
 // first, before any libvirt connection, so an empty image library fails the boot
 // fast with a clear error.
-func InitVirt(settings *config.Settings) error {
+func Init(settings *config.Settings) error {
 	if err := storage.EnsureBaseImagesAvailable(settings); err != nil {
 		return err
 	}
