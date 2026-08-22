@@ -306,7 +306,7 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	t.Setenv(config.FRONT_DOMAIN, frontDomain)
 
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}

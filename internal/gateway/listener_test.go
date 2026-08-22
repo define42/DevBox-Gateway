@@ -104,7 +104,7 @@ func TestBufferedConnRead(t *testing.T) {
 
 func TestServeListenerReturnsWhenClosed(t *testing.T) {
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestServeListenerReturnsWhenClosed(t *testing.T) {
 
 func TestServeListenerRetriesTimeoutAccept(t *testing.T) {
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestServeListenerSurvivesTemporaryAcceptError(t *testing.T) {
 
 func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 
 func TestHandleSharedConnPeekFailure(t *testing.T) {
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}

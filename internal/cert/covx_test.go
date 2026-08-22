@@ -65,7 +65,7 @@ func TestStartManagingBeginsBackgroundManagement(t *testing.T) {
 	t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
 	settings := config.NewSettingType(false)
 
-	tm, err := NewTLSManager(settings)
+	tm, err := NewTLSManager(settings, noVMNames)
 	if err != nil {
 		t.Fatalf("NewTLSManager: %v", err)
 	}
@@ -95,7 +95,12 @@ func TestWorkerTickUpdatesDomains(t *testing.T) {
 	magic.OnDemand = new(certmagic.OnDemandConfig)
 	magic.Storage = &certmagic.FileStorage{Path: t.TempDir()}
 
-	manager := &TLSManager{magic: magic, settings: settings, workerDone: make(chan struct{})}
+	manager := &TLSManager{
+		magic:      magic,
+		settings:   settings,
+		vmNames:    noVMNames,
+		workerDone: make(chan struct{}),
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	go manager.worker(ctx, time.NewTicker(25*time.Millisecond))
@@ -131,7 +136,7 @@ func TestUpdateDomainsManageSyncError(t *testing.T) {
 	magic := certmagic.NewDefault()
 	magic.Storage = &certmagic.FileStorage{Path: storagePath}
 
-	manager := &TLSManager{magic: magic, settings: settings}
+	manager := &TLSManager{magic: magic, settings: settings, vmNames: noVMNames}
 	manager.updateDomains()
 
 	if got := manager.managedDomains(); len(got) != 0 {

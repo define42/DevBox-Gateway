@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -20,16 +21,19 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/hash"
-	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"
 )
 
+// VMNameProvider returns the current VM names used to maintain the ACME domain set.
+type VMNameProvider func() []string
+
 // TLSManager owns the frontend TLS configuration and ACME domain updates.
 type TLSManager struct {
 	magic          *certmagic.Config
 	settings       *config.SettingsType
+	vmNames        VMNameProvider
 	tlsConfig      *tls.Config
 	initialDomains []string
 	domainsMu      sync.RWMutex
@@ -78,7 +82,7 @@ func (tm *TLSManager) Close() error {
 }
 
 func (tm *TLSManager) updateDomains() {
-	vmNames := virt.GetInstance().VMNames()
+	vmNames := tm.vmNames()
 	frontPageDomain := tm.settings.Get(config.FRONT_DOMAIN)
 	secret := []byte(tm.settings.Get(config.SNI_HASH_SECRET))
 
@@ -124,18 +128,24 @@ func (tm *TLSManager) setManagedDomains(domains []string) {
 // ACME is enabled it prepares certificate management but does not yet obtain any
 // certificates: the caller must invoke StartManaging once the front listener is
 // accepting connections, so that ACME TLS-ALPN-01 validation can be answered.
-func NewTLSManager(settings *config.SettingsType) (*TLSManager, error) {
+// vmNames is required only when ACME is enabled.
+func NewTLSManager(settings *config.SettingsType, vmNames VMNameProvider) (*TLSManager, error) {
+	acmeEnabled := settings.IsTrue(config.ACME_ENABLE)
+	if acmeEnabled && vmNames == nil {
+		return nil, errors.New("cert: vm name provider is required when acme is enabled")
+	}
+
 	fallback, err := LoadOrGenerateCert(settings)
 	if err != nil {
 		log.Fatalf("cert setup: %v", err)
 		return nil, err
 	}
 
-	if !settings.IsTrue(config.ACME_ENABLE) {
+	if !acmeEnabled {
 		return newStaticTLSManager(settings, fallback), nil
 	}
 
-	return newACMETLSManager(settings, fallback)
+	return newACMETLSManager(settings, fallback, vmNames)
 }
 
 // LoadOrGenerateCert loads the configured certificate pair or creates a self-signed fallback.
@@ -176,7 +186,11 @@ func newStaticTLSManager(settings *config.SettingsType, fallback tls.Certificate
 	}
 }
 
-func newACMETLSManager(settings *config.SettingsType, fallback tls.Certificate) (*TLSManager, error) {
+func newACMETLSManager(
+	settings *config.SettingsType,
+	fallback tls.Certificate,
+	vmNames VMNameProvider,
+) (*TLSManager, error) {
 	configureACMEDefaults(settings)
 
 	domains, err := initialManagedDomains(settings.Get(config.FRONT_DOMAIN))
@@ -190,6 +204,7 @@ func newACMETLSManager(settings *config.SettingsType, fallback tls.Certificate) 
 		magic:          magic,
 		tlsConfig:      newManagedTLSConfig(magic, fallback),
 		settings:       settings,
+		vmNames:        vmNames,
 		initialDomains: domains,
 	}, nil
 }

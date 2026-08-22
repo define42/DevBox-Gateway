@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,10 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"
 )
+
+func noVMNames() []string {
+	return nil
+}
 
 func TestSameElements(t *testing.T) {
 	tests := []struct {
@@ -124,7 +129,7 @@ func TestNewTLSManagerWithoutACME(t *testing.T) {
 	t.Setenv(config.KEY_FILE, "")
 	settings := config.NewSettingType(false)
 
-	tm, err := NewTLSManager(settings)
+	tm, err := NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,8 +244,22 @@ func TestNewTLSManagerACMERequiresFrontDomain(t *testing.T) {
 	t.Setenv(config.KEY_FILE, "")
 
 	settings := config.NewSettingType(false)
-	if _, err := NewTLSManager(settings); err == nil {
+	if _, err := NewTLSManager(settings, noVMNames); err == nil {
 		t.Fatal("expected ACME-enabled TLS manager without front domain to fail")
+	}
+}
+
+func TestNewTLSManagerACMERequiresVMNameProvider(t *testing.T) {
+	t.Setenv(config.ACME_ENABLE, "true")
+	t.Setenv(config.FRONT_DOMAIN, "vdi.example.test")
+
+	settings := config.NewSettingType(false)
+	_, err := NewTLSManager(settings, nil)
+	if err == nil {
+		t.Fatal("expected ACME-enabled TLS manager without VM name provider to fail")
+	}
+	if !strings.Contains(err.Error(), "vm name provider") {
+		t.Fatalf("expected VM name provider error, got %v", err)
 	}
 }
 
@@ -256,7 +275,7 @@ func TestNewTLSManagerACMEDefersIssuance(t *testing.T) {
 	t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
 
 	settings := config.NewSettingType(false)
-	tm, err := NewTLSManager(settings)
+	tm, err := NewTLSManager(settings, noVMNames)
 	if err != nil {
 		t.Fatalf("NewTLSManager: %v", err)
 	}
@@ -283,7 +302,7 @@ func TestStartManagingStaticNoop(t *testing.T) {
 	t.Setenv(config.KEY_FILE, "")
 
 	settings := config.NewSettingType(false)
-	tm, err := NewTLSManager(settings)
+	tm, err := NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("NewTLSManager: %v", err)
 	}
@@ -297,18 +316,33 @@ func TestStartManagingStaticNoop(t *testing.T) {
 }
 
 func TestUpdateDomainsNoChange(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "example.test")
+	const (
+		frontDomain = "example.test"
+		vmName      = "alice-workstation"
+		secret      = "routing-secret"
+	)
+	t.Setenv(config.FRONT_DOMAIN, frontDomain)
+	t.Setenv(config.SNI_HASH_SECRET, secret)
 	settings := config.NewSettingType(false)
+	want := managedDomainList([]string{vmName}, frontDomain, []byte(secret))
+	providerCalls := 0
 
 	manager := &TLSManager{
 		settings: settings,
-		domains:  []string{"example.test"},
+		vmNames: func() []string {
+			providerCalls++
+			return []string{vmName}
+		},
+		domains: want,
 	}
 	manager.updateDomains()
 
+	if providerCalls != 1 {
+		t.Fatalf("expected VM name provider to be called once, got %d", providerCalls)
+	}
 	got := manager.managedDomains()
-	if len(got) != 1 || got[0] != "example.test" {
-		t.Fatalf("expected domains to remain unchanged, got %v", got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("expected domains to remain %v, got %v", want, got)
 	}
 }
 

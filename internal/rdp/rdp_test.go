@@ -61,7 +61,7 @@ func TestHandleRDPRejectsSNIMismatch(t *testing.T) {
 	InitLogging()
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	settings := config.NewSettingType(false)
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, nil)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}

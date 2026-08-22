@@ -95,7 +95,7 @@ func (g *gatewayRuntime) Close() error {
 }
 
 func bootGateway() (*gatewayRuntime, error) {
-	virt.GetInstance()
+	vmInventory := virt.GetInstance()
 
 	rdp.InitLogging()
 
@@ -123,7 +123,7 @@ func bootGateway() (*gatewayRuntime, error) {
 
 	mux := NewHandler(sessionManager, settings)
 
-	frontTLS, err := cert.NewTLSManager(settings)
+	frontTLS, err := cert.NewTLSManager(settings, vmInventory.VMNames)
 	if err != nil {
 		return nil, fmt.Errorf("tls setup: %w", err)
 	}
