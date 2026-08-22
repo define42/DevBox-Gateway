@@ -146,8 +146,8 @@ type packageFile struct {
 // a LOCAL_USER_SHA256 list of password digests. Combined with the root:root
 // owner set in addPackageFiles, that keeps the file readable only by root. The
 // remaining files carry no secrets and use the conventional world-readable
-// modes. The repository does not ship a LICENSE file, so it is bundled only
-// when present and packaging never fails on its absence.
+// modes. The LICENSE file is bundled when present; packaging tolerates its
+// absence (e.g. out-of-tree builds) rather than failing.
 func packageFiles(o Options) []packageFile {
 	files := []packageFile{
 		{o.BinarySource, o.BinaryDestination, 0o755, rpmpack.GenericFile},

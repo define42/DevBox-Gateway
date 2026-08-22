@@ -109,7 +109,7 @@ func TestPostInstallDoesNotConfigureFirewall(t *testing.T) {
 
 // stageInputs writes a binary, unit, and config file into dir and returns their
 // paths. The license file is intentionally omitted so tests exercise the
-// "no LICENSE in the repo" path by default.
+// absent-LICENSE skip path by default.
 func stageInputs(t *testing.T, dir string) (bin, unit, conf string) {
 	t.Helper()
 	bin = filepath.Join(dir, "devbox-gateway")

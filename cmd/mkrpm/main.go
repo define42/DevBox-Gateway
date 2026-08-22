@@ -21,7 +21,7 @@ func main() {
 	flag.StringVar(&o.Version, "version", "0.0.0", "package version")
 	flag.StringVar(&o.Release, "release", "1", "package release")
 	flag.StringVar(&o.Arch, "arch", rpm.Arch(runtime.GOARCH), "package architecture")
-	flag.StringVar(&o.License, "licence", "Proprietary", "license tag for the RPM metadata")
+	flag.StringVar(&o.License, "licence", "MIT", "license tag for the RPM metadata")
 	flag.StringVar(&o.BinarySource, "binary", "dist/devbox-gateway", "path to the prebuilt binary")
 	flag.StringVar(&o.BinaryDestination, "binary-dest", "/usr/bin/devbox-gateway", "install path for the binary")
 	flag.StringVar(&o.UnitSource, "unit", "devbox-gateway.service", "path to the systemd unit file")

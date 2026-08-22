@@ -632,4 +632,6 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 
 ## License
 
-See the repository for license details.
+DevBox-Gateway is released under the [MIT License](LICENSE). The `LICENSE`
+file is bundled into the RPM (`/usr/share/licenses/devbox-gateway/LICENSE`)
+and Debian (`/usr/share/doc/devbox-gateway/copyright`) packages.
