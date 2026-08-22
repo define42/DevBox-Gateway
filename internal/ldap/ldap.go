@@ -19,12 +19,12 @@ import (
 // anonymous bind, which would let an empty password succeed against any
 // account. The HTTP layer already rejects empty credentials, so this is the
 // authoritative backstop guaranteeing the bypass cannot reappear via any caller.
-var ErrEmptyPassword = errors.New("password must not be empty")
+var ErrEmptyPassword = errors.New("ldap: password must not be empty")
 
 // ErrEmptyIdentifier rejects a login that cannot produce an LDAP bind
 // identifier. Without this guard, skipping an empty identifier would leave the
 // connection anonymous and allow the subsequent search to run without a bind.
-var ErrEmptyIdentifier = errors.New("ldap login identifier must not be empty")
+var ErrEmptyIdentifier = errors.New("ldap: login identifier must not be empty")
 
 // Configured reports whether an LDAP directory is configured. When LDAP_URL is
 // empty the gateway runs in local-users-only mode (see internal/localauth) and

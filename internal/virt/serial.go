@@ -13,11 +13,11 @@ import (
 
 var (
 	// ErrSerialConsoleNotConfigured reports that the domain does not expose a serial console.
-	ErrSerialConsoleNotConfigured = errors.New("serial console not configured")
+	ErrSerialConsoleNotConfigured = errors.New("virt: serial console not configured")
 	// ErrSerialConsoleNotRunning reports that the domain is not running.
-	ErrSerialConsoleNotRunning = errors.New("serial console not running")
+	ErrSerialConsoleNotRunning = errors.New("virt: serial console not running")
 	// ErrSerialConsoleNotReady reports that the serial console is not ready yet.
-	ErrSerialConsoleNotReady = errors.New("serial console not ready")
+	ErrSerialConsoleNotReady = errors.New("virt: serial console not ready")
 )
 
 type domainSerialXML struct {

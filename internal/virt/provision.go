@@ -15,7 +15,7 @@ import (
 
 // ErrVMAlreadyExists indicates a domain with the requested name already exists.
 // Creation never destroys an existing VM, so the user must delete it first.
-var ErrVMAlreadyExists = errors.New("vm with this name already exists")
+var ErrVMAlreadyExists = errors.New("virt: vm with this name already exists")
 
 // vmNameLocks serializes create and remove operations per VDI name. BootNewVM
 // checks the name is free (ensureVMNameAvailable) and only defines the domain

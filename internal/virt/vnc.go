@@ -16,11 +16,11 @@ import (
 
 var (
 	// ErrVNCNotConfigured reports that the domain does not expose a VNC socket.
-	ErrVNCNotConfigured = errors.New("vnc not configured")
+	ErrVNCNotConfigured = errors.New("virt: vnc not configured")
 	// ErrVNCNotRunning reports that the domain is not running.
-	ErrVNCNotRunning = errors.New("vnc not running")
+	ErrVNCNotRunning = errors.New("virt: vnc not running")
 	// ErrVNCNotReady reports that the VNC socket path does not exist yet.
-	ErrVNCNotReady = errors.New("vnc not ready")
+	ErrVNCNotReady = errors.New("virt: vnc not ready")
 )
 
 // vncDebugLogging gates verbose VNC-backend diagnostics (which connection path

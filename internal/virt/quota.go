@@ -14,7 +14,7 @@ import (
 // ErrVMLimitReached indicates the requesting user already owns the maximum
 // number of VDIs allowed by MAX_VDI_PER_USER, so creation is refused until the
 // user deletes one.
-var ErrVMLimitReached = errors.New("vm limit reached")
+var ErrVMLimitReached = errors.New("virt: vm limit reached")
 
 // vmCreationMu guards inflightVMCreations, which tracks creations that have
 // reserved a MAX_VDI_PER_USER slot but not yet persisted owner metadata (which
