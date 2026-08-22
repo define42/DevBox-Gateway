@@ -7,7 +7,7 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/identity"
-	"github.com/define42/devbox-gateway/internal/virt/storage"
+	"github.com/define42/devbox-gateway/internal/virt/internal/storage"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"libvirt.org/go/libvirt"

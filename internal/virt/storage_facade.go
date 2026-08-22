@@ -2,7 +2,7 @@ package virt
 
 import (
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/virt/storage"
+	"github.com/define42/devbox-gateway/internal/virt/internal/storage"
 
 	"libvirt.org/go/libvirt"
 )
