@@ -259,7 +259,7 @@ func assertRemovedVM(t *testing.T, conn *libvirt.Connect, vmName string) {
 func TestStartVM(t *testing.T) {
 	settings := newConsoleSocketSettings(t)
 
-	user, err := identity.NewUser(testUsername)
+	user, err := identity.New(testUsername)
 	if err != nil {
 		t.Fatalf("Failed to create test user: %v", err)
 	}

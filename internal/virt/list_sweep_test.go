@@ -7,10 +7,10 @@ import (
 )
 
 // fakeSweepSpawner records sweep launches without opening libvirt connections.
-func fakeSweepSpawner(t *testing.T) (*SingletonWorker, chan chan<- sweepOutcome) {
+func fakeSweepSpawner(t *testing.T) (*Inventory, chan chan<- sweepOutcome) {
 	t.Helper()
 	spawned := make(chan chan<- sweepOutcome, 8)
-	worker := &SingletonWorker{
+	worker := &Inventory{
 		spawnSweep: func(outcome chan<- sweepOutcome) {
 			spawned <- outcome
 		},
@@ -103,7 +103,7 @@ func TestInflightSweepDoneIsNilSafe(t *testing.T) {
 }
 
 func TestApplySweepPublishesCurrentHostResults(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	identity := inventoryHostIdentity{URI: "qemu:///system", HostUUID: "8e6a3f0a-3f3f-4d43-9d3c-2f6d8b7a1c55"}
 
 	worker.applySweep(sweepOutcome{
@@ -125,7 +125,7 @@ func TestApplySweepPublishesCurrentHostResults(t *testing.T) {
 }
 
 func TestApplySweepDiscardsResultsAcrossHostChange(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	oldIdentity := inventoryHostIdentity{URI: "qemu:///system", HostUUID: "8e6a3f0a-3f3f-4d43-9d3c-2f6d8b7a1c55"}
 	newIdentity := inventoryHostIdentity{URI: "qemu:///system", HostUUID: "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9"}
 
@@ -168,7 +168,7 @@ func TestApplySweepDiscardsResultsAcrossHostChange(t *testing.T) {
 }
 
 func TestApplySweepIgnoresFailedSweep(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 
 	worker.applySweep(sweepOutcome{err: errors.New("libvirt unreachable")})
 

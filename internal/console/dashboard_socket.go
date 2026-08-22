@@ -159,7 +159,7 @@ func publishDashboardVMUpdates(
 	done chan<- struct{},
 ) {
 	defer close(done)
-	worker := virt.GetInstance()
+	worker := virt.NewInventory()
 
 	// Readiness belongs to this authenticated dashboard connection. Probe before
 	// the initial WebSocket snapshot, then repeat until its context is cancelled.

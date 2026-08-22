@@ -558,7 +558,7 @@ func TestWriteJSON(t *testing.T) {
 }
 
 func TestHandleHealthEndpoint(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -575,7 +575,7 @@ func TestHandleHealthEndpoint(t *testing.T) {
 }
 
 func TestRootRedirectsToLogin(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -592,7 +592,7 @@ func TestRootRedirectsToLogin(t *testing.T) {
 }
 
 func TestLoginGetServesPage(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -629,7 +629,7 @@ func responseSetsSessionCookie(res *http.Response) bool {
 // would) must be refused before any credential is authenticated, so no session
 // cookie is planted.
 func TestLoginPostRejectsMissingSameOriginHeader(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -652,7 +652,7 @@ func TestLoginPostRejectsMissingSameOriginHeader(t *testing.T) {
 // TestLoginPostRejectsCrossOriginHeader covers the same login-CSRF gate when the
 // forged request advertises an attacker-controlled Origin.
 func TestLoginPostRejectsCrossOriginHeader(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -678,7 +678,7 @@ func TestLoginPostRejectsCrossOriginHeader(t *testing.T) {
 // (which fails here since no users are configured), returning the login page
 // rather than a 403.
 func TestLoginPostAllowsSameOriginRequest(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -700,7 +700,7 @@ func TestLoginPostAllowsSameOriginRequest(t *testing.T) {
 }
 
 func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -719,7 +719,7 @@ func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 }
 
 func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -743,7 +743,7 @@ func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
 }
 
 func TestLogoutRedirects(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookieFromIP(t, sm, "alice", "192.0.2.10:12345")
@@ -786,7 +786,7 @@ func TestLogoutRedirects(t *testing.T) {
 }
 
 func TestLogoutWithoutSessionRedirects(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -804,7 +804,7 @@ func TestLogoutWithoutSessionRedirects(t *testing.T) {
 }
 
 func TestDashboardRequiresSession(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -819,7 +819,7 @@ func TestDashboardRequiresSession(t *testing.T) {
 }
 
 func TestDashboardDataRequiresSession(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -833,7 +833,7 @@ func TestDashboardDataRequiresSession(t *testing.T) {
 }
 
 func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 
@@ -852,7 +852,7 @@ func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
 }
 
 func TestDashboardPostRejectsMissingSameOriginHeader(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -877,7 +877,7 @@ func TestDashboardPostRejectsMissingSameOriginHeader(t *testing.T) {
 }
 
 func TestDashboardPostRejectsCrossOriginHeader(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -903,7 +903,7 @@ func TestDashboardPostRejectsCrossOriginHeader(t *testing.T) {
 }
 
 func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -924,7 +924,7 @@ func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
 }
 
 func TestDashboardPostInvalidVMName(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -948,7 +948,7 @@ func TestDashboardPostInvalidVMName(t *testing.T) {
 // login password hash (e.g. sessions created before hash storage was added):
 // VDI creation cannot seed the guest account, so the user must log in again.
 func TestDashboardPostMissingSessionPasswordHash(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookieWithHash(t, sm, "alice", "192.0.2.1:12345", "")
@@ -976,7 +976,7 @@ func TestDashboardPostMissingSessionPasswordHash(t *testing.T) {
 }
 
 func TestDashboardPostRejectsOversizedForm(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
@@ -1003,7 +1003,7 @@ func TestDashboardPostRejectsOversizedForm(t *testing.T) {
 }
 
 func TestDashboardMutationEndpointsRejectMissingVMName(t *testing.T) {
-	sm := session.NewManager()
+	sm := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")

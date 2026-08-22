@@ -6,7 +6,7 @@ type User struct {
 	Name string
 }
 
-// NewUser creates a user.
-func NewUser(name string) (*User, error) {
+// New creates a user.
+func New(name string) (*User, error) {
 	return &User{Name: name}, nil
 }

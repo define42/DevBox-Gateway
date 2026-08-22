@@ -129,7 +129,7 @@ func covxOpenConsole(t *testing.T, name string) *virt.SerialConsole {
 
 func TestCovxConsoleAndVNCOwnershipAndStoppedBranches(t *testing.T) {
 	dom := covxDefineDomain(t, "own")
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -165,7 +165,7 @@ func TestCovxConsoleAndVNCOnRunningVM(t *testing.T) {
 	dom.setOwnerMetadata(covxOwnerMetadata)
 	dom.start()
 
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -196,7 +196,7 @@ func TestCovxDashboardConsoleWSEndToEnd(t *testing.T) {
 	// resuming afterwards makes its serial output arrive on the open bridge.
 	dom.startPaused()
 
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 

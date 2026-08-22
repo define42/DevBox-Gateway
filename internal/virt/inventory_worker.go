@@ -17,8 +17,8 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-// SingletonWorker caches VM metadata in the background for fast read access.
-type SingletonWorker struct {
+// Inventory caches VM metadata in the background for fast read access.
+type Inventory struct {
 	ticker *time.Ticker
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -27,8 +27,8 @@ type SingletonWorker struct {
 	// bounds how many the worker may accumulate (maxOutstandingSweeps).
 	outstandingSweeps atomic.Int32
 	// spawnSweep overrides how startSweepIfDue launches a sweep goroutine;
-	// nil means s.sweep. Tests inject a fake so tick handling can be driven
-	// without a live libvirt connection.
+	// nil means the inventory's sweep method. Tests inject a fake so tick
+	// handling can be driven without a live libvirt connection.
 	spawnSweep            func(chan<- sweepOutcome)
 	inventoryCacheMu      sync.Mutex
 	inventoryHostIdentity inventoryHostIdentity
@@ -44,39 +44,39 @@ type SingletonWorker struct {
 }
 
 var (
-	instance atomic.Pointer[SingletonWorker] //nolint:gochecknoglobals // package-level singleton needed for one-time registration
-	once     sync.Once                       //nolint:gochecknoglobals // package-level singleton needed for one-time registration
+	inventoryInstance atomic.Pointer[Inventory] //nolint:gochecknoglobals // package-level singleton needed for one-time registration
+	inventoryOnce     sync.Once                 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 )
 
-// GetInstance returns the process-wide VM cache worker.
-func GetInstance() *SingletonWorker {
-	once.Do(func() {
+// NewInventory returns the process-wide VM inventory.
+func NewInventory() *Inventory {
+	inventoryOnce.Do(func() {
 		ctx, cancel := context.WithCancel(context.Background())
 
-		worker := &SingletonWorker{
+		inventory := &Inventory{
 			ticker: time.NewTicker(2 * time.Second),
 			ctx:    ctx,
 			cancel: cancel,
 		}
-		instance.Store(worker)
-		go worker.run()
+		inventoryInstance.Store(inventory)
+		go inventory.run()
 	})
 
-	return instance.Load()
+	return inventoryInstance.Load()
 }
 
-// peekInstance returns the process-wide VM cache worker only when GetInstance
+// peekInventory returns the process-wide VM inventory only when NewInventory
 // has already started it, and nil otherwise. Callers with a correct non-cache
 // path (such as the VM creation quota check) use this so consulting the cache
 // never starts the background worker as a side effect; in-package tests rely on
 // the worker staying unstarted so their libvirt fixtures remain the only
 // observer of domain state.
-func peekInstance() *SingletonWorker {
-	return instance.Load()
+func peekInventory() *Inventory {
+	return inventoryInstance.Load()
 }
 
 // Stop stops the background worker ticker and cancels its context.
-func (s *SingletonWorker) Stop() {
+func (s *Inventory) Stop() {
 	s.cancel()
 	s.ticker.Stop()
 }
@@ -94,7 +94,7 @@ const vmQuotaSnapshotMaxAge = 10 * time.Second
 // must have completed recently (vmQuotaSnapshotMaxAge) and not been invalidated
 // by a libvirt host change. Callers must treat a false result as "count
 // unavailable", never as zero.
-func (s *SingletonWorker) CountVMsOwnedBy(user string) (int, bool) {
+func (s *Inventory) CountVMsOwnedBy(user string) (int, bool) {
 	if strings.TrimSpace(user) == "" {
 		return 0, false
 	}
@@ -117,7 +117,7 @@ func (s *SingletonWorker) CountVMsOwnedBy(user string) (int, bool) {
 
 // markVMSnapshotSwept records that the visible VM snapshot was just produced by
 // a completed inventory sweep, making it eligible for quota decisions.
-func (s *SingletonWorker) markVMSnapshotSwept() {
+func (s *Inventory) markVMSnapshotSwept() {
 	s.mu.Lock()
 	s.snapshotSweptAt = time.Now()
 	s.mu.Unlock()
@@ -128,7 +128,7 @@ func (s *SingletonWorker) markVMSnapshotSwept() {
 // libvirt host succeeds. The sweep timestamp is zeroed before the snapshot is
 // cleared so a concurrent CountVMsOwnedBy can never judge soon-to-be-dropped
 // data as fresh.
-func (s *SingletonWorker) invalidateVMSnapshot() {
+func (s *Inventory) invalidateVMSnapshot() {
 	s.mu.Lock()
 	s.snapshotSweptAt = time.Time{}
 	s.mu.Unlock()
@@ -141,7 +141,7 @@ func (s *SingletonWorker) invalidateVMSnapshot() {
 // domain's first sweep, while the registry records every touch since. The
 // overlay happens on the returned copies only — the internal snapshot keeps
 // raw sweep data so its change detection is unaffected.
-func (s *SingletonWorker) VMs(user string) []VMInfo {
+func (s *Inventory) VMs(user string) []VMInfo {
 	snapshot := s.snapshotVMs()
 
 	filteredVMs := make([]VMInfo, 0, len(snapshot))
@@ -161,14 +161,14 @@ func (s *SingletonWorker) VMs(user string) []VMInfo {
 // user-filtered snapshot. The touch points call it (via MarkVMUsed) because a
 // last-used update changes what VMs returns without changing the underlying
 // sweep snapshot, so setVMs' own change detection would never fire for it.
-func (s *SingletonWorker) NotifyVMDataChanged() {
+func (s *Inventory) NotifyVMDataChanged() {
 	s.mu.Lock()
 	s.notifySubscribersLocked()
 	s.mu.Unlock()
 }
 
 // VMNames returns the cached VM names.
-func (s *SingletonWorker) VMNames() []string {
+func (s *Inventory) VMNames() []string {
 	snapshot := s.snapshotVMs()
 
 	names := make([]string, 0, len(snapshot))
@@ -179,7 +179,7 @@ func (s *SingletonWorker) VMNames() []string {
 }
 
 // VMIP returns the primary IP address cached for the named VM.
-func (s *SingletonWorker) VMIP(vmName string) (string, error) {
+func (s *Inventory) VMIP(vmName string) (string, error) {
 	for _, vm := range s.snapshotVMs() {
 		if vm.Name == vmName {
 			return vm.PrimaryIP, nil
@@ -191,7 +191,7 @@ func (s *SingletonWorker) VMIP(vmName string) (string, error) {
 // ResolveVMNameByLabel returns the real VM name whose opaque SNI routing label
 // (HMAC-SHA256 of the name, keyed by secret) matches label. Because the label
 // is one-way, routing depends on the cached VM list being populated.
-func (s *SingletonWorker) ResolveVMNameByLabel(secret []byte, label string) (string, bool) {
+func (s *Inventory) ResolveVMNameByLabel(secret []byte, label string) (string, bool) {
 	want := []byte(label)
 	for _, vm := range s.snapshotVMs() {
 		if hmac.Equal([]byte(hash.RoutingLabel(secret, vm.Name)), want) {
@@ -201,7 +201,7 @@ func (s *SingletonWorker) ResolveVMNameByLabel(secret []byte, label string) (str
 	return "", false
 }
 
-func (s *SingletonWorker) snapshotVMs() []VMInfo {
+func (s *Inventory) snapshotVMs() []VMInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -219,7 +219,7 @@ func (s *SingletonWorker) snapshotVMs() []VMInfo {
 // caller must invoke unsubscribe when it no longer needs updates. Notifications
 // carry no VM data: subscribers take a fresh, user-filtered snapshot after each
 // signal, which prevents one user's VM metadata from being broadcast to another.
-func (s *SingletonWorker) SubscribeVMChanges() (<-chan struct{}, func()) {
+func (s *Inventory) SubscribeVMChanges() (<-chan struct{}, func()) {
 	updates := make(chan struct{}, 1)
 
 	s.mu.Lock()
@@ -242,7 +242,7 @@ func (s *SingletonWorker) SubscribeVMChanges() (<-chan struct{}, func()) {
 	}
 }
 
-func (s *SingletonWorker) setVMs(vms []VMInfo) {
+func (s *Inventory) setVMs(vms []VMInfo) {
 	s.mu.Lock()
 	next := slices.Clone(vms)
 	s.mergeRDPReadinessLocked(next)
@@ -255,7 +255,7 @@ func (s *SingletonWorker) setVMs(vms []VMInfo) {
 	s.mu.Unlock()
 }
 
-func (s *SingletonWorker) notifySubscribersLocked() {
+func (s *Inventory) notifySubscribersLocked() {
 	for _, updates := range s.subscribers {
 		select {
 		case updates <- struct{}{}:
@@ -306,8 +306,8 @@ func (f *inflightSweep) done() <-chan sweepOutcome {
 	return f.outcome
 }
 
-func (s *SingletonWorker) run() {
-	log.Println("singleton worker started")
+func (s *Inventory) run() {
+	log.Println("vm inventory worker started")
 
 	var inflight *inflightSweep
 	for {
@@ -320,7 +320,7 @@ func (s *SingletonWorker) run() {
 		case <-s.ctx.Done():
 			// An in-flight sweep finishes on its own: its outcome channel is
 			// buffered and it closes its own connection.
-			log.Println("singleton worker stopped")
+			log.Println("vm inventory worker stopped")
 			return
 		}
 	}
@@ -332,7 +332,7 @@ func (s *SingletonWorker) run() {
 // abandoned sweep's inflightSweep is what guarantees its stale outcome is
 // never applied: the worker no longer holds the only reference to the channel
 // it will report on.
-func (s *SingletonWorker) startSweepIfDue(current *inflightSweep) *inflightSweep {
+func (s *Inventory) startSweepIfDue(current *inflightSweep) *inflightSweep {
 	if current != nil {
 		if time.Since(current.started) < sweepTimeout {
 			return current
@@ -360,7 +360,7 @@ func (s *SingletonWorker) startSweepIfDue(current *inflightSweep) *inflightSweep
 // uncancellable RPC, nothing else holds the same socket, so the next sweep
 // starts on a fresh connection immediately while this goroutine keeps
 // blocking until libvirt gives up.
-func (s *SingletonWorker) sweep(outcome chan<- sweepOutcome) {
+func (s *Inventory) sweep(outcome chan<- sweepOutcome) {
 	s.outstandingSweeps.Add(1)
 	defer s.outstandingSweeps.Add(-1)
 
@@ -395,9 +395,9 @@ func (s *SingletonWorker) sweep(outcome chan<- sweepOutcome) {
 // sweeps never reach here — the worker dropped their channel — so data that
 // is minutes stale, or was collected against a previous libvirt host, is
 // discarded unread.
-func (s *SingletonWorker) applySweep(res sweepOutcome) {
+func (s *Inventory) applySweep(res sweepOutcome) {
 	if res.err != nil {
-		log.Printf("singleton worker list vms: %v", res.err)
+		log.Printf("vm inventory list vms: %v", res.err)
 		return
 	}
 
@@ -420,7 +420,7 @@ func (s *SingletonWorker) applySweep(res sweepOutcome) {
 
 // publishInventory installs a sweep's results: the UUID-keyed inventory
 // caches, the visible VM snapshot, and the quota freshness stamp.
-func (s *SingletonWorker) publishInventory(
+func (s *Inventory) publishInventory(
 	vms []VMInfo,
 	metadata map[string]domainMetadataSnapshot,
 	disks map[string]domainDiskSnapshot,
@@ -438,7 +438,7 @@ func (s *SingletonWorker) publishInventory(
 // startSweepIfDue/sweep/applySweep instead so a stalled sweep can be
 // abandoned; this synchronous form is the seam tests use to drive the worker
 // against fixture connections.
-func (s *SingletonWorker) doWork(conn *libvirt.Connect) error {
+func (s *Inventory) doWork(conn *libvirt.Connect) error {
 	if conn == nil {
 		return fmt.Errorf("libvirt connection is nil")
 	}
@@ -456,7 +456,7 @@ func (s *SingletonWorker) doWork(conn *libvirt.Connect) error {
 // retain. It mutates no worker state: abandoned sweeps may still be running
 // one of these concurrently with the current one, so installing the results
 // is the caller's decision (applySweep for the worker, doWork for tests).
-func (s *SingletonWorker) collectInventory(conn *libvirt.Connect) (
+func (s *Inventory) collectInventory(conn *libvirt.Connect) (
 	[]VMInfo,
 	map[string]domainMetadataSnapshot,
 	map[string]domainDiskSnapshot,

@@ -11,7 +11,7 @@ import (
 )
 
 func TestStaticFilesDisableCaching(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sessionManager, settings)
 
@@ -38,7 +38,7 @@ func TestStaticFilesDisableCaching(t *testing.T) {
 }
 
 func TestVendoredDashboardAssetsServed(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sessionManager, settings)
 
@@ -65,7 +65,7 @@ func TestVendoredDashboardAssetsServed(t *testing.T) {
 }
 
 func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sessionManager, settings)
 
@@ -87,7 +87,7 @@ func TestDashboardJavaScriptUsesPostLogout(t *testing.T) {
 }
 
 func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sessionManager, settings)
 
@@ -117,7 +117,7 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 }
 
 func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
-	router := NewHandler(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettingType(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -147,7 +147,7 @@ func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
 }
 
 func TestDashboardJavaScriptStreamsCreationProgress(t *testing.T) {
-	router := NewHandler(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.New(), config.NewSettingType(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

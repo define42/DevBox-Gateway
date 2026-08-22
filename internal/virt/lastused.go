@@ -158,10 +158,10 @@ func MarkVMUsed(name string) {
 
 // notifyVMLastUsedChanged nudges open dashboards to re-pull VM data so a
 // just-recorded touch (and its recomputed auto-shutdown countdown) is visible
-// immediately. peekInstance keeps this from starting the background worker as
+// immediately. peekInventory keeps this from starting the background worker as
 // a side effect; when the worker is not running there is nobody to notify.
 func notifyVMLastUsedChanged() {
-	if worker := peekInstance(); worker != nil {
+	if worker := peekInventory(); worker != nil {
 		worker.NotifyVMDataChanged()
 	}
 }

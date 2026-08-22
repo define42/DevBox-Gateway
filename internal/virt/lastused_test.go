@@ -112,7 +112,7 @@ func TestLoadVMLastUsedFromMetadataFailureModes(t *testing.T) {
 
 func TestVMsOverlaysRegistryLastUsed(t *testing.T) {
 	const name = "overlay-vm"
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{Name: name, Owner: "alice", LastUsed: "2026-08-15T12:00:00Z"}})
 	t.Cleanup(func() { vmLastUsed.remove(name) })
 
@@ -137,7 +137,7 @@ func TestVMsOverlaysRegistryLastUsed(t *testing.T) {
 }
 
 func TestNotifyVMDataChangedWakesSubscribers(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	updates, unsubscribe := worker.SubscribeVMChanges()
 	defer unsubscribe()
 

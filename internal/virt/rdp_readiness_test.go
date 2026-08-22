@@ -11,7 +11,7 @@ import (
 )
 
 func TestRefreshRDPReadinessProbesOnlyRequestedUsersRunningVMs(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "alice-desktop", Owner: "alice", State: "running", PrimaryIP: "192.168.122.10"},
 		{Name: "alice-stopped", Owner: "alice", State: "shut off", PrimaryIP: "192.168.122.11"},
@@ -50,7 +50,7 @@ func TestRefreshRDPReadinessProbesOnlyRequestedUsersRunningVMs(t *testing.T) {
 }
 
 func TestRefreshRDPReadinessDuplicatesWorkAcrossWebSockets(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{
 		Name:      "alice-desktop",
 		Owner:     "alice",
@@ -83,7 +83,7 @@ func TestRefreshRDPReadinessDuplicatesWorkAcrossWebSockets(t *testing.T) {
 }
 
 func TestOlderWebSocketObservationCannotOverwriteNewerResult(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{
 		Name:      "alice-desktop",
 		Owner:     "alice",
@@ -116,7 +116,7 @@ func TestOlderWebSocketObservationCannotOverwriteNewerResult(t *testing.T) {
 func TestRefreshRDPReadinessHasNoGlobalConcurrencyLimit(t *testing.T) {
 	const vmCount = 64
 
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	vms := make([]VMInfo, 0, vmCount)
 	for i := range vmCount {
 		vms = append(vms, VMInfo{
@@ -169,7 +169,7 @@ func TestRefreshRDPReadinessHasNoGlobalConcurrencyLimit(t *testing.T) {
 }
 
 func TestRDPReadinessSurvivesInventoryRefreshAndRejectsStaleResult(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	original := VMInfo{
 		Name:      "alice-desktop",
 		Owner:     "alice",
@@ -224,7 +224,7 @@ func TestRDPReadinessSurvivesInventoryRefreshAndRejectsStaleResult(t *testing.T)
 }
 
 func TestRefreshRDPReadinessCancellationStopsBlockedProbes(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	vms := make([]VMInfo, 0, 8)
 	for i := range 8 {
 		vms = append(vms, VMInfo{

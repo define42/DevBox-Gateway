@@ -126,7 +126,7 @@ func TestViocovListVMsAndDoWorkErrors(t *testing.T) {
 	if _, err := ListVMs("", &libvirt.Connect{}); err == nil {
 		t.Fatal("expected ListVMs error for an invalid connection")
 	}
-	worker := &SingletonWorker{metadataByUUID: map[string]domainMetadataSnapshot{
+	worker := &Inventory{metadataByUUID: map[string]domainMetadataSnapshot{
 		"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
 	}, diskByUUID: map[string]domainDiskSnapshot{
 		"cached-domain": {UsedGB: 1, TotalGB: 2},
@@ -276,7 +276,7 @@ func TestViocovWorkerDiskCacheUsesUUIDLifetimeSnapshot(t *testing.T) {
 type viocovWorkerDiskCacheFixture struct {
 	t        *testing.T
 	conn     *libvirt.Connect
-	worker   *SingletonWorker
+	worker   *Inventory
 	name     string
 	diskPath string
 }
@@ -301,7 +301,7 @@ func newViocovWorkerDiskCacheFixture(
 	fixture := &viocovWorkerDiskCacheFixture{
 		t:        t,
 		conn:     conn,
-		worker:   &SingletonWorker{},
+		worker:   &Inventory{},
 		name:     name,
 		diskPath: diskPath,
 	}
@@ -452,7 +452,7 @@ func TestViocovWorkerRunRefreshesCache(t *testing.T) {
 	viocovDefineDomain(t, conn, name, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &SingletonWorker{ticker: time.NewTicker(25 * time.Millisecond), ctx: ctx, cancel: cancel}
+	worker := &Inventory{ticker: time.NewTicker(25 * time.Millisecond), ctx: ctx, cancel: cancel}
 
 	done := make(chan struct{})
 	go func() {
@@ -476,7 +476,7 @@ func TestViocovWorkerRunSurvivesConnectFailure(t *testing.T) {
 	t.Setenv(libvirtURIEnv, viocovBadLibvirtURI)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &SingletonWorker{
+	worker := &Inventory{
 		ticker: time.NewTicker(20 * time.Millisecond),
 		ctx:    ctx,
 		cancel: cancel,

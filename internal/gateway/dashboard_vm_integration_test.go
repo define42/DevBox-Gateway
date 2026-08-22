@@ -62,7 +62,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 	username := "dashuser" + strconv.FormatInt(suffix, 10)
 	vmShortName := "dashvm" + strconv.FormatInt(suffix, 10)
 
-	user, err := identity.NewUser(username)
+	user, err := identity.New(username)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -119,7 +119,7 @@ func assertRDPFileContent(t *testing.T, content, wantConnectHost, username strin
 }
 
 func TestListDashboardVMs(t *testing.T) {
-	virt.GetInstance()
+	virt.NewInventory()
 
 	settings := newDashboardVMSettings(t)
 	username, vmName := createDashboardVM(t, settings)

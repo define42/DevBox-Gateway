@@ -114,7 +114,7 @@ func TestSetInventoryHostIdentityPreservesCachesForSameHost(t *testing.T) {
 		URI:      "qemu:///system",
 		HostUUID: "7b55704c-29f4-11b2-a85c-9dc6ff50623f",
 	}
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 
 	if previous, changed := worker.setInventoryHostIdentity(identity); changed || previous != (inventoryHostIdentity{}) {
 		t.Fatalf("initial identity = (%+v, %v), want empty previous without change", previous, changed)
@@ -189,8 +189,8 @@ func TestSetInventoryHostIdentityClearsCachesOnlyForConfirmedChange(t *testing.T
 	}
 }
 
-func workerWithInventorySnapshots() *SingletonWorker {
-	return &SingletonWorker{
+func workerWithInventorySnapshots() *Inventory {
+	return &Inventory{
 		metadataByUUID: map[string]domainMetadataSnapshot{
 			"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
 		},
@@ -200,7 +200,7 @@ func workerWithInventorySnapshots() *SingletonWorker {
 	}
 }
 
-func assertWorkerInventorySnapshotsPresent(t *testing.T, worker *SingletonWorker) {
+func assertWorkerInventorySnapshotsPresent(t *testing.T, worker *Inventory) {
 	t.Helper()
 	if len(worker.metadataByUUID) != 1 {
 		t.Fatalf("metadata cache was cleared: %+v", worker.metadataByUUID)

@@ -254,7 +254,7 @@ func TestInitVirtRequiresBaseImage(t *testing.T) {
 
 func TestSingletonWorkerStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	worker := &SingletonWorker{
+	worker := &Inventory{
 		ticker: time.NewTicker(time.Hour),
 		ctx:    ctx,
 		cancel: cancel,

@@ -160,7 +160,7 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.SettingsType, log
 // validated against LDAP.
 func authenticateLogin(username, password string, settings *config.SettingsType) (*identity.User, error) {
 	if localauth.Validate(username, password, settings) {
-		return identity.NewUser(username)
+		return identity.New(username)
 	}
 	if !ldap.Configured(settings) {
 		// Local-users-only mode: no directory to fall back to.

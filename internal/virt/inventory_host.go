@@ -86,7 +86,7 @@ func loadInventoryHostIdentity(
 // from. UUID-keyed domain snapshots are valid only for the host from which
 // they were read, so a positively identified host change is the one boundary
 // that invalidates both caches (and the visible VM snapshot with them).
-func (s *SingletonWorker) setInventoryHostIdentity(identity inventoryHostIdentity) (
+func (s *Inventory) setInventoryHostIdentity(identity inventoryHostIdentity) (
 	previous inventoryHostIdentity,
 	invalidated bool,
 ) {

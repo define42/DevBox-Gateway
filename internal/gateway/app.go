@@ -95,7 +95,7 @@ func (g *gatewayRuntime) Close() error {
 }
 
 func bootGateway() (*gatewayRuntime, error) {
-	vmInventory := virt.GetInstance()
+	vmInventory := virt.NewInventory()
 
 	rdp.InitLogging()
 
@@ -104,7 +104,7 @@ func bootGateway() (*gatewayRuntime, error) {
 		return nil, err
 	}
 
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	sessionManager.SetUserConnectionLimit(settings.GetInt(config.MAX_CONNECTIONS_PER_USER))
 
 	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.

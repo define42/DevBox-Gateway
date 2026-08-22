@@ -147,7 +147,7 @@ func rdpConnectHost(settings *config.SettingsType, vmName string) string {
 // resolved from the requesting user's own VM list so callers cannot mint a file
 // for a VM the user does not own. ok is false when the VM is not in that list.
 func RDPFileForUser(settings *config.SettingsType, user, vmName string) (filename string, content []byte, ok bool) {
-	for _, vm := range virt.GetInstance().VMs(user) {
+	for _, vm := range virt.NewInventory().VMs(user) {
 		if vm.Name != vmName {
 			continue
 		}
@@ -181,7 +181,7 @@ func WriteRDPFile(w http.ResponseWriter, settings *config.SettingsType, user, vm
 
 // ListDashboardVMs returns VM rows visible to the given user.
 func ListDashboardVMs(user string) ([]VM, error) {
-	vmList := virt.GetInstance().VMs(user)
+	vmList := virt.NewInventory().VMs(user)
 	return buildDashboardRows(vmList, user), nil
 }
 

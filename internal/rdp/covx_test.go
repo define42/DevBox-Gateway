@@ -296,7 +296,7 @@ func TestCovxAuthorizeRDPAccessOwnerLookupError(t *testing.T) {
 	t.Setenv("LIBVIRT_URI", "qemu+unix:///system?socket=/nonexistent/covx-libvirt.sock")
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
-	if _, ok := authorizeRDPAccess(addr, session.NewManager(), "covx.example.test", "covxvm"); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), "covx.example.test", "covxvm"); ok {
 		t.Fatal("expected denial when the owner lookup errors")
 	}
 }
@@ -305,7 +305,7 @@ func TestCovxAuthorizeRDPAccessMissingOwner(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
 	// An empty hostname resolves to "no owner" without a libvirt round trip.
-	if _, ok := authorizeRDPAccess(addr, session.NewManager(), "covx.example.test", ""); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), "covx.example.test", ""); ok {
 		t.Fatal("expected denial for a VM without owner metadata")
 	}
 }
@@ -314,7 +314,7 @@ func TestCovxAuthorizeRDPAccessInvalidClientAddr(t *testing.T) {
 	name := covxUniqueName("addr")
 	covxDefineOwnedDomain(t, name)
 
-	if _, ok := authorizeRDPAccess(covxAddr{}, session.NewManager(), name+".example.test", name); ok {
+	if _, ok := authorizeRDPAccess(covxAddr{}, session.New(), name+".example.test", name); ok {
 		t.Fatal("expected denial for an unparseable client address")
 	}
 }
@@ -325,7 +325,7 @@ func TestCovxAuthorizeRDPAccessWithoutGrant(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(192, 0, 2, 90), Port: 42424}
 
 	// Owner and client IP resolve fine, but no Connect grant was recorded.
-	if _, ok := authorizeRDPAccess(addr, session.NewManager(), name+".example.test", name); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), name+".example.test", name); ok {
 		t.Fatal("expected denial without an unused Connect authorization")
 	}
 }
@@ -384,7 +384,7 @@ func TestCovxHandleRDPDeniesWhenVMHasNoOwner(t *testing.T) {
 	stubVMIPs(t, map[string]string{name: "127.0.0.71"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 
-	client, done := startHandleRDPTestConnection(t, frontTLS, session.NewManager(), settings, "192.0.2.180")
+	client, done := startHandleRDPTestConnection(t, frontTLS, session.New(), settings, "192.0.2.180")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -399,7 +399,7 @@ func TestCovxHandleRDPNoRouteForVM(t *testing.T) {
 	stubVMIPs(t, map[string]string{name: ""})
 	covxDefineOwnedDomain(t, name)
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.181:5000", name)
 
 	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.181")
@@ -418,7 +418,7 @@ func TestCovxHandleRDPBackendDialRefused(t *testing.T) {
 	covxDefineOwnedDomain(t, name)
 	t.Setenv(config.TIMEOUT, "2s")
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.182:5000", name)
 
 	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182")
@@ -442,7 +442,7 @@ func TestCovxHandleRDPRevocationClosesActiveProxy(t *testing.T) {
 	defer stopBackend()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.185:5000", name)
 
 	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185")

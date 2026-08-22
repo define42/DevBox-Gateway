@@ -35,9 +35,9 @@ type gatewayTestServer struct {
 func startGatewayTestServer(t *testing.T, settings *config.SettingsType) gatewayTestServer {
 	t.Helper()
 
-	vmInventory := virt.GetInstance()
+	vmInventory := virt.NewInventory()
 
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	mux := NewHandler(sessionManager, settings)
 	frontTLS, err := cert.NewTLSManager(settings, vmInventory.VMNames)
 	if err != nil {

@@ -298,7 +298,7 @@ func TestBridgeDashboardSocketClosesOnUserRevocation(t *testing.T) {
 		close(done)
 	}()
 
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	unregister, _ := sessionManager.RegisterUserConnection("alice", func() {
 		_ = serverWS.Close()
 		_ = backendConn.Close()

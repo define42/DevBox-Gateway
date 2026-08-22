@@ -62,11 +62,11 @@ func reserveUserVMSlot(conn *libvirt.Connect, settings *config.SettingsType, own
 }
 
 // cachedVMCountForQuota returns the worker's cached per-owner VM count. It
-// deliberately peeks at the singleton instead of starting it: when the worker
-// is not running (or its snapshot is stale) the second result is false and the
-// quota check counts live libvirt state instead.
+// deliberately peeks at the process-wide inventory instead of starting it:
+// when the worker is not running (or its snapshot is stale) the second result
+// is false and the quota check counts live libvirt state instead.
 func cachedVMCountForQuota(owner string) (int, bool) {
-	worker := peekInstance()
+	worker := peekInventory()
 	if worker == nil {
 		return 0, false
 	}

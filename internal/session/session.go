@@ -84,8 +84,8 @@ func (m *Manager) SetUserConnectionLimit(limit int) {
 	m.connectionsMu.Unlock()
 }
 
-// NewManager constructs the gateway session manager.
-func NewManager() *Manager {
+// New constructs the gateway session manager.
+func New() *Manager {
 	registerSessionTypes()
 	return &Manager{
 		SessionManager:  newSessionManager(),

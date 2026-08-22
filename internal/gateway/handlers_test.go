@@ -32,7 +32,7 @@ func issueSessionCookieFromIP(t *testing.T, sessionManager *session.Manager, use
 func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, username, remoteAddr, loginPasswordHash string) *http.Cookie {
 	t.Helper()
 
-	user, err := identity.NewUser(username)
+	user, err := identity.New(username)
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -62,8 +62,8 @@ func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, u
 }
 
 func TestCompleteLoginRecordsLoginIP(t *testing.T) {
-	sessionManager := session.NewManager()
-	user, err := identity.NewUser("alice")
+	sessionManager := session.New()
+	user, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

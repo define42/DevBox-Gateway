@@ -146,7 +146,7 @@ func TestViocovWorkerMetadataCacheLifecycle(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	name := viocovUniqueName("worker-meta-cache")
 	createdAt := "2026-08-15T12:00:00Z"
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 
 	first, firstUUID := viocovCreatePartialMetadataDomain(t, conn, worker, name)
 	viocovCompleteMetadataCacheEntry(t, conn, worker, first, firstUUID, createdAt)
@@ -160,7 +160,7 @@ func TestViocovWorkerMetadataCacheLifecycle(t *testing.T) {
 func viocovCreatePartialMetadataDomain(
 	t *testing.T,
 	conn *libvirt.Connect,
-	worker *SingletonWorker,
+	worker *Inventory,
 	name string,
 ) (*libvirt.Domain, string) {
 	t.Helper()
@@ -184,7 +184,7 @@ func viocovCreatePartialMetadataDomain(
 func viocovCompleteMetadataCacheEntry(
 	t *testing.T,
 	conn *libvirt.Connect,
-	worker *SingletonWorker,
+	worker *Inventory,
 	domain *libvirt.Domain,
 	domainUUID string,
 	createdAt string,
@@ -211,7 +211,7 @@ func viocovCompleteMetadataCacheEntry(
 func viocovReplaceMetadataDomain(
 	t *testing.T,
 	conn *libvirt.Connect,
-	worker *SingletonWorker,
+	worker *Inventory,
 	first *libvirt.Domain,
 	firstUUID string,
 	name string,
@@ -243,7 +243,7 @@ func viocovReplaceMetadataDomain(
 
 func viocovAssertMetadataReplacement(
 	t *testing.T,
-	worker *SingletonWorker,
+	worker *Inventory,
 	name string,
 	firstUUID string,
 	secondUUID string,
@@ -263,7 +263,7 @@ func viocovAssertMetadataReplacement(
 func viocovAssertMetadataSnapshotIsImmutable(
 	t *testing.T,
 	conn *libvirt.Connect,
-	worker *SingletonWorker,
+	worker *Inventory,
 	domain *libvirt.Domain,
 	name string,
 ) {
@@ -289,7 +289,7 @@ func viocovAssertMetadataSnapshotIsImmutable(
 func viocovRemoveMetadataDomain(
 	t *testing.T,
 	conn *libvirt.Connect,
-	worker *SingletonWorker,
+	worker *Inventory,
 	domain *libvirt.Domain,
 	domainUUID string,
 ) {
@@ -306,7 +306,7 @@ func viocovRemoveMetadataDomain(
 }
 
 func viocovWorkerCachedMetadata(
-	worker *SingletonWorker,
+	worker *Inventory,
 	domainUUID string,
 ) (domainMetadataSnapshot, bool) {
 	worker.inventoryCacheMu.Lock()

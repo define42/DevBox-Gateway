@@ -33,11 +33,11 @@ type rdpReadinessResult struct {
 // WebSocket publishers call this synchronously, so each connection owns its
 // polling lifecycle and cancellation. All of that user's probes start together;
 // there is deliberately no process-wide concurrency limit.
-func (s *SingletonWorker) RefreshRDPReadiness(ctx context.Context, username string) {
+func (s *Inventory) RefreshRDPReadiness(ctx context.Context, username string) {
 	s.refreshRDPReadiness(ctx, username, probeRDPAddress)
 }
 
-func (s *SingletonWorker) refreshRDPReadiness(
+func (s *Inventory) refreshRDPReadiness(
 	ctx context.Context,
 	username string,
 	probe rdpReadinessProbe,
@@ -58,7 +58,7 @@ func (s *SingletonWorker) refreshRDPReadiness(
 	s.applyRDPReadinessResults(results)
 }
 
-func (s *SingletonWorker) probeRDPJobs(
+func (s *Inventory) probeRDPJobs(
 	ctx context.Context,
 	jobs []rdpReadinessJob,
 	probe rdpReadinessProbe,
@@ -111,7 +111,7 @@ func tcpEndpointReadyContext(ctx context.Context, address string, timeout time.D
 	return true
 }
 
-func (s *SingletonWorker) rdpReadinessJobs(username string) []rdpReadinessJob {
+func (s *Inventory) rdpReadinessJobs(username string) []rdpReadinessJob {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -139,7 +139,7 @@ func isRDPReadinessTarget(vm VMInfo) bool {
 	return vm.State == "running" && vm.PrimaryIP != "" && vm.Owner != ""
 }
 
-func (s *SingletonWorker) applyRDPReadinessResults(results []rdpReadinessResult) {
+func (s *Inventory) applyRDPReadinessResults(results []rdpReadinessResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -191,7 +191,7 @@ func rdpResultMatchesTarget(vm *VMInfo, result *rdpReadinessResult) bool {
 // snapshot: an entry whose probe target is unchanged keeps its readiness and
 // generation, while a new or changed entry gets a new generation so stale probe
 // results can never be applied to it. Callers must hold s.mu.
-func (s *SingletonWorker) mergeRDPReadinessLocked(next []VMInfo) {
+func (s *Inventory) mergeRDPReadinessLocked(next []VMInfo) {
 	previous := make(map[string]VMInfo, len(s.vms))
 	for _, vm := range s.vms {
 		previous[vm.Name] = vm

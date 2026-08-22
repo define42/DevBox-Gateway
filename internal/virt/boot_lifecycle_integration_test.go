@@ -89,7 +89,7 @@ func stageBootBaseImage(t *testing.T, sourcePath, targetPath string) {
 func newBootTestUser(t *testing.T, prefix string) *identity.User {
 	t.Helper()
 
-	user, err := identity.NewUser(prefix + time.Now().Format("150405"))
+	user, err := identity.New(prefix + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)
 
-	user, err := identity.NewUser("meta-" + time.Now().Format("150405"))
+	user, err := identity.New("meta-" + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

@@ -158,12 +158,12 @@ func StartAutoShutdownWorker(settings *config.SettingsType) (stop func()) {
 		idleAfter:   idleAfter,
 		gracePeriod: autoShutdownGracePeriod,
 		now:         time.Now,
-		// peekInstance, not GetInstance: consulting the cache must never start
+		// peekInventory, not NewInventory: consulting the cache must never start
 		// the background worker as a side effect. In production the worker is
 		// started before settings are even loaded (bootGateway), so ticks
 		// always see it running.
 		listVMs: func() []VMInfo {
-			worker := peekInstance()
+			worker := peekInventory()
 			if worker == nil {
 				return nil
 			}

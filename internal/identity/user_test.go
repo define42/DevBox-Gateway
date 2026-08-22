@@ -5,7 +5,7 @@ import (
 )
 
 func TestNewUser(t *testing.T) {
-	user, err := NewUser("alice")
+	user, err := New("alice")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

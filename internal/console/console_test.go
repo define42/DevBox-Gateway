@@ -14,7 +14,7 @@ import (
 )
 
 func TestDashboardConsoleRouteRejectsUnauthorizedRequests(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 
 	router := chi.NewRouter()
 	router.Use(sessionManager.LoadAndSave)
@@ -34,7 +34,7 @@ func TestDashboardConsoleRouteRejectsUnauthorizedRequests(t *testing.T) {
 }
 
 func TestDashboardVNCRouteRejectsUnauthorizedRequests(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 
 	router := chi.NewRouter()
 	router.Use(sessionManager.LoadAndSave)

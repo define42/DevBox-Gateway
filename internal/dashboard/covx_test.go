@@ -118,7 +118,7 @@ func covxWaitForVM(t *testing.T, owner string) {
 	t.Helper()
 
 	deadline := time.Now().Add(20 * time.Second)
-	for len(virt.GetInstance().VMs(owner)) == 0 {
+	for len(virt.NewInventory().VMs(owner)) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for a VM owned by %q in the cache", owner)
 		}

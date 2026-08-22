@@ -276,7 +276,7 @@ func TestMcovServeListenerStopsOnPermanentAcceptError(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, session.NewManager(), settings)
+		errCh <- serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, session.New(), settings)
 	}()
 
 	select {
@@ -341,7 +341,7 @@ func TestMcovHandleSharedConnDebugLogging(t *testing.T) {
 
 			done := make(chan struct{})
 			go func() {
-				handleSharedConn(server, frontTLS, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), session.NewManager(), settings)
+				handleSharedConn(server, frontTLS, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), session.New(), settings)
 				close(done)
 			}()
 

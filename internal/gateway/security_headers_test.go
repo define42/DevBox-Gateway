@@ -10,7 +10,7 @@ import (
 )
 
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	settings := config.NewSettingType(false)
 	router := NewHandler(sessionManager, settings)
 

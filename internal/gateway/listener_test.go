@@ -120,7 +120,7 @@ func TestServeListenerReturnsWhenClosed(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), frontTLS, sessionManager, settings)
 		close(done)
@@ -163,7 +163,7 @@ func TestServeListenerRetriesTimeoutAccept(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		serveListener(tcpLn, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), frontTLS, sessionManager, settings)
 		close(done)
@@ -217,7 +217,7 @@ func TestServeListenerSurvivesTemporaryAcceptError(t *testing.T) {
 	ln := &flakyAcceptListener{failures: 3}
 
 	errCh := make(chan error, 1)
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		errCh <- serveListener(ln, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil, sessionManager, settings)
 	}()
@@ -251,7 +251,7 @@ func TestHandleSharedConnRoutesNonTLS(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		handleSharedConn(server, frontTLS, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Error("HTTPS handler should not be called for non-TLS payload")
@@ -286,7 +286,7 @@ func TestHandleSharedConnPeekFailure(t *testing.T) {
 	client, server := net.Pipe()
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		handleSharedConn(server, frontTLS, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Error("HTTPS handler should not be called when no bytes are available")
@@ -311,7 +311,7 @@ func TestHandleSharedConnSetupDeadlineClosesIdleClient(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		handleSharedConn(server, nil, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Error("HTTPS handler should not be called for an idle client")
@@ -377,7 +377,7 @@ func TestHandleSharedConnRoutesTLS(t *testing.T) {
 	defer func() { _ = server.Close() }()
 
 	done := make(chan struct{})
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	go func() {
 		handleSharedConn(server, frontTLS, handler, sessionManager, settings)
 		close(done)

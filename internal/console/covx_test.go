@@ -39,7 +39,7 @@ func covxSessionCookieWithDeadline(
 ) *http.Cookie {
 	t.Helper()
 
-	user, err := identity.NewUser(username)
+	user, err := identity.New(username)
 	if err != nil {
 		t.Fatalf("new user %q: %v", username, err)
 	}
@@ -161,7 +161,7 @@ func covxAwaitWebsocketClosed(t *testing.T, conn *websocket.Conn) {
 }
 
 func TestCovxDashboardWSRejectsUnauthenticated(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 
 	status, body := covxGetStatus(t, server, "/api/dashboard/ws", nil)
@@ -174,7 +174,7 @@ func TestCovxDashboardWSRejectsUnauthenticated(t *testing.T) {
 }
 
 func TestCovxDashboardWSUpgradeFailure(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -192,7 +192,7 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	SetDebugLogging(true)
 	t.Cleanup(func() { SetDebugLogging(false) })
 
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -211,7 +211,7 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 }
 
 func TestCovxDashboardWSClosedOnUserRevocation(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -224,7 +224,7 @@ func TestCovxDashboardWSClosedOnUserRevocation(t *testing.T) {
 }
 
 func TestCovxDashboardWSClosesAtSessionDeadline(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookieWithDeadline(
 		t,
@@ -477,7 +477,7 @@ func TestCovxCopyWebsocketToSocketWriteError(t *testing.T) {
 }
 
 func TestCovxDashboardHandlersRejectInvalidVMName(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
@@ -493,7 +493,7 @@ func TestCovxDashboardHandlersRejectInvalidVMName(t *testing.T) {
 // the per-user connection limit has the connection over the limit refused with
 // a policy-violation close frame instead of being registered.
 func TestCovxDashboardWSEnforcesPerUserConnectionLimit(t *testing.T) {
-	manager := session.NewManager()
+	manager := session.New()
 	manager.SetUserConnectionLimit(1)
 	server := covxDashboardServer(t, manager)
 	cookie := covxSessionCookie(t, manager, "covxconnlimit")

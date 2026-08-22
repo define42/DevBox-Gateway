@@ -54,7 +54,7 @@ func (s covxDeleteFailingStore) Delete(string) error { return s.deleteErr }
 
 func covxUser(t *testing.T, name string) *identity.User {
 	t.Helper()
-	user, err := identity.NewUser(name)
+	user, err := identity.New(name)
 	if err != nil {
 		t.Fatalf("new user %q: %v", name, err)
 	}
@@ -62,7 +62,7 @@ func covxUser(t *testing.T, name string) *identity.User {
 }
 
 func TestCovxStoreNotIterable(t *testing.T) {
-	m := NewManager()
+	m := New()
 	m.Store = covxPlainStore{}
 
 	if got := m.allSessions(); got != nil {
@@ -78,7 +78,7 @@ func TestCovxStoreNotIterable(t *testing.T) {
 
 func TestCovxStoreIterationError(t *testing.T) {
 	allErr := errors.New("iteration failed")
-	m := NewManager()
+	m := New()
 	m.Store = &covxIterableStore{allErr: allErr}
 
 	if got := m.allSessions(); got != nil {
@@ -93,7 +93,7 @@ func TestCovxStoreIterationError(t *testing.T) {
 }
 
 func TestCovxStoreSkipsUndecodableSessions(t *testing.T) {
-	m := NewManager()
+	m := New()
 	if err := m.Store.Commit("covx-bad", []byte("not-a-gob-session"), time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("commit garbage session: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestCovxStoreSkipsUndecodableSessions(t *testing.T) {
 }
 
 func TestCovxDestroyAllSessionsForUserDeleteError(t *testing.T) {
-	m := NewManager()
+	m := New()
 	deleteErr := errors.New("delete refused")
 
 	deadline := time.Now().Add(time.Hour)
@@ -129,7 +129,7 @@ func TestCovxDestroyAllSessionsForUserDeleteError(t *testing.T) {
 }
 
 func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
-	m := NewManager()
+	m := New()
 	now := time.Now()
 
 	if m.consumeStoredGrant("tok", []byte("not-a-gob-session"), "alice", "192.0.2.1", "vm1", now) {
@@ -149,7 +149,7 @@ func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
 }
 
 func TestCovxUserHasActiveSessionFromIPSkipsUserlessSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	deadline := time.Now().Add(time.Hour)
 	userless, err := m.Codec.Encode(deadline, map[string]interface{}{
@@ -168,7 +168,7 @@ func TestCovxUserHasActiveSessionFromIPSkipsUserlessSession(t *testing.T) {
 }
 
 func TestCovxGrantRDPConnectPrunesExpiredGrants(t *testing.T) {
-	m := NewManager()
+	m := New()
 	user := covxUser(t, "nora")
 	cookie := issueSession(t, m, user, covxRemoteAddr)
 
@@ -212,7 +212,7 @@ func TestCovxRegisterUserConnectionInitializesNilMap(t *testing.T) {
 }
 
 func TestCovxUserFromContextContextKeyFallback(t *testing.T) {
-	m := NewManager()
+	m := New()
 	user := covxUser(t, "mona")
 
 	withLoadedSession(t, m, covxRemoteAddr, nil, func(r *http.Request) {
@@ -225,7 +225,7 @@ func TestCovxUserFromContextContextKeyFallback(t *testing.T) {
 }
 
 func TestCovxPasswordHashFromContextContextKeyFallback(t *testing.T) {
-	m := NewManager()
+	m := New()
 	user := covxUser(t, "nora")
 
 	withLoadedSession(t, m, covxRemoteAddr, nil, func(r *http.Request) {
@@ -243,7 +243,7 @@ func TestCovxPasswordHashFromContextContextKeyFallback(t *testing.T) {
 }
 
 func TestCovxCreateSessionRenewTokenError(t *testing.T) {
-	m := NewManager()
+	m := New()
 	user := covxUser(t, "lena")
 	cookie := issueSession(t, m, user, covxRemoteAddr)
 	m.Store = covxDeleteFailingStore{Store: m.Store, deleteErr: errors.New("delete refused")}
@@ -258,7 +258,7 @@ func TestCovxCreateSessionRenewTokenError(t *testing.T) {
 }
 
 func TestCovxEnforceClientIPDestroyFailureStillServes(t *testing.T) {
-	m := NewManager()
+	m := New()
 	user := covxUser(t, "kate")
 	cookie := issueSession(t, m, user, "192.0.2.60:5000")
 	m.Store = covxDeleteFailingStore{Store: m.Store, deleteErr: errors.New("delete refused")}

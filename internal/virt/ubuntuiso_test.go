@@ -140,7 +140,7 @@ func TestPowerLifecycle(t *testing.T) {
 	}
 	stageExistingBaseImageFromDefaultRoot(t, settings)
 
-	user, err := identity.NewUser("poweruser" + time.Now().Format("150405"))
+	user, err := identity.New("poweruser" + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

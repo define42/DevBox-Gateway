@@ -84,7 +84,7 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 		return nil, fmt.Errorf("user %s is not a member of any required group", mail)
 	}
 
-	return identity.NewUser(username)
+	return identity.New(username)
 }
 
 // requiredGroups parses LDAP_REQUIRED_GROUPS into a list of group DNs or bare

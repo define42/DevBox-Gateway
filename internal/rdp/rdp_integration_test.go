@@ -54,7 +54,7 @@ func newServerConnWithRemoteIP(conn net.Conn, remoteIP string) net.Conn {
 func issueUserSession(t *testing.T, sessionManager *session.Manager, username, remoteAddr string, grantVMs ...string) {
 	t.Helper()
 
-	user, err := identity.NewUser(username)
+	user, err := identity.New(username)
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestHandleRDPSuccessfulProxy(t *testing.T) {
 	defer stopBackend()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.100:5000", "vm1")
 
 	client, done := startHandleRDPTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100")
@@ -490,7 +490,7 @@ func TestHandleRDPRejectsMissingRoute(t *testing.T) {
 	stubVMIPs(t, map[string]string{})
 	defineOwnedRDPTestDomains(t, map[string]string{"missing": "alice"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.101:5000", "missing")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -518,7 +518,7 @@ func TestHandleRDPBackendDialFailure(t *testing.T) {
 	stubVMIPs(t, map[string]string{"vmdial": "127.0.0.43"})
 	defineOwnedRDPTestDomains(t, map[string]string{"vmdial": "alice"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.102:5000", "vmdial")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -559,7 +559,7 @@ func TestHandleRDPRejectsBackendWithoutTLS(t *testing.T) {
 	defer stopBackend()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.103:5000", "vmbad")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -596,7 +596,7 @@ func TestHandleRDPRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 	}()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -631,7 +631,7 @@ func TestHandleRDPRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 	}()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.200:5000")
 
 	client, server := net.Pipe()
@@ -667,7 +667,7 @@ func TestHandleRDPRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 	}()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "bob", "192.0.2.106:5000")
 
 	client, server := net.Pipe()
@@ -703,7 +703,7 @@ func TestHandleRDPRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 	}()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	// An active dashboard session from the connecting IP, but the user never
 	// clicked Connect for this VM, so there is no RDP grant.
 	issueUserSession(t, sessionManager, "alice", "192.0.2.108:5000")
@@ -741,7 +741,7 @@ func TestHandleRDPAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	defer stopBackend()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
-	sessionManager := session.NewManager()
+	sessionManager := session.New()
 	// One session without a grant, and the connecting session (.107) with an
 	// explicit grant for the VM: the grant on the matching IP is what authorizes.
 	issueUserSession(t, sessionManager, "alice", "192.0.2.201:5000")

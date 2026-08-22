@@ -13,7 +13,7 @@ import (
 )
 
 func TestSingletonWorkerDoWorkNilConn(t *testing.T) {
-	worker := &SingletonWorker{metadataByUUID: map[string]domainMetadataSnapshot{
+	worker := &Inventory{metadataByUUID: map[string]domainMetadataSnapshot{
 		"cached-domain": {CreatedAt: "2026-08-15T12:00:00Z"},
 	}, diskByUUID: map[string]domainDiskSnapshot{
 		"cached-domain": {UsedGB: 1, TotalGB: 2},
@@ -32,7 +32,7 @@ func TestSingletonWorkerDoWorkNilConn(t *testing.T) {
 func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 
 	const loops = 500
 	var wg sync.WaitGroup
@@ -69,7 +69,7 @@ func TestSingletonWorkerCacheConcurrentAccess(t *testing.T) {
 }
 
 func TestSubscribeVMChangesNotifiesOnlyForChangedSnapshots(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	updates, unsubscribe := worker.SubscribeVMChanges()
 	defer unsubscribe()
 
@@ -106,7 +106,7 @@ func TestSubscribeVMChangesNotifiesOnlyForChangedSnapshots(t *testing.T) {
 }
 
 func TestSubscribeVMChangesCoalescesAndUnsubscribes(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	updates, unsubscribe := worker.SubscribeVMChanges()
 
 	worker.setVMs([]VMInfo{{Name: "vm-1"}})
@@ -184,7 +184,7 @@ func TestTCPEndpointNotReady(t *testing.T) {
 }
 
 func TestVMsFiltersByUser(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "alice-desktop", Owner: "alice", PrimaryIP: "10.0.0.1"},
 		{Name: "alice-dev", Owner: "alice", PrimaryIP: "10.0.0.2"},
@@ -208,7 +208,7 @@ func TestVMsFiltersByUser(t *testing.T) {
 }
 
 func TestVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "legacy-vm"},
 		{Name: "alice-desktop", Owner: "alice"},
@@ -224,7 +224,7 @@ func TestVMsSkipsOwnerlessVMsWhenFiltering(t *testing.T) {
 }
 
 func TestVMNames(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "vm-a"},
 		{Name: "vm-b"},
@@ -238,7 +238,7 @@ func TestVMNames(t *testing.T) {
 }
 
 func TestVMIP(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "my-vm", PrimaryIP: "192.168.1.100"},
 	})
@@ -259,7 +259,7 @@ func TestVMIP(t *testing.T) {
 
 func TestResolveVMNameByLabel(t *testing.T) {
 	secret := []byte("routing-secret")
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "alice-desktop", PrimaryIP: "192.168.1.10"},
 		{Name: "bob-devbox", PrimaryIP: "192.168.1.11"},
@@ -284,7 +284,7 @@ func TestResolveVMNameByLabel(t *testing.T) {
 }
 
 func TestCountVMsOwnedByRequiresFreshSweep(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{
 		{Name: "alice-desktop", Owner: "alice"},
 		{Name: "alice-dev", Owner: "alice"},
@@ -316,7 +316,7 @@ func TestCountVMsOwnedByRequiresFreshSweep(t *testing.T) {
 }
 
 func TestInvalidateVMSnapshotStopsQuotaCounting(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{Name: "alice-desktop", Owner: "alice"}})
 	worker.markVMSnapshotSwept()
 	if count, ok := worker.CountVMsOwnedBy("alice"); !ok || count != 1 {
@@ -334,7 +334,7 @@ func TestInvalidateVMSnapshotStopsQuotaCounting(t *testing.T) {
 }
 
 func TestSetVMsNil(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{Name: "test"}})
 	worker.setVMs(nil)
 
@@ -345,7 +345,7 @@ func TestSetVMsNil(t *testing.T) {
 }
 
 func TestSetVMsEmpty(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 	worker.setVMs([]VMInfo{{Name: "test"}})
 	worker.setVMs([]VMInfo{})
 
@@ -356,7 +356,7 @@ func TestSetVMsEmpty(t *testing.T) {
 }
 
 func TestSnapshotVMsEmpty(t *testing.T) {
-	worker := &SingletonWorker{}
+	worker := &Inventory{}
 
 	snapshot := worker.snapshotVMs()
 	if snapshot != nil {

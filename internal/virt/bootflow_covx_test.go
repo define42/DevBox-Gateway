@@ -15,7 +15,7 @@ import (
 func vbtcovNewUser(t *testing.T, name string) *identity.User {
 	t.Helper()
 
-	user, err := identity.NewUser(name)
+	user, err := identity.New(name)
 	if err != nil {
 		t.Fatalf("new user %s: %v", name, err)
 	}

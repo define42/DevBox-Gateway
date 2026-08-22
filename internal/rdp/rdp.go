@@ -51,12 +51,12 @@ func debugf(format string, args ...any) {
 
 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 var vmIPAddressLookup = func(hostname string) (string, error) {
-	return virt.GetInstance().VMIP(hostname)
+	return virt.NewInventory().VMIP(hostname)
 }
 
 //nolint:gochecknoglobals // package-level singleton needed for one-time registration
 var vmNameByLabelLookup = func(secret []byte, label string) (string, bool) {
-	return virt.GetInstance().ResolveVMNameByLabel(secret, label)
+	return virt.NewInventory().ResolveVMNameByLabel(secret, label)
 }
 
 func getSubdomain(host, root string) (string, bool) {

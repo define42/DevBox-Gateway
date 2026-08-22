@@ -48,7 +48,7 @@ func issueSession(t *testing.T, m *Manager, user *identity.User, remoteAddr stri
 }
 
 func TestNewManager(t *testing.T) {
-	m := NewManager()
+	m := New()
 	if m == nil {
 		t.Fatal("expected non-nil Manager")
 		return
@@ -59,9 +59,9 @@ func TestNewManager(t *testing.T) {
 }
 
 func TestCreateAndGetSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("alice")
+	user, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestCreateAndGetSession(t *testing.T) {
 }
 
 func TestUserFromContextNil(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	//nolint:staticcheck // testing nil context behavior
 	u, ok := m.UserFromContext(nil)
@@ -108,7 +108,7 @@ func TestUserFromContextNil(t *testing.T) {
 }
 
 func TestUserFromContextNoSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -127,9 +127,9 @@ func TestUserFromContextNoSession(t *testing.T) {
 }
 
 func TestPasswordHashFromContext(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("alice")
+	user, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPasswordHashFromContext(t *testing.T) {
 }
 
 func TestPasswordHashFromContextNilAndMissing(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	//nolint:staticcheck // testing nil context behavior
 	if _, ok := m.PasswordHashFromContext(nil); ok {
@@ -167,9 +167,9 @@ func TestPasswordHashFromContextNilAndMissing(t *testing.T) {
 // login password hash (e.g. sessions that predate hash storage): they must
 // report no hash so VDI creation forces a fresh login.
 func TestPasswordHashFromContextEmptyHash(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("legacy")
+	user, err := identity.New("legacy")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -207,9 +207,9 @@ func TestPasswordHashFromContextEmptyHash(t *testing.T) {
 }
 
 func TestGetSessionFromUserName(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("bob")
+	user, err := identity.New("bob")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -238,9 +238,9 @@ func TestGetSessionFromUserName(t *testing.T) {
 }
 
 func TestDestroySession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("charlie")
+	user, err := identity.New("charlie")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestDestroySession(t *testing.T) {
 }
 
 func TestDestroyAllSessionsForUser(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	alice, err := identity.NewUser("alice")
+	alice, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new alice: %v", err)
 	}
-	bob, err := identity.NewUser("bob")
+	bob, err := identity.New("bob")
 	if err != nil {
 		t.Fatalf("new bob: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestDestroyAllSessionsForUser(t *testing.T) {
 }
 
 func TestCloseUserConnectionsClosesOnlyMatchingUser(t *testing.T) {
-	m := NewManager()
+	m := New()
 	aliceClosed := 0
 	bobClosed := 0
 
@@ -343,7 +343,7 @@ func TestCloseUserConnectionsClosesOnlyMatchingUser(t *testing.T) {
 }
 
 func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
-	m := NewManager()
+	m := New()
 	closed := 0
 
 	unregister, _ := m.RegisterUserConnection("alice", func() { closed++ })
@@ -367,9 +367,9 @@ func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
 }
 
 func TestUserHasActiveSessionFromIP(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("dora")
+	user, err := identity.New("dora")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -385,9 +385,9 @@ func TestUserHasActiveSessionFromIP(t *testing.T) {
 }
 
 func TestUserHasActiveSessionFromIPIgnoresExpiredSessions(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("dora")
+	user, err := identity.New("dora")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -429,9 +429,9 @@ func TestUserHasActiveSessionFromIPIgnoresExpiredSessions(t *testing.T) {
 }
 
 func TestUserHasActiveSessionFromIPAllowsAnyMatchingOwnerSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("erin")
+	user, err := identity.New("erin")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -445,13 +445,13 @@ func TestUserHasActiveSessionFromIPAllowsAnyMatchingOwnerSession(t *testing.T) {
 }
 
 func TestUserHasActiveSessionFromIPDoesNotCrossAuthorizeUsers(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	alice, err := identity.NewUser("alice")
+	alice, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new alice: %v", err)
 	}
-	bob, err := identity.NewUser("bob")
+	bob, err := identity.New("bob")
 	if err != nil {
 		t.Fatalf("new bob: %v", err)
 	}
@@ -471,9 +471,9 @@ func TestUserHasActiveSessionFromIPDoesNotCrossAuthorizeUsers(t *testing.T) {
 }
 
 func TestCreateSessionNormalizesIPv4MappedIPv6(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("frank")
+	user, err := identity.New("frank")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestCanonicalClientIP(t *testing.T) {
 }
 
 func TestGetSessionFromUserNameEmpty(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	if _, ok := m.getSessionFromUserName("   "); ok {
 		t.Fatal("expected blank username lookup to fail")
@@ -528,9 +528,9 @@ func TestGetSessionFromUserNameEmpty(t *testing.T) {
 }
 
 func TestUserHasActiveSessionFromIPRejectsInvalidInput(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("grace")
+	user, err := identity.New("grace")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -546,7 +546,7 @@ func TestUserHasActiveSessionFromIPRejectsInvalidInput(t *testing.T) {
 }
 
 func TestSessionMiddlewareRedirectsWithoutSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
@@ -568,9 +568,9 @@ func TestSessionMiddlewareRedirectsWithoutSession(t *testing.T) {
 }
 
 func TestSessionMiddlewareCallsNextWithSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("heidi")
+	user, err := identity.New("heidi")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -608,9 +608,9 @@ func TestSessionMiddlewareCallsNextWithSession(t *testing.T) {
 }
 
 func TestEnforceClientIPKeepsSessionFromSameIP(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("ivan")
+	user, err := identity.New("ivan")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -634,9 +634,9 @@ func TestEnforceClientIPKeepsSessionFromSameIP(t *testing.T) {
 }
 
 func TestEnforceClientIPDestroysRoamedSession(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("judy")
+	user, err := identity.New("judy")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -683,9 +683,9 @@ func withLoadedSession(t *testing.T, m *Manager, remoteAddr string, cookie *http
 }
 
 func TestConsumeRDPConnectGrantIsSingleUse(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("alice")
+	user, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -712,9 +712,9 @@ func TestConsumeRDPConnectGrantIsSingleUse(t *testing.T) {
 }
 
 func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("alice")
+	user, err := identity.New("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -738,9 +738,9 @@ func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
 }
 
 func TestConsumeRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("dora")
+	user, err := identity.New("dora")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -769,9 +769,9 @@ func TestConsumeRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
 }
 
 func TestConsumeRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
-	m := NewManager()
+	m := New()
 
-	user, err := identity.NewUser("dora")
+	user, err := identity.New("dora")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -820,7 +820,7 @@ func TestConsumeRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
 }
 
 func TestRegisterUserConnectionEnforcesPerUserLimit(t *testing.T) {
-	m := NewManager()
+	m := New()
 	m.SetUserConnectionLimit(2)
 
 	closed := 0
@@ -863,7 +863,7 @@ func TestRegisterUserConnectionEnforcesPerUserLimit(t *testing.T) {
 }
 
 func TestRegisterUserConnectionLimitDisabledByDefault(t *testing.T) {
-	m := NewManager()
+	m := New()
 
 	for i := 0; i < 100; i++ {
 		if _, ok := m.RegisterUserConnection("alice", func() {}); !ok {
