@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -186,7 +187,13 @@ func undefinePartialDomain(dom *libvirt.Domain, name string) {
 func DestroyExistingDomain(conn *libvirt.Connect, vmName string) error {
 	existingDom, err := conn.LookupDomainByName(vmName)
 	if err != nil {
-		return nil
+		// Only a confirmed "no such domain" means there is nothing to destroy.
+		// Any other lookup failure (RPC, permissions, dead connection) must abort
+		// the caller, which otherwise proceeds to delete the VM's volumes.
+		if errors.Is(err, libvirt.ERR_NO_DOMAIN) {
+			return nil
+		}
+		return fmt.Errorf("lookup domain %s: %w", vmName, err)
 	}
 	defer func() {
 		_ = existingDom.Free()
