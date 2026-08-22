@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 )
 
 const powerTestTimeout = 30 * time.Second
@@ -140,7 +140,7 @@ func TestPowerLifecycle(t *testing.T) {
 	}
 	stageExistingBaseImageFromDefaultRoot(t, settings)
 
-	user, err := types.NewUser("poweruser" + time.Now().Format("150405"))
+	user, err := identity.NewUser("poweruser" + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

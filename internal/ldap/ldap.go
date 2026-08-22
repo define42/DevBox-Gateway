@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -34,7 +34,7 @@ func Configured(settings *config.SettingsType) bool {
 }
 
 // AuthenticateAccess authenticates a user against LDAP and returns the gateway user model.
-func AuthenticateAccess(username, password string, settings *config.SettingsType) (*types.User, error) {
+func AuthenticateAccess(username, password string, settings *config.SettingsType) (*identity.User, error) {
 	// Reject empty passwords before dialing or binding so an empty-password
 	// anonymous bind can never authenticate a user. See ErrEmptyPassword.
 	if password == "" {
@@ -84,7 +84,7 @@ func AuthenticateAccess(username, password string, settings *config.SettingsType
 		return nil, fmt.Errorf("user %s is not a member of any required group", mail)
 	}
 
-	return types.NewUser(username)
+	return identity.NewUser(username)
 }
 
 // requiredGroups parses LDAP_REQUIRED_GROUPS into a list of group DNs or bare

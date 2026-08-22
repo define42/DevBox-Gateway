@@ -16,8 +16,8 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/types"
 	"github.com/define42/devbox-gateway/internal/virt"
 
 	"github.com/tomatome/grdp/protocol/x224"
@@ -54,7 +54,7 @@ func newServerConnWithRemoteIP(conn net.Conn, remoteIP string) net.Conn {
 func issueUserSession(t *testing.T, sessionManager *session.Manager, username, remoteAddr string, grantVMs ...string) {
 	t.Helper()
 
-	user, err := types.NewUser(username)
+	user, err := identity.NewUser(username)
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

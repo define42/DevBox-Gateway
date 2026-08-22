@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 
 	"github.com/alexedwards/scs/v2"
 )
@@ -52,9 +52,9 @@ type covxDeleteFailingStore struct {
 
 func (s covxDeleteFailingStore) Delete(string) error { return s.deleteErr }
 
-func covxUser(t *testing.T, name string) *types.User {
+func covxUser(t *testing.T, name string) *identity.User {
 	t.Helper()
-	user, err := types.NewUser(name)
+	user, err := identity.NewUser(name)
 	if err != nil {
 		t.Fatalf("new user %q: %v", name, err)
 	}

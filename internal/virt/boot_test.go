@@ -14,7 +14,7 @@ import (
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/virt"
 
-	typesUser "github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 
 	"libvirt.org/go/libvirt"
 )
@@ -259,7 +259,7 @@ func assertRemovedVM(t *testing.T, conn *libvirt.Connect, vmName string) {
 func TestStartVM(t *testing.T) {
 	settings := newConsoleSocketSettings(t)
 
-	user, err := typesUser.NewUser(testUsername)
+	user, err := identity.NewUser(testUsername)
 	if err != nil {
 		t.Fatalf("Failed to create test user: %v", err)
 	}

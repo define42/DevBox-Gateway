@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 
 	"libvirt.org/go/libvirt"
 )
 
-func vbtcovNewUser(t *testing.T, name string) *types.User {
+func vbtcovNewUser(t *testing.T, name string) *identity.User {
 	t.Helper()
 
-	user, err := types.NewUser(name)
+	user, err := identity.NewUser(name)
 	if err != nil {
 		t.Fatalf("new user %s: %v", name, err)
 	}

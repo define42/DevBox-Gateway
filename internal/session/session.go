@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/alexedwards/scs/v2/memstore"
@@ -23,7 +23,7 @@ import (
 )
 
 type sessionData struct {
-	User      *types.User
+	User      *identity.User
 	CreatedAt time.Time
 	ClientIP  string
 	// LoginPasswordHash is the salted sha512_crypt ($6$, /etc/shadow compatible)
@@ -141,7 +141,7 @@ func CanonicalClientIP(remoteAddr string) (string, bool) {
 // retained — loginPasswordHash is its salted sha512_crypt digest, kept in the
 // in-memory store so VDI creation can seed the guest account with the user's
 // login password (see PasswordHashFromContext).
-func (m *Manager) CreateSession(ctx context.Context, u *types.User, clientIP, loginPasswordHash string) error {
+func (m *Manager) CreateSession(ctx context.Context, u *identity.User, clientIP, loginPasswordHash string) error {
 	if err := m.RenewToken(ctx); err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (m *Manager) getSession(r *http.Request) (sessionData, bool) {
 }
 
 // UserFromContext returns the authenticated user stored in the request context.
-func (m *Manager) UserFromContext(ctx context.Context) (*types.User, bool) {
+func (m *Manager) UserFromContext(ctx context.Context) (*identity.User, bool) {
 	if ctx == nil {
 		return nil, false
 	}

@@ -10,8 +10,8 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/types"
 )
 
 func issueSessionCookie(t *testing.T, sessionManager *session.Manager, username string) *http.Cookie {
@@ -32,7 +32,7 @@ func issueSessionCookieFromIP(t *testing.T, sessionManager *session.Manager, use
 func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, username, remoteAddr, loginPasswordHash string) *http.Cookie {
 	t.Helper()
 
-	user, err := types.NewUser(username)
+	user, err := identity.NewUser(username)
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -63,7 +63,7 @@ func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, u
 
 func TestCompleteLoginRecordsLoginIP(t *testing.T) {
 	sessionManager := session.NewManager()
-	user, err := types.NewUser("alice")
+	user, err := identity.NewUser("alice")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

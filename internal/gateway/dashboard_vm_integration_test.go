@@ -8,7 +8,7 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/hash"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
@@ -62,7 +62,7 @@ func createDashboardVM(t *testing.T, settings *config.SettingsType) (string, str
 	username := "dashuser" + strconv.FormatInt(suffix, 10)
 	vmShortName := "dashvm" + strconv.FormatInt(suffix, 10)
 
-	user, err := types.NewUser(username)
+	user, err := identity.NewUser(username)
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"libvirt.org/go/libvirt"
@@ -86,10 +86,10 @@ func stageBootBaseImage(t *testing.T, sourcePath, targetPath string) {
 	}
 }
 
-func newBootTestUser(t *testing.T, prefix string) *types.User {
+func newBootTestUser(t *testing.T, prefix string) *identity.User {
 	t.Helper()
 
-	user, err := types.NewUser(prefix + time.Now().Format("150405"))
+	user, err := identity.NewUser(prefix + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)
 
-	user, err := types.NewUser("meta-" + time.Now().Format("150405"))
+	user, err := identity.NewUser("meta-" + time.Now().Format("150405"))
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

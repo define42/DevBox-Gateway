@@ -19,8 +19,8 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/types"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
@@ -440,7 +440,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 	sessionManager.Store = hcovDeleteFailStore{inner: sessionManager.Store}
 	cookie := issueSessionCookie(t, sessionManager, "hcovbroken")
 
-	user, err := types.NewUser("hcovbroken")
+	user, err := identity.NewUser("hcovbroken")
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}

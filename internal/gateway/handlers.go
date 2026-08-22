@@ -15,10 +15,10 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/hash"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/ldap"
 	"github.com/define42/devbox-gateway/internal/localauth"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/types"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
 	"github.com/define42/devbox-gateway/internal/webassets"
@@ -158,9 +158,9 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.SettingsType, log
 // LOCAL_USER_SHA256 digests) are checked first so the gateway works without a
 // directory and without an LDAP round-trip; otherwise the credentials are
 // validated against LDAP.
-func authenticateLogin(username, password string, settings *config.SettingsType) (*types.User, error) {
+func authenticateLogin(username, password string, settings *config.SettingsType) (*identity.User, error) {
 	if localauth.Validate(username, password, settings) {
-		return types.NewUser(username)
+		return identity.NewUser(username)
 	}
 	if !ldap.Configured(settings) {
 		// Local-users-only mode: no directory to fall back to.
@@ -172,7 +172,7 @@ func authenticateLogin(username, password string, settings *config.SettingsType)
 // completeLogin establishes the authenticated session for a user whose
 // credentials have just been verified. Any session-establishment failure is a
 // server-side error that aborts the login.
-func completeLogin(sessionManager *session.Manager, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, user *types.User, password string) {
+func completeLogin(sessionManager *session.Manager, settings *config.SettingsType, w http.ResponseWriter, r *http.Request, user *identity.User, password string) {
 	if err := establishSession(r.Context(), sessionManager, user, r.RemoteAddr, password); err != nil {
 		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
 		serveLogin(w, settings, "Login failed.")
@@ -185,7 +185,7 @@ func completeLogin(sessionManager *session.Manager, settings *config.SettingsTyp
 // is digested right away so only its salted sha512_crypt hash outlives this
 // request: the hash is stored in the in-memory session and later seeds the
 // guest account when the user creates a VDI; the cleartext is never retained.
-func establishSession(ctx context.Context, sessionManager *session.Manager, user *types.User, remoteAddr, password string) error {
+func establishSession(ctx context.Context, sessionManager *session.Manager, user *identity.User, remoteAddr, password string) error {
 	loginPasswordHash, err := hash.CloudInitPasswordHash(password)
 	if err != nil {
 		return err

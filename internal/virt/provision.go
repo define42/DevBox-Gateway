@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/virt/storage"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
@@ -59,7 +59,7 @@ const cloudInitPasswordHashPrefix = "$6$"
 // ($6$) digest: it is the hash of the owner's gateway login password, captured
 // at login (see session.PasswordHashFromContext), so no cleartext password is
 // ever passed through the VM provisioning path.
-func resolveGuestCredentials(user *types.User, guestUsername, guestPasswordHash string) (string, string, error) {
+func resolveGuestCredentials(user *identity.User, guestUsername, guestPasswordHash string) (string, string, error) {
 	guestUsername = strings.TrimSpace(guestUsername)
 	if guestUsername == "" {
 		guestUsername = user.Name
@@ -84,7 +84,7 @@ type VMCreateRequest struct {
 	// or hostname is rejected before anything is created.
 	Name string
 	// Owner is the gateway user the VM belongs to; required.
-	Owner *types.User
+	Owner *identity.User
 	// GuestUsername is the login account provisioned inside the guest (and
 	// used for RDP); it falls back to Owner's name when empty.
 	GuestUsername string

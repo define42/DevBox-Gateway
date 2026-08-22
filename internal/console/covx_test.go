@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/types"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -39,7 +39,7 @@ func covxSessionCookieWithDeadline(
 ) *http.Cookie {
 	t.Helper()
 
-	user, err := types.NewUser(username)
+	user, err := identity.NewUser(username)
 	if err != nil {
 		t.Fatalf("new user %q: %v", username, err)
 	}
