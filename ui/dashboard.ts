@@ -94,12 +94,17 @@ type ServerResourceUsage = {
     totalBytes: number;
 };
 
+type ServerCPUUsage = {
+    usagePercent: number;
+};
+
 type DashboardSocketMessage = {
     type?: string;
     id?: number;
     data?: DashboardDataResponse;
     serverMemory?: ServerResourceUsage;
     serverDisk?: ServerResourceUsage;
+    serverCPU?: ServerCPUUsage;
     error?: string;
 };
 
@@ -417,6 +422,7 @@ function bootstrap(): void {
               <span id="jitter-indicator" class="badge rounded-pill text-bg-secondary jitter-indicator" title="Live RTT jitter (variation between samples)" aria-live="polite"><i class="bi bi-graph-up me-1" aria-hidden="true"></i>Jitter: &ndash;&ndash;</span>
               <span id="server-memory-indicator" class="badge rounded-pill text-bg-secondary server-memory-indicator" title="Current server memory usage" aria-live="polite" hidden><i class="bi bi-memory me-1" aria-hidden="true"></i>Memory: &ndash;&ndash;</span>
               <span id="server-disk-indicator" class="badge rounded-pill text-bg-secondary server-disk-indicator" title="Current usage of the filesystem backing VM storage" aria-live="polite" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Disk: &ndash;&ndash;</span>
+              <span id="server-cpu-indicator" class="badge rounded-pill text-bg-secondary server-cpu-indicator" title="CPU utilization averaged across all logical CPUs" aria-live="polite" hidden><i class="bi bi-cpu me-1" aria-hidden="true"></i>CPU: &ndash;&ndash;</span>
               <a class="btn btn-outline-primary btn-sm" id="admin-view-link" href="/api/admin" hidden><i class="bi bi-shield-lock me-1" aria-hidden="true"></i>Admin</a>
               <button class="btn btn-outline-primary btn-sm" id="base-images-button" type="button" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Base Images</button>
               <a class="btn btn-outline-secondary btn-sm" id="dashboard-view-link" href="/api/dashboard" hidden><i class="bi bi-display me-1" aria-hidden="true"></i>My DevBoxes</a>
@@ -606,6 +612,7 @@ function bootstrap(): void {
     const jitterIndicator = root.querySelector<HTMLSpanElement>("#jitter-indicator");
     const serverMemoryIndicator = root.querySelector<HTMLSpanElement>("#server-memory-indicator");
     const serverDiskIndicator = root.querySelector<HTMLSpanElement>("#server-disk-indicator");
+    const serverCPUIndicator = root.querySelector<HTMLSpanElement>("#server-cpu-indicator");
     const actionArea = root.querySelector<HTMLDivElement>("#action-area");
     const listArea = root.querySelector<HTMLDivElement>("#vm-list");
     const terminalModal = root.querySelector<HTMLDivElement>("#terminal-modal");
@@ -677,6 +684,7 @@ function bootstrap(): void {
         !jitterIndicator ||
         !serverMemoryIndicator ||
         !serverDiskIndicator ||
+        !serverCPUIndicator ||
         !actionArea ||
         !listArea ||
         !terminalModal ||
@@ -750,6 +758,7 @@ function bootstrap(): void {
     const jitterIndicatorEl = jitterIndicator;
     const serverMemoryIndicatorEl = serverMemoryIndicator;
     const serverDiskIndicatorEl = serverDiskIndicator;
+    const serverCPUIndicatorEl = serverCPUIndicator;
     const actionAreaEl = actionArea;
     const listAreaEl = listArea;
     const terminalModalEl = terminalModal;
@@ -827,6 +836,7 @@ function bootstrap(): void {
         openCreateButtonEl.hidden = adminView;
         serverMemoryIndicatorEl.hidden = !adminView;
         serverDiskIndicatorEl.hidden = !adminView;
+        serverCPUIndicatorEl.hidden = !adminView;
     }
 
     renderPageMode();
@@ -882,11 +892,12 @@ function bootstrap(): void {
         });
     }
 
-    function renderServerUsage(
+    function renderServerUsagePercent(
         indicator: HTMLSpanElement,
         iconClass: string,
         label: string,
-        usage?: ServerResourceUsage | null,
+        usagePercent: number | null,
+        details = "",
     ): void {
         indicator.classList.remove(
             "text-bg-success",
@@ -894,6 +905,34 @@ function bootstrap(): void {
             "text-bg-danger",
             "text-bg-secondary",
         );
+        if (
+            typeof usagePercent !== "number" ||
+            !Number.isFinite(usagePercent) ||
+            usagePercent < 0 ||
+            usagePercent > 100
+        ) {
+            indicator.classList.add("text-bg-secondary");
+            setIconLabel(indicator, iconClass, `${label}: --`);
+            return;
+        }
+
+        const usedPercent = Math.round(usagePercent);
+        let colorClass = "text-bg-success";
+        if (usedPercent > SERVER_USAGE_RED_ABOVE_PERCENT) {
+            colorClass = "text-bg-danger";
+        } else if (usedPercent >= SERVER_USAGE_YELLOW_MIN_PERCENT) {
+            colorClass = "text-bg-warning";
+        }
+        indicator.classList.add(colorClass);
+        setIconLabel(indicator, iconClass, `${label}: ${usedPercent}%${details}`);
+    }
+
+    function renderServerUsage(
+        indicator: HTMLSpanElement,
+        iconClass: string,
+        label: string,
+        usage?: ServerResourceUsage | null,
+    ): void {
         const usedBytes = usage?.usedBytes;
         const totalBytes = usage?.totalBytes;
         if (
@@ -905,23 +944,16 @@ function bootstrap(): void {
             totalBytes <= 0 ||
             usedBytes > totalBytes
         ) {
-            indicator.classList.add("text-bg-secondary");
-            setIconLabel(indicator, iconClass, `${label}: --`);
+            renderServerUsagePercent(indicator, iconClass, label, null);
             return;
         }
 
-        const usedPercent = Math.round((usedBytes / totalBytes) * 100);
-        let colorClass = "text-bg-success";
-        if (usedPercent > SERVER_USAGE_RED_ABOVE_PERCENT) {
-            colorClass = "text-bg-danger";
-        } else if (usedPercent >= SERVER_USAGE_YELLOW_MIN_PERCENT) {
-            colorClass = "text-bg-warning";
-        }
-        indicator.classList.add(colorClass);
-        setIconLabel(
+        renderServerUsagePercent(
             indicator,
             iconClass,
-            `${label}: ${usedPercent}% · ${formatServerCapacityGB(usedBytes)} used / ${formatServerCapacityGB(totalBytes)} total`,
+            label,
+            (usedBytes / totalBytes) * 100,
+            ` · ${formatServerCapacityGB(usedBytes)} used / ${formatServerCapacityGB(totalBytes)} total`,
         );
     }
 
@@ -934,6 +966,13 @@ function bootstrap(): void {
     function renderServerDisk(disk?: ServerResourceUsage | null): void {
         if (adminView) {
             renderServerUsage(serverDiskIndicatorEl, "bi-device-hdd", "Disk", disk);
+        }
+    }
+
+    function renderServerCPU(cpu?: ServerCPUUsage | null): void {
+        if (adminView) {
+            const usagePercent = cpu ? cpu.usagePercent : null;
+            renderServerUsagePercent(serverCPUIndicatorEl, "bi-cpu", "CPU", usagePercent);
         }
     }
 
@@ -1104,6 +1143,7 @@ function bootstrap(): void {
             recordRTTSample(performance.now() - message.id);
             renderServerMemory(message.serverMemory);
             renderServerDisk(message.serverDisk);
+            renderServerCPU(message.serverCPU);
             return;
         }
         if (message.type === "dashboard") {
@@ -1125,6 +1165,7 @@ function bootstrap(): void {
             renderRTT(null, null);
             renderServerMemory(null);
             renderServerDisk(null);
+            renderServerCPU(null);
             scheduleDashboardReconnect();
             return;
         }
@@ -1157,6 +1198,7 @@ function bootstrap(): void {
                 renderRTT(null, null);
                 renderServerMemory(null);
                 renderServerDisk(null);
+                renderServerCPU(null);
                 if (!dashboardSocketErrorChecked) {
                     dashboardSocketErrorChecked = true;
                     // WebSocket does not expose handshake status codes. This
@@ -1177,6 +1219,7 @@ function bootstrap(): void {
             renderRTT(null, null);
             renderServerMemory(null);
             renderServerDisk(null);
+            renderServerCPU(null);
             scheduleDashboardReconnect();
         };
     }
@@ -2889,6 +2932,7 @@ function bootstrap(): void {
     renderRTT(null, null);
     renderServerMemory(null);
     renderServerDisk(null);
+    renderServerCPU(null);
     void loadVMs().then(() => {
         dashboardInitialLoadComplete = true;
         connectDashboardSocket();

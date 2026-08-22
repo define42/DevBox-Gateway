@@ -34,6 +34,7 @@ type dashboardServerMessage struct {
 	Data         *dashboard.DataResponse `json:"data,omitempty"`
 	ServerMemory *dashboard.ServerMemory `json:"serverMemory,omitempty"`
 	ServerDisk   *dashboard.ServerDisk   `json:"serverDisk,omitempty"`
+	ServerCPU    *dashboard.ServerCPU    `json:"serverCPU,omitempty"`
 	Error        string                  `json:"error,omitempty"`
 }
 
@@ -43,6 +44,7 @@ type dashboardView struct {
 	allVMs           bool
 	readServerMemory func() (dashboard.ServerMemory, error)
 	readServerDisk   func() (dashboard.ServerDisk, error)
+	sampleServerCPU  func() (*dashboard.ServerCPU, error)
 }
 
 // HandleDashboardWS serves the dashboard's shared control websocket. Typed
@@ -104,6 +106,7 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 			view.readServerDisk = func() (dashboard.ServerDisk, error) {
 				return dashboard.ReadServerDisk(config.VirtStoragePoolPath(settings))
 			}
+			view.sampleServerCPU = dashboard.NewServerCPUSampler().Sample
 		}
 		bridgeDashboardControlSocketForView(ws, view, settings, sessionDeadline)
 	}
@@ -182,6 +185,11 @@ func dashboardPong(view dashboardView, id *float64) dashboardServerMessage {
 	if view.readServerDisk != nil {
 		if disk, err := view.readServerDisk(); err == nil {
 			response.ServerDisk = &disk
+		}
+	}
+	if view.sampleServerCPU != nil {
+		if cpu, err := view.sampleServerCPU(); err == nil {
+			response.ServerCPU = cpu
 		}
 	}
 	return response

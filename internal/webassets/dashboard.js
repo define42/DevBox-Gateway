@@ -225,6 +225,7 @@ function bootstrap() {
               <span id="jitter-indicator" class="badge rounded-pill text-bg-secondary jitter-indicator" title="Live RTT jitter (variation between samples)" aria-live="polite"><i class="bi bi-graph-up me-1" aria-hidden="true"></i>Jitter: &ndash;&ndash;</span>
               <span id="server-memory-indicator" class="badge rounded-pill text-bg-secondary server-memory-indicator" title="Current server memory usage" aria-live="polite" hidden><i class="bi bi-memory me-1" aria-hidden="true"></i>Memory: &ndash;&ndash;</span>
               <span id="server-disk-indicator" class="badge rounded-pill text-bg-secondary server-disk-indicator" title="Current usage of the filesystem backing VM storage" aria-live="polite" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Disk: &ndash;&ndash;</span>
+              <span id="server-cpu-indicator" class="badge rounded-pill text-bg-secondary server-cpu-indicator" title="CPU utilization averaged across all logical CPUs" aria-live="polite" hidden><i class="bi bi-cpu me-1" aria-hidden="true"></i>CPU: &ndash;&ndash;</span>
               <a class="btn btn-outline-primary btn-sm" id="admin-view-link" href="/api/admin" hidden><i class="bi bi-shield-lock me-1" aria-hidden="true"></i>Admin</a>
               <button class="btn btn-outline-primary btn-sm" id="base-images-button" type="button" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Base Images</button>
               <a class="btn btn-outline-secondary btn-sm" id="dashboard-view-link" href="/api/dashboard" hidden><i class="bi bi-display me-1" aria-hidden="true"></i>My DevBoxes</a>
@@ -413,6 +414,7 @@ function bootstrap() {
     const jitterIndicator = root.querySelector("#jitter-indicator");
     const serverMemoryIndicator = root.querySelector("#server-memory-indicator");
     const serverDiskIndicator = root.querySelector("#server-disk-indicator");
+    const serverCPUIndicator = root.querySelector("#server-cpu-indicator");
     const actionArea = root.querySelector("#action-area");
     const listArea = root.querySelector("#vm-list");
     const terminalModal = root.querySelector("#terminal-modal");
@@ -482,6 +484,7 @@ function bootstrap() {
         !jitterIndicator ||
         !serverMemoryIndicator ||
         !serverDiskIndicator ||
+        !serverCPUIndicator ||
         !actionArea ||
         !listArea ||
         !terminalModal ||
@@ -553,6 +556,7 @@ function bootstrap() {
     const jitterIndicatorEl = jitterIndicator;
     const serverMemoryIndicatorEl = serverMemoryIndicator;
     const serverDiskIndicatorEl = serverDiskIndicator;
+    const serverCPUIndicatorEl = serverCPUIndicator;
     const actionAreaEl = actionArea;
     const listAreaEl = listArea;
     const terminalModalEl = terminalModal;
@@ -628,6 +632,7 @@ function bootstrap() {
         openCreateButtonEl.hidden = adminView;
         serverMemoryIndicatorEl.hidden = !adminView;
         serverDiskIndicatorEl.hidden = !adminView;
+        serverCPUIndicatorEl.hidden = !adminView;
     }
     renderPageMode();
     const terminalResizeObserver = new ResizeObserver(() => {
@@ -678,8 +683,28 @@ function bootstrap() {
             }
         });
     }
-    function renderServerUsage(indicator, iconClass, label, usage) {
+    function renderServerUsagePercent(indicator, iconClass, label, usagePercent, details = "") {
         indicator.classList.remove("text-bg-success", "text-bg-warning", "text-bg-danger", "text-bg-secondary");
+        if (typeof usagePercent !== "number" ||
+            !Number.isFinite(usagePercent) ||
+            usagePercent < 0 ||
+            usagePercent > 100) {
+            indicator.classList.add("text-bg-secondary");
+            setIconLabel(indicator, iconClass, `${label}: --`);
+            return;
+        }
+        const usedPercent = Math.round(usagePercent);
+        let colorClass = "text-bg-success";
+        if (usedPercent > SERVER_USAGE_RED_ABOVE_PERCENT) {
+            colorClass = "text-bg-danger";
+        }
+        else if (usedPercent >= SERVER_USAGE_YELLOW_MIN_PERCENT) {
+            colorClass = "text-bg-warning";
+        }
+        indicator.classList.add(colorClass);
+        setIconLabel(indicator, iconClass, `${label}: ${usedPercent}%${details}`);
+    }
+    function renderServerUsage(indicator, iconClass, label, usage) {
         const usedBytes = usage === null || usage === void 0 ? void 0 : usage.usedBytes;
         const totalBytes = usage === null || usage === void 0 ? void 0 : usage.totalBytes;
         if (typeof usedBytes !== "number" ||
@@ -689,20 +714,10 @@ function bootstrap() {
             !Number.isFinite(totalBytes) ||
             totalBytes <= 0 ||
             usedBytes > totalBytes) {
-            indicator.classList.add("text-bg-secondary");
-            setIconLabel(indicator, iconClass, `${label}: --`);
+            renderServerUsagePercent(indicator, iconClass, label, null);
             return;
         }
-        const usedPercent = Math.round((usedBytes / totalBytes) * 100);
-        let colorClass = "text-bg-success";
-        if (usedPercent > SERVER_USAGE_RED_ABOVE_PERCENT) {
-            colorClass = "text-bg-danger";
-        }
-        else if (usedPercent >= SERVER_USAGE_YELLOW_MIN_PERCENT) {
-            colorClass = "text-bg-warning";
-        }
-        indicator.classList.add(colorClass);
-        setIconLabel(indicator, iconClass, `${label}: ${usedPercent}% · ${formatServerCapacityGB(usedBytes)} used / ${formatServerCapacityGB(totalBytes)} total`);
+        renderServerUsagePercent(indicator, iconClass, label, (usedBytes / totalBytes) * 100, ` · ${formatServerCapacityGB(usedBytes)} used / ${formatServerCapacityGB(totalBytes)} total`);
     }
     function renderServerMemory(memory) {
         if (adminView) {
@@ -712,6 +727,12 @@ function bootstrap() {
     function renderServerDisk(disk) {
         if (adminView) {
             renderServerUsage(serverDiskIndicatorEl, "bi-device-hdd", "Disk", disk);
+        }
+    }
+    function renderServerCPU(cpu) {
+        if (adminView) {
+            const usagePercent = cpu ? cpu.usagePercent : null;
+            renderServerUsagePercent(serverCPUIndicatorEl, "bi-cpu", "CPU", usagePercent);
         }
     }
     // renderRTT paints the live round-trip-time and jitter badges in the header.
@@ -866,6 +887,7 @@ function bootstrap() {
             recordRTTSample(performance.now() - message.id);
             renderServerMemory(message.serverMemory);
             renderServerDisk(message.serverDisk);
+            renderServerCPU(message.serverCPU);
             return;
         }
         if (message.type === "dashboard") {
@@ -887,6 +909,7 @@ function bootstrap() {
             renderRTT(null, null);
             renderServerMemory(null);
             renderServerDisk(null);
+            renderServerCPU(null);
             scheduleDashboardReconnect();
             return;
         }
@@ -916,6 +939,7 @@ function bootstrap() {
                 renderRTT(null, null);
                 renderServerMemory(null);
                 renderServerDisk(null);
+                renderServerCPU(null);
                 if (!dashboardSocketErrorChecked) {
                     dashboardSocketErrorChecked = true;
                     // WebSocket does not expose handshake status codes. This
@@ -935,6 +959,7 @@ function bootstrap() {
             renderRTT(null, null);
             renderServerMemory(null);
             renderServerDisk(null);
+            renderServerCPU(null);
             scheduleDashboardReconnect();
         };
     }
@@ -2536,6 +2561,7 @@ function bootstrap() {
     renderRTT(null, null);
     renderServerMemory(null);
     renderServerDisk(null);
+    renderServerCPU(null);
     void loadVMs().then(() => {
         dashboardInitialLoadComplete = true;
         connectDashboardSocket();

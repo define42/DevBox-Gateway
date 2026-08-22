@@ -99,6 +99,64 @@ func TestDashboardPongIncludesServerUsageOnlyForAdminView(t *testing.T) {
 	}
 }
 
+func TestDashboardPongIncludesServerCPUOnlyForAdminView(t *testing.T) {
+	t.Parallel()
+
+	wantCPU := dashboard.ServerCPU{UsagePercent: 42.5}
+	tests := []struct {
+		name          string
+		allVMs        bool
+		sampleErr     error
+		wantCPU       *dashboard.ServerCPU
+		wantReadCalls int
+	}{
+		{name: "admin view", allVMs: true, wantCPU: &wantCPU, wantReadCalls: 1},
+		{name: "ordinary dashboard"},
+		{name: "admin sample failure", allVMs: true, sampleErr: errors.New("CPU unavailable"), wantReadCalls: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := 123.456
+			readCalls := 0
+			view := dashboardView{
+				allVMs: tt.allVMs,
+				sampleServerCPU: func() (*dashboard.ServerCPU, error) {
+					readCalls++
+					return &wantCPU, tt.sampleErr
+				},
+			}
+
+			got := dashboardPong(view, &probe)
+			assertDashboardPong(t, got, probe, nil, nil)
+			assertOptionalServerUsage(t, "CPU", got.ServerCPU, tt.wantCPU)
+			if readCalls != tt.wantReadCalls {
+				t.Fatalf("dashboardPong() sampled CPU %d times, want %d", readCalls, tt.wantReadCalls)
+			}
+		})
+	}
+}
+
+func TestDashboardPongKeepsOtherUsageWhenServerCPUFails(t *testing.T) {
+	t.Parallel()
+
+	wantMemory := dashboard.ServerMemory{UsedBytes: 1, TotalBytes: 2}
+	wantDisk := dashboard.ServerDisk{UsedBytes: 3, TotalBytes: 4}
+	view := dashboardView{
+		allVMs:           true,
+		readServerMemory: func() (dashboard.ServerMemory, error) { return wantMemory, nil },
+		readServerDisk:   func() (dashboard.ServerDisk, error) { return wantDisk, nil },
+		sampleServerCPU:  func() (*dashboard.ServerCPU, error) { return nil, errors.New("CPU unavailable") },
+	}
+
+	probe := 123.456
+	got := dashboardPong(view, &probe)
+	assertDashboardPong(t, got, probe, &wantMemory, &wantDisk)
+	if got.ServerCPU != nil {
+		t.Fatalf("dashboardPong() CPU = %+v, want nil", got.ServerCPU)
+	}
+}
+
 func assertDashboardPong(
 	t *testing.T,
 	got dashboardServerMessage,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +181,47 @@ func covxAwaitWebsocketClosed(t *testing.T, conn *websocket.Conn) {
 	}
 }
 
+func covxAwaitServerCPU(t *testing.T, conn *websocket.Conn) float64 {
+	t.Helper()
+
+	deadline := time.Now().Add(websocketTestTimeout)
+	probe := 1000.0
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		probe++
+		if err := conn.WriteJSON(dashboardClientMessage{Type: "ping", ID: &probe}); err != nil {
+			t.Fatalf("write CPU sample ping: %v", err)
+		}
+		pong := readDashboardMessageType(t, conn, "pong")
+		if pong.ServerCPU != nil {
+			return pong.ServerCPU.UsagePercent
+		}
+	}
+
+	t.Fatal("admin websocket did not report CPU utilization")
+	return 0
+}
+
+func assertInitialAdminServerUsage(t *testing.T, pong dashboardServerMessage) {
+	t.Helper()
+
+	if pong.ServerMemory == nil || pong.ServerMemory.TotalBytes == 0 {
+		t.Fatalf("expected admin pong to contain server memory, got %+v", pong.ServerMemory)
+	}
+	if pong.ServerMemory.UsedBytes > pong.ServerMemory.TotalBytes {
+		t.Fatalf("admin pong reported invalid server memory: %+v", pong.ServerMemory)
+	}
+	if pong.ServerDisk == nil || pong.ServerDisk.TotalBytes == 0 {
+		t.Fatalf("expected admin pong to contain server disk usage, got %+v", pong.ServerDisk)
+	}
+	if pong.ServerDisk.UsedBytes > pong.ServerDisk.TotalBytes {
+		t.Fatalf("admin pong reported invalid server disk usage: %+v", pong.ServerDisk)
+	}
+	if pong.ServerCPU != nil {
+		t.Fatalf("first admin pong reported CPU before establishing a baseline: %+v", pong.ServerCPU)
+	}
+}
+
 func TestCovxDashboardWSRejectsUnauthenticated(t *testing.T) {
 	manager := session.New()
 	server := covxDashboardServer(t, manager)
@@ -224,17 +266,10 @@ func TestCovxAdminDashboardWSAuthorization(t *testing.T) {
 		t.Fatalf("write admin ping probe: %v", err)
 	}
 	pong := readDashboardMessageType(t, conn, "pong")
-	if pong.ServerMemory == nil || pong.ServerMemory.TotalBytes == 0 {
-		t.Fatalf("expected admin pong to contain server memory, got %+v", pong.ServerMemory)
-	}
-	if pong.ServerMemory.UsedBytes > pong.ServerMemory.TotalBytes {
-		t.Fatalf("admin pong reported invalid server memory: %+v", pong.ServerMemory)
-	}
-	if pong.ServerDisk == nil || pong.ServerDisk.TotalBytes == 0 {
-		t.Fatalf("expected admin pong to contain server disk usage, got %+v", pong.ServerDisk)
-	}
-	if pong.ServerDisk.UsedBytes > pong.ServerDisk.TotalBytes {
-		t.Fatalf("admin pong reported invalid server disk usage: %+v", pong.ServerDisk)
+	assertInitialAdminServerUsage(t, pong)
+	cpuPercent := covxAwaitServerCPU(t, conn)
+	if math.IsNaN(cpuPercent) || math.IsInf(cpuPercent, 0) || cpuPercent < 0 || cpuPercent > 100 {
+		t.Fatalf("admin pong reported invalid CPU utilization: %v", cpuPercent)
 	}
 }
 
@@ -276,6 +311,9 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	}
 	if pong.ServerDisk != nil {
 		t.Fatalf("ordinary dashboard pong exposed server disk usage: %+v", pong.ServerDisk)
+	}
+	if pong.ServerCPU != nil {
+		t.Fatalf("ordinary dashboard pong exposed server CPU utilization: %+v", pong.ServerCPU)
 	}
 
 	closeWebsocketClient(t, conn)

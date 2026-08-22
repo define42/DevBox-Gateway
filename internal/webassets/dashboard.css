@@ -5,7 +5,8 @@
 .rtt-indicator,
 .jitter-indicator,
 .server-memory-indicator,
-.server-disk-indicator {
+.server-disk-indicator,
+.server-cpu-indicator {
   min-width: 7.5rem;
   justify-content: center;
   font-variant-numeric: tabular-nums;
