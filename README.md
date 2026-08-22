@@ -524,8 +524,9 @@ make rpm VERSION=1.4.0
 This compiles the UI and a `CGO_ENABLED=1` binary into `dist/`, then packages it
 together with the systemd unit and `devbox-gateway.conf` into
 `dist/devbox-gateway-<version>-1.x86_64.rpm` using the pure-Go
-[`cmd/mkrpm`](cmd/mkrpm) helper — no `rpmbuild` or spec file required. Run `go run
-./cmd/mkrpm -h` to see the available packaging flags.
+[`internal/rpm`](internal/rpm) implementation through the
+[`cmd/mkrpm`](cmd/mkrpm) command — no `rpmbuild` or spec file required. Run `go
+run ./cmd/mkrpm -h` to see the available packaging flags.
 
 ### Building the deb
 
@@ -538,9 +539,10 @@ make deb VERSION=1.4.0
 
 This packages the same `dist/` artifacts into
 `dist/devbox-gateway_<version>_amd64.deb` using the pure-Go
-[`cmd/mkdeb`](cmd/mkdeb) helper (built on `github.com/xor-gate/debpkg`) — no
-`dpkg-deb` or `debian/` tree required. Run `go run ./cmd/mkdeb -h` to see the
-available packaging flags. Override `DEB_ARCH` for a non-`amd64` target.
+[`internal/deb`](internal/deb) implementation through the
+[`cmd/mkdeb`](cmd/mkdeb) command — no `dpkg-deb` or `debian/` tree required. Run
+`go run ./cmd/mkdeb -h` to see the available packaging flags. Override
+`DEB_ARCH` for a non-`amd64` target.
 
 ### UI (TypeScript)
 
@@ -573,8 +575,8 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 .
 ├── cmd/
 │   ├── devbox-gateway/  Minimal gateway process entrypoint.
-│   ├── mkdeb/           Debian package builder.
-│   └── mkrpm/           RPM package builder.
+│   ├── mkdeb/           Debian packaging CLI adapter.
+│   └── mkrpm/           RPM packaging CLI adapter.
 ├── internal/
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
 │   ├── cloudinit/   NoCloud document and seed ISO generation.
@@ -582,11 +584,13 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   │                vars may be read from).
 │   ├── console/     Serial console and noVNC WebSocket handlers.
 │   ├── dashboard/   Dashboard HTML / JSON rendering and VM listing.
+│   ├── deb/         Debian package construction and archive writing.
 │   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
 │   ├── hash/        Password/credential hashing helpers.
 │   ├── ldap/        LDAP login authentication.
 │   ├── localauth/   Local password authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
+│   ├── rpm/         RPM package construction and manifests.
 │   ├── session/     Cookie session manager and middleware.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).

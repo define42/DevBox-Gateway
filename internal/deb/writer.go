@@ -1,4 +1,4 @@
-package main
+package deb
 
 import (
 	"archive/tar"
@@ -30,7 +30,7 @@ type tarEntry struct {
 	typeFlag byte
 }
 
-func writeDebArchive(o options) error {
+func writeArchive(o Options) error {
 	files, err := packageFiles(o)
 	if err != nil {
 		return err
@@ -76,7 +76,7 @@ func writeDebArchive(o options) error {
 		}
 		members = append(members, arEntry)
 	}
-	return writePackageFile(o.out, writeAr(members))
+	return writePackageFile(o.Output, writeAr(members))
 }
 
 func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
@@ -112,14 +112,14 @@ func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 // list of password digests. The data archive owns every entry as root:root
 // (uid/gid 0), so 0640 keeps the file readable only by root. The other files
 // carry no secrets and use the conventional world-readable modes.
-func packageFiles(o options) ([]debFile, error) {
+func packageFiles(o Options) ([]debFile, error) {
 	files := []debFile{
-		{o.binarySrc, o.binaryDest, 0o755},
-		{o.unitSrc, unitDestination, 0o644},
-		{o.confSrc, confDestination, 0o640},
+		{o.BinarySource, o.BinaryDestination, 0o755},
+		{o.UnitSource, unitDestination, 0o644},
+		{o.ConfigSource, confDestination, 0o640},
 	}
-	if _, err := os.Stat(o.licenseSrc); err == nil {
-		files = append(files, debFile{o.licenseSrc, licenseDest, 0o644})
+	if _, err := os.Stat(o.LicenseSource); err == nil {
+		files = append(files, debFile{o.LicenseSource, licenseDest, 0o644})
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat license: %w", err)
 	}
@@ -156,13 +156,13 @@ func readPackageFile(file debFile) (tarEntry, error) {
 	}, nil
 }
 
-func controlEntries(o options, md5sums string, installedBytes int64, now time.Time) []tarEntry {
+func controlEntries(o Options, md5sums string, installedBytes int64, now time.Time) []tarEntry {
 	installedSize := (installedBytes + 1023) / 1024
 	control := fmt.Sprintf(
 		"Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s <%s>\n"+
 			"Installed-Size: %d\nSection: %s\nHomepage: %s\nDepends: %s\n"+
 			"Description: %s\n %s\n",
-		packageName, o.version, o.arch, maintainer, maintainerEmail, installedSize, section, url,
+		packageName, o.Version, o.Arch, maintainer, maintainerEmail, installedSize, section, url,
 		packageRelations(), summary, strings.ReplaceAll(description, "\n", "\n "),
 	)
 	return []tarEntry{

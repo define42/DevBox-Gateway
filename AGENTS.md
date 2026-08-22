@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a Go module for an HTTPS RDP gateway. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb` and `cmd/mkrpm` build native packages. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, and `console`, `dashboard`, `rdp`, and `session` for their respective features.
+This repository is a Go module for an HTTPS RDP gateway. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb` and `cmd/mkrpm` are thin native-packaging command adapters. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, `deb` and `rpm` for native package construction, and `console`, `dashboard`, `rdp`, and `session` for their respective features.
 
 UI source lives in `ui/`, and the compiled browser asset is `static/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Tests are co-located with their packages; integration coverage is concentrated in `internal/gateway`, `internal/rdp`, and `internal/virt`.
 

@@ -1,12 +1,9 @@
-package main
+package deb
 
 import (
 	"bytes"
 	"compress/gzip"
-	"flag"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,7 +163,7 @@ func selfLoopSymlink(t *testing.T) string {
 }
 
 func TestPackageFilesLicenseStatError(t *testing.T) {
-	o := options{binarySrc: "bin", unitSrc: "unit", confSrc: "conf", licenseSrc: selfLoopSymlink(t)}
+	o := Options{BinarySource: "bin", UnitSource: "unit", ConfigSource: "conf", LicenseSource: selfLoopSymlink(t)}
 	if _, err := packageFiles(o); err == nil || !strings.Contains(err.Error(), "stat license") {
 		t.Fatalf("packageFiles error = %v, want a stat license error", err)
 	}
@@ -175,17 +172,17 @@ func TestPackageFilesLicenseStatError(t *testing.T) {
 func TestWriteDebLicenseStatError(t *testing.T) {
 	dir := t.TempDir()
 	bin, unit, conf := stageInputs(t, dir)
-	o := options{
-		version:    "1.0.0",
-		arch:       "amd64",
-		binarySrc:  bin,
-		binaryDest: "/usr/bin/devbox-gateway",
-		unitSrc:    unit,
-		confSrc:    conf,
-		licenseSrc: selfLoopSymlink(t),
-		out:        filepath.Join(dir, "out.deb"),
+	o := Options{
+		Version:           "1.0.0",
+		Arch:              "amd64",
+		BinarySource:      bin,
+		BinaryDestination: "/usr/bin/devbox-gateway",
+		UnitSource:        unit,
+		ConfigSource:      conf,
+		LicenseSource:     selfLoopSymlink(t),
+		Output:            filepath.Join(dir, "out.deb"),
 	}
-	if err := writeDeb(o); err == nil {
+	if err := Write(o); err == nil {
 		t.Fatal("expected error when the license path cannot be stat-ed")
 	}
 }
@@ -193,19 +190,19 @@ func TestWriteDebLicenseStatError(t *testing.T) {
 func TestWriteDebDataArchiveError(t *testing.T) {
 	dir := t.TempDir()
 	bin, unit, conf := stageInputs(t, dir)
-	o := options{
-		version:    "1.0.0",
-		arch:       "amd64",
-		binarySrc:  bin,
-		binaryDest: "/usr/bin/dev\x00box", // NUL cannot be encoded in a tar name
-		unitSrc:    unit,
-		confSrc:    conf,
-		licenseSrc: filepath.Join(dir, "LICENSE"),
-		out:        filepath.Join(dir, "out.deb"),
+	o := Options{
+		Version:           "1.0.0",
+		Arch:              "amd64",
+		BinarySource:      bin,
+		BinaryDestination: "/usr/bin/dev\x00box", // NUL cannot be encoded in a tar name
+		UnitSource:        unit,
+		ConfigSource:      conf,
+		LicenseSource:     filepath.Join(dir, "LICENSE"),
+		Output:            filepath.Join(dir, "out.deb"),
 	}
-	err := writeDeb(o)
+	err := Write(o)
 	if err == nil || !strings.Contains(err.Error(), "create data archive") {
-		t.Fatalf("writeDeb error = %v, want a create data archive error", err)
+		t.Fatalf("Write error = %v, want a create data archive error", err)
 	}
 }
 
@@ -218,81 +215,4 @@ func TestWritePackageFileRenameOntoDirectory(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "replace output") {
 		t.Fatalf("writePackageFile error = %v, want a replace output error", err)
 	}
-}
-
-// TestMainDefaultOutPath omits -out so main derives the
-// dist/<name>_<version>_<arch>.deb default, running from a temp working
-// directory that provides the dist/ folder.
-func TestMainDefaultOutPath(t *testing.T) {
-	prevArgs := os.Args
-	prevFlags := flag.CommandLine
-	t.Cleanup(func() {
-		os.Args = prevArgs
-		flag.CommandLine = prevFlags
-	})
-
-	dir := t.TempDir()
-	bin, unit, conf := stageInputs(t, dir)
-	t.Chdir(dir)
-	if err := os.Mkdir("dist", 0o755); err != nil {
-		t.Fatalf("mkdir dist: %v", err)
-	}
-
-	flag.CommandLine = flag.NewFlagSet("mkdeb", flag.ContinueOnError)
-	flag.CommandLine.SetOutput(io.Discard)
-	os.Args = []string{
-		"mkdeb",
-		"-version", "9.9.9",
-		"-arch", "amd64",
-		"-binary", bin,
-		"-unit", unit,
-		"-conf", conf,
-		"-license", filepath.Join(dir, "LICENSE"),
-	}
-
-	main()
-
-	out := filepath.Join(dir, "dist", "devbox-gateway_9.9.9_amd64.deb")
-	if info, err := os.Stat(out); err != nil || info.Size() == 0 {
-		t.Fatalf("default output stat = %v, %v", info, err)
-	}
-}
-
-const fatalTrapSentinel = "mkdeb: log.Fatal reached"
-
-// fatalTrapWriter panics from inside log.Fatal's output call so main's error
-// branch can run without the process exiting; the test recovers the sentinel.
-type fatalTrapWriter struct{}
-
-func (fatalTrapWriter) Write([]byte) (int, error) {
-	panic(fatalTrapSentinel)
-}
-
-func TestMainFatalOnError(t *testing.T) {
-	prevArgs := os.Args
-	prevFlags := flag.CommandLine
-	prevLogOutput := log.Writer()
-	t.Cleanup(func() {
-		os.Args = prevArgs
-		flag.CommandLine = prevFlags
-		log.SetOutput(prevLogOutput)
-	})
-
-	dir := t.TempDir()
-	flag.CommandLine = flag.NewFlagSet("mkdeb", flag.ContinueOnError)
-	flag.CommandLine.SetOutput(io.Discard)
-	os.Args = []string{
-		"mkdeb",
-		"-binary", filepath.Join(dir, "absent"),
-		"-out", filepath.Join(dir, "out.deb"),
-	}
-	log.SetOutput(fatalTrapWriter{})
-
-	defer func() {
-		if r := recover(); r != fatalTrapSentinel {
-			t.Fatalf("main did not reach log.Fatal; recovered %v", r)
-		}
-	}()
-	main()
-	t.Fatal("main returned even though packaging failed")
 }
