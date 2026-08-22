@@ -126,6 +126,42 @@ func covxWaitForVM(t *testing.T, owner string) {
 	}
 }
 
+func TestDataForAdminListsVMsAcrossOwners(t *testing.T) {
+	suffix := time.Now().UnixNano()
+	owners := []string{
+		fmt.Sprintf("covxadmina%d", suffix),
+		fmt.Sprintf("covxadminb%d", suffix),
+	}
+	wantNames := make(map[string]string, len(owners))
+	for i, owner := range owners {
+		vmName := fmt.Sprintf("covxadminvm%d-%d", suffix, i)
+		covxDefineOwnedDomain(t, vmName, owner)
+		covxWaitForVM(t, owner)
+		wantNames[vmName] = owner
+	}
+
+	response, err := DataForAdmin(config.NewSettings(false))
+	if err != nil {
+		t.Fatalf("DataForAdmin: %v", err)
+	}
+	if !response.IsAdmin {
+		t.Fatal("expected admin response marker")
+	}
+	for _, vm := range response.VMs {
+		wantOwner, wanted := wantNames[vm.Name]
+		if !wanted {
+			continue
+		}
+		if vm.Owner != wantOwner {
+			t.Fatalf("VM %q owner = %q, want %q", vm.Name, vm.Owner, wantOwner)
+		}
+		delete(wantNames, vm.Name)
+	}
+	if len(wantNames) != 0 {
+		t.Fatalf("admin response did not include every owner's VM: missing %v", wantNames)
+	}
+}
+
 func TestWriteRDPFileNotFound(t *testing.T) {
 	settings := config.NewSettings(false)
 

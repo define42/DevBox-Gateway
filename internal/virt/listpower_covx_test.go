@@ -31,6 +31,9 @@ func TestViocovConnectErrorsSurfaceFromHelpers(t *testing.T) {
 	if _, _, err := VMOwner("cvio-any"); err == nil {
 		t.Fatal("VMOwner: expected connect error")
 	}
+	if _, err := PersistentVMExists("cvio-any"); err == nil {
+		t.Fatal("PersistentVMExists: expected connect error")
+	}
 	if _, err := UserOwnsVM("cvio-any", "cvio-user"); err == nil {
 		t.Fatal("UserOwnsVM: expected connect error")
 	}

@@ -36,6 +36,17 @@ func issueSessionCookieWithHash(t *testing.T, sessionManager *session.Manager, u
 	if err != nil {
 		t.Fatalf("new user: %v", err)
 	}
+	return issueSessionCookieForUser(t, sessionManager, user, remoteAddr, loginPasswordHash)
+}
+
+func issueSessionCookieForUser(
+	t *testing.T,
+	sessionManager *session.Manager,
+	user *identity.User,
+	remoteAddr string,
+	loginPasswordHash string,
+) *http.Cookie {
+	t.Helper()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)

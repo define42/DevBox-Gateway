@@ -355,6 +355,55 @@ func TestViocovMetadataGettersInvalidDomain(t *testing.T) {
 	}
 }
 
+func TestViocovPersistentVMExists(t *testing.T) {
+	tests := []struct {
+		name   string
+		vmName string
+	}{
+		{name: "blank", vmName: "   "},
+		{name: "missing", vmName: viocovUniqueName("absent")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exists, err := PersistentVMExists(tt.vmName)
+			if err != nil {
+				t.Fatalf("PersistentVMExists(%q): %v", tt.vmName, err)
+			}
+			if exists {
+				t.Fatalf("PersistentVMExists(%q) = true, want false", tt.vmName)
+			}
+		})
+	}
+
+	conn := newTestLibvirtConn(t)
+	persistentName := viocovUniqueName("persistent")
+	viocovDefineDomain(t, conn, persistentName, "")
+	exists, err := PersistentVMExists(persistentName)
+	if err != nil {
+		t.Fatalf("PersistentVMExists(persistent): %v", err)
+	}
+	if !exists {
+		t.Fatal("expected defined domain to be persistent")
+	}
+
+	transientName := viocovUniqueName("transient")
+	transient, err := conn.DomainCreateXML(viocovDomainXML(transientName, ""), 0)
+	if err != nil {
+		t.Fatalf("create transient domain: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = transient.Destroy()
+		_ = transient.Free()
+	})
+	exists, err = PersistentVMExists(transientName)
+	if err != nil {
+		t.Fatalf("PersistentVMExists(transient): %v", err)
+	}
+	if exists {
+		t.Fatal("did not expect transient domain to pass the persistent VM check")
+	}
+}
+
 func TestViocovVMOwnerBranches(t *testing.T) {
 	owner, has, err := VMOwner("   ")
 	if err != nil || has || owner != "" {

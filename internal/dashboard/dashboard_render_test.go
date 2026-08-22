@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/webassets"
 )
@@ -164,6 +165,9 @@ func TestBuildDashboardRows(t *testing.T) {
 	if row.User != "guest" {
 		t.Fatalf("expected user %q, got %q", "guest", row.User)
 	}
+	if row.Owner != "alice" {
+		t.Fatalf("expected owner %q to remain distinct from guest user %q, got %q", "alice", row.User, row.Owner)
+	}
 	if row.Name != "alice.vm" || row.IP != "192.0.2.10" || row.State != "running" {
 		t.Fatalf("unexpected row data: %+v", row)
 	}
@@ -172,6 +176,43 @@ func TestBuildDashboardRows(t *testing.T) {
 	}
 	if row.RDPFilename != "alice.vm.rdp" {
 		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)
+	}
+}
+
+func TestDataForAdmin(t *testing.T) {
+	settings := config.NewSettings(false)
+	baseImagesPath := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(baseImagesPath, []byte("not an image directory"), 0o600); err != nil {
+		t.Fatalf("write base-image blocker: %v", err)
+	}
+	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, baseImagesPath); err != nil {
+		t.Fatalf("overwrite base-image directory: %v", err)
+	}
+	if err := settings.OverwriteForTestInt(config.VDI_AUTO_SHUTDOWN_HOURS, 6); err != nil {
+		t.Fatalf("overwrite auto-shutdown hours: %v", err)
+	}
+
+	response, err := DataForAdmin(settings)
+	if err != nil {
+		t.Fatalf("DataForAdmin: %v", err)
+	}
+	if !response.IsAdmin {
+		t.Fatal("expected admin response marker")
+	}
+	if response.Username != "" {
+		t.Fatalf("expected no single-user filter in admin response, got %q", response.Username)
+	}
+	if response.AutoShutdownHours != 6 {
+		t.Fatalf("expected auto-shutdown metadata 6, got %d", response.AutoShutdownHours)
+	}
+	if response.Filename != DefaultRDPFilename {
+		t.Fatalf("expected filename %q, got %q", DefaultRDPFilename, response.Filename)
+	}
+	if response.VMs == nil {
+		t.Fatal("expected an initialized flat VM list")
+	}
+	if response.BaseImages != nil {
+		t.Fatalf("admin response must not require base images, got %v", response.BaseImages)
 	}
 }
 
@@ -191,6 +232,35 @@ func TestDataResponseSerializesAutoShutdownHours(t *testing.T) {
 	}
 	if strings.Contains(string(disabled), "autoShutdownHours") {
 		t.Fatalf("expected autoShutdownHours to be omitted when disabled, got %s", disabled)
+	}
+}
+
+func TestAdminFieldsSerializeOnlyWhenSet(t *testing.T) {
+	payload, err := json.Marshal(DataResponse{
+		IsAdmin: true,
+		VMs: []VM{{
+			Owner: "alice",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal admin response: %v", err)
+	}
+	if !strings.Contains(string(payload), `"isAdmin":true`) {
+		t.Fatalf("expected isAdmin in payload, got %s", payload)
+	}
+	if !strings.Contains(string(payload), `"owner":"alice"`) {
+		t.Fatalf("expected VM owner in payload, got %s", payload)
+	}
+
+	omitted, err := json.Marshal(DataResponse{VMs: []VM{{}}})
+	if err != nil {
+		t.Fatalf("marshal ordinary response: %v", err)
+	}
+	if strings.Contains(string(omitted), "isAdmin") {
+		t.Fatalf("expected false isAdmin to be omitted, got %s", omitted)
+	}
+	if strings.Contains(string(omitted), `"owner"`) {
+		t.Fatalf("expected blank owner to be omitted, got %s", omitted)
 	}
 }
 
@@ -214,19 +284,25 @@ func TestBuildDashboardRowsRDPUsername(t *testing.T) {
 	rows := buildDashboardRows([]virt.VMInfo{
 		{Name: "with-guest", Owner: "alice", GuestUser: "bob"},
 		{Name: "legacy", Owner: "alice"},
-	}, "alice")
+		{Name: "ownerless"},
+	}, "requester")
 
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
 	// User is the RDP login surfaced in the .rdp download: the chosen guest
 	// account when present.
 	if rows[0].User != "bob" {
 		t.Fatalf("expected RDP username %q, got %q", "bob", rows[0].User)
 	}
-	// Older VMs without guest-user metadata fall back to the requesting user.
+	// Older VMs without guest-user metadata first fall back to their owner,
+	// which matters when an administrator is viewing another user's VM.
 	if rows[1].User != "alice" {
-		t.Fatalf("expected fallback RDP username %q, got %q", "alice", rows[1].User)
+		t.Fatalf("expected owner fallback RDP username %q, got %q", "alice", rows[1].User)
+	}
+	// An ownerless legacy entry has no better identity than the requesting user.
+	if rows[2].User != "requester" {
+		t.Fatalf("expected requester fallback RDP username %q, got %q", "requester", rows[2].User)
 	}
 }
 

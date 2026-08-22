@@ -18,6 +18,9 @@ func TestNewSettingsDefaults(t *testing.T) {
 	if got := s.String(LDAP_BASE_DN); got != "dc=glauth,dc=com" {
 		t.Fatalf("expected default LDAP_BASE_DN, got %q", got)
 	}
+	if got := s.String(ADMIN_GROUP); got != "" {
+		t.Fatalf("expected default ADMIN_GROUP to be empty, got %q", got)
+	}
 	if got := s.Bool(ACME_ENABLE); got != false {
 		t.Fatalf("expected default ACME_ENABLE=false, got %v", got)
 	}
@@ -41,6 +44,15 @@ func TestNewSettingsDefaults(t *testing.T) {
 	}
 	if got := s.Int(VDI_AUTO_SHUTDOWN_HOURS); got != DefaultVDIAutoShutdownHours {
 		t.Fatalf("expected default VDI_AUTO_SHUTDOWN_HOURS=%d, got %d", DefaultVDIAutoShutdownHours, got)
+	}
+}
+
+func TestNewSettingsAdminGroupFromEnvironment(t *testing.T) {
+	t.Setenv(ADMIN_GROUP, " cn=VDI-Admins,ou=groups,dc=example,dc=com ")
+
+	s := NewSettings(false)
+	if got := s.String(ADMIN_GROUP); got != "cn=VDI-Admins,ou=groups,dc=example,dc=com" {
+		t.Fatalf("expected trimmed ADMIN_GROUP, got %q", got)
 	}
 }
 

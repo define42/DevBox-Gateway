@@ -72,6 +72,43 @@ func domainOwner(dom *libvirt.Domain) (string, bool, error) {
 	return owner, true, nil
 }
 
+// PersistentVMExists reports whether a persistent domain with the exact name
+// currently exists. Administrator lifecycle authorization uses this live
+// check instead of the eventually consistent inventory cache, particularly so
+// a remove request cannot target same-named orphan volumes after a domain has
+// disappeared.
+func PersistentVMExists(name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, nil
+	}
+
+	conn, err := connectLibvirt()
+	if err != nil {
+		return false, fmt.Errorf("connect libvirt: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Close()
+	}()
+
+	dom, err := conn.LookupDomainByName(name)
+	if err != nil {
+		if errors.Is(err, libvirt.ERR_NO_DOMAIN) {
+			return false, nil
+		}
+		return false, fmt.Errorf("lookup domain %s: %w", name, err)
+	}
+	defer func() {
+		_ = dom.Free()
+	}()
+
+	persistent, err := dom.IsPersistent()
+	if err != nil {
+		return false, fmt.Errorf("check domain persistence %s: %w", name, err)
+	}
+	return persistent, nil
+}
+
 // UserOwnsVM reports whether the named VM is owned by the given user.
 func UserOwnsVM(name, username string) (bool, error) {
 	owner, hasOwner, err := VMOwner(name)

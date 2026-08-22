@@ -169,6 +169,7 @@ func (s *Settings) setAuthDefaults() {
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
 	s.SetString(LDAP_REQUIRED_GROUPS, "List of groups (bare names or full DNs, DNs must be ';'-delimited, bare names may use ',' too); when non-empty, LDAP login also requires the user's memberOf attribute to contain at least one listed group", "")
+	s.SetString(ADMIN_GROUP, "LDAP group (bare name or full DN) whose direct members receive administrator access at login; empty disables administrator access", "")
 	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
@@ -487,6 +488,7 @@ const (
 	ACME_EMAIL                       = "ACME_EMAIL"
 	ACME_CA                          = "ACME_CA"
 	ACME_ENABLE                      = "ACME_ENABLE"
+	ADMIN_GROUP                      = "ADMIN_GROUP"
 	CERT_FILE                        = "CERT_FILE"
 	DATA_ROOT_DIR                    = "DATA_ROOT_DIR"
 	FRONT_DOMAIN                     = "FRONT_DOMAIN"

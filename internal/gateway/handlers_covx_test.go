@@ -102,6 +102,31 @@ func hcovCleanupDomain(name string) {
 	_ = dom.Undefine()
 }
 
+func hcovDomainState(t *testing.T, name string) (exists bool, active bool) {
+	t.Helper()
+
+	conn, err := libvirt.NewConnect(virt.LibvirtURI())
+	if err != nil {
+		t.Fatalf("connect libvirt: %v", err)
+	}
+	defer func() { _, _ = conn.Close() }()
+
+	dom, err := conn.LookupDomainByName(name)
+	if errors.Is(err, libvirt.ERR_NO_DOMAIN) {
+		return false, false
+	}
+	if err != nil {
+		t.Fatalf("lookup domain %s: %v", name, err)
+	}
+	defer func() { _ = dom.Free() }()
+
+	active, err = dom.IsActive()
+	if err != nil {
+		t.Fatalf("check domain %s active: %v", name, err)
+	}
+	return true, active
+}
+
 func hcovCleanupPool(name string) {
 	conn, err := libvirt.NewConnect(virt.LibvirtURI())
 	if err != nil {
@@ -609,6 +634,131 @@ func TestHcovDashboardRDPRejectsBadAndUnownedNames(t *testing.T) {
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {"hcovghostvm"}})
 	hcovAssertAction(t, rec, http.StatusForbidden, "You do not have permission to connect to this VM.")
+}
+
+func TestHcovAdminRoleDoesNotBypassRDPOwnership(t *testing.T) {
+	owner := hcovUniqueName("hcovrdpowner")
+	domainName := owner + vmname.Separator + "desk"
+	hcovDefineOwnedDomain(t, domainName, owner)
+
+	sessionManager := session.New()
+	router := NewHandler(sessionManager, config.NewSettings(false))
+	admin := &identity.User{Name: hcovUniqueName("hcovadmin"), IsAdmin: true}
+	cookie := issueSessionCookieForUser(
+		t,
+		sessionManager,
+		admin,
+		"192.0.2.1:12345",
+		testGuestPasswordHash,
+	)
+
+	rec := hcovPostForm(
+		t,
+		router,
+		cookie,
+		"/api/dashboard/rdp",
+		url.Values{"vm_name": {domainName}},
+	)
+	hcovAssertAction(t, rec, http.StatusForbidden, "You do not have permission to connect to this VM.")
+	if sessionManager.ConsumeRDPConnectGrant(admin.Name, "192.0.2.1", domainName) {
+		t.Fatal("administrator RDP denial must not leave a connection grant")
+	}
+}
+
+func TestHcovDashboardLifecycleRejectsAnotherUsersVM(t *testing.T) {
+	owner := hcovUniqueName("hcovotherowner")
+	domainName := owner + vmname.Separator + "desk"
+	hcovDefineOwnedDomain(t, domainName, owner)
+
+	sessionManager := session.New()
+	router := NewHandler(sessionManager, config.NewSettings(false))
+	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovordinary"))
+
+	tests := []struct {
+		name string
+		path string
+		verb string
+	}{
+		{name: "start", path: "/api/dashboard/start", verb: "start"},
+		{name: "restart", path: "/api/dashboard/restart", verb: "restart"},
+		{name: "stop", path: "/api/dashboard/shutdown", verb: "shutdown"},
+		{name: "remove", path: "/api/dashboard/remove", verb: "remove"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := hcovPostForm(t, router, cookie, tt.path, url.Values{"vm_name": {domainName}})
+			hcovAssertAction(
+				t,
+				rec,
+				http.StatusForbidden,
+				fmt.Sprintf("You do not have permission to %s this VM.", tt.verb),
+			)
+		})
+	}
+
+	exists, active := hcovDomainState(t, domainName)
+	if !exists || active {
+		t.Fatalf("ordinary-user requests mutated VM %q: exists=%v active=%v", domainName, exists, active)
+	}
+}
+
+func TestHcovAdminCanManageAnotherUsersVMLifecycle(t *testing.T) {
+	owner := hcovUniqueName("hcovmanagedowner")
+	domainName := owner + vmname.Separator + "desk"
+	hcovDefineOwnedDomain(t, domainName, owner)
+
+	settings := config.NewSettings(false)
+	poolName := hcovUniqueName("hcov-admin-pool")
+	hcovDefineActivePool(t, poolName, newLibvirtAccessibleTempDir(t, "hcov-admin-pool-"))
+	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
+		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
+	}
+
+	sessionManager := session.New()
+	router := NewHandler(sessionManager, settings)
+	admin := &identity.User{Name: hcovUniqueName("hcovadmin"), IsAdmin: true}
+	cookie := issueSessionCookieForUser(
+		t,
+		sessionManager,
+		admin,
+		"192.0.2.1:12345",
+		testGuestPasswordHash,
+	)
+	form := url.Values{"vm_name": {domainName}}
+
+	rec := hcovPostForm(t, router, cookie, "/api/dashboard/start", form)
+	hcovAssertAction(t, rec, http.StatusOK, "VM start requested.")
+	if exists, active := hcovDomainState(t, domainName); !exists || !active {
+		t.Fatalf("admin start did not activate VM %q: exists=%v active=%v", domainName, exists, active)
+	}
+
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/restart", form)
+	hcovAssertAction(t, rec, http.StatusOK, "VM restart requested.")
+	if exists, active := hcovDomainState(t, domainName); !exists || !active {
+		t.Fatalf("admin restart did not keep VM %q active: exists=%v active=%v", domainName, exists, active)
+	}
+
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/shutdown", form)
+	hcovAssertAction(t, rec, http.StatusOK, "VM shutdown requested.")
+	if exists, active := hcovDomainState(t, domainName); !exists || active {
+		t.Fatalf("admin stop did not deactivate VM %q: exists=%v active=%v", domainName, exists, active)
+	}
+
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/remove", form)
+	hcovAssertAction(t, rec, http.StatusOK, "VM removed.")
+	if exists, _ := hcovDomainState(t, domainName); exists {
+		t.Fatalf("admin remove left VM %q defined", domainName)
+	}
+
+	missingName := hcovUniqueName("hcov-admin-missing")
+	rec = hcovPostForm(
+		t,
+		router,
+		cookie,
+		"/api/dashboard/remove",
+		url.Values{"vm_name": {missingName}},
+	)
+	hcovAssertAction(t, rec, http.StatusNotFound, "VM not found.")
 }
 
 func hcovAssertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, user string) {

@@ -116,6 +116,34 @@ func TestDashboardJavaScriptMultiplexesVMUpdatesOnWebSocket(t *testing.T) {
 	}
 }
 
+func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
+	router := NewHandler(session.New(), config.NewSettings(false))
+	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
+	}
+	body := rec.Body.String()
+	for description, fragment := range map[string]string{
+		"conditional admin navigation": `id="admin-view-link" href="/api/admin" hidden`,
+		"admin data endpoint":          `"/api/admin/data"`,
+		"admin websocket endpoint":     `"/api/admin/ws"`,
+		"owner grouping":               `new Map()`,
+		"unowned VM group":             `"Unowned"`,
+		"admin lifecycle table mode":   `appendVMTable(section, vmsByOwner.get(owner) || [], { connections: false, lifecycle: true })`,
+		"hidden create action":         `openCreateButtonEl.hidden = adminView`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected dashboard JavaScript to include %s", description)
+		}
+	}
+	if strings.Contains(body, `actionAreaEl.hidden = adminView`) {
+		t.Fatal("administrator lifecycle action feedback must remain visible")
+	}
+}
+
 func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
 	router := NewHandler(session.New(), config.NewSettings(false))
 	req := httptest.NewRequest(http.MethodGet, "/static/dashboard.js", nil)

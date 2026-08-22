@@ -34,6 +34,7 @@ const (
 type VM struct {
 	Name         string `json:"name"`
 	DisplayName  string `json:"displayName"`
+	Owner        string `json:"owner,omitempty"`
 	User         string `json:"user"`
 	BaseImage    string `json:"baseImage,omitempty"`
 	CreatedAt    string `json:"createdAt,omitempty"`
@@ -48,10 +49,11 @@ type VM struct {
 	RDPReady     bool   `json:"rdpReady"`
 }
 
-// DataResponse is the API response for /api/dashboard/data.
+// DataResponse is a dashboard inventory snapshot returned over HTTP or WebSocket.
 type DataResponse struct {
 	Filename string `json:"filename"`
 	Username string `json:"username,omitempty"`
+	IsAdmin  bool   `json:"isAdmin,omitempty"`
 	VMs      []VM   `json:"vms"`
 	// AutoShutdownHours is the VDI_AUTO_SHUTDOWN_HOURS setting: how many hours
 	// a running VDI may go unused before the gateway shuts it down. 0 means
@@ -212,6 +214,19 @@ func DataForUser(settings *config.Settings, user string) (DataResponse, error) {
 	return response, nil
 }
 
+// DataForAdmin builds an administrator dashboard snapshot containing every
+// cached persistent VM. Unlike the user dashboard it does not load base images
+// because the administrator inventory does not expose VM creation.
+func DataForAdmin(settings *config.Settings) (DataResponse, error) {
+	vmList := virt.NewInventory().VMs("")
+	return DataResponse{
+		Filename:          DefaultRDPFilename,
+		IsAdmin:           true,
+		VMs:               buildDashboardRows(vmList, ""),
+		AutoShutdownHours: int(config.VDIAutoShutdownAfter(settings) / time.Hour),
+	}, nil
+}
+
 func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 	rows := make([]VM, 0, len(vmList))
 	for _, vm := range vmList {
@@ -219,15 +234,20 @@ func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 		// without the owner prefix) — the old FQDN was never the on-wire SNI.
 		displayName := vmBareName(vm)
 		// Prefer the guest account stored on the VM; older VMs without that
-		// metadata fall back to the requesting user's own name. This is the RDP
-		// login surfaced in the downloaded .rdp file (see RDPFileForUser).
+		// metadata fall back to their owner, then to the requesting user's name
+		// for an ownerless legacy entry. This is the RDP login surfaced in the
+		// downloaded .rdp file (see RDPFileForUser).
 		rdpUser := strings.TrimSpace(vm.GuestUser)
+		if rdpUser == "" {
+			rdpUser = strings.TrimSpace(vm.Owner)
+		}
 		if rdpUser == "" {
 			rdpUser = user
 		}
 		rows = append(rows, VM{
 			Name:         vm.Name,
 			DisplayName:  displayName,
+			Owner:        vm.Owner,
 			User:         rdpUser,
 			BaseImage:    strings.TrimSpace(vm.BaseImage),
 			CreatedAt:    strings.TrimSpace(vm.CreatedAt),

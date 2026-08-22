@@ -84,7 +84,12 @@ func AuthenticateAccess(username, password string, settings *config.Settings) (*
 		return nil, fmt.Errorf("user %s is not a member of any required group", mail)
 	}
 
-	return identity.New(username)
+	user, err := identity.New(username)
+	if err != nil {
+		return nil, err
+	}
+	user.IsAdmin = isAdmin(sr.Entries[0], settings)
+	return user, nil
 }
 
 // requiredGroups parses LDAP_REQUIRED_GROUPS into a list of group DNs or bare
@@ -125,6 +130,17 @@ func memberOfAny(entry *ldap.Entry, groups []string) bool {
 		}
 	}
 	return false
+}
+
+// isAdmin reports whether the entry is a direct member of ADMIN_GROUP. The
+// result is captured in the authenticated identity at login time; an empty
+// setting, a missing memberOf attribute, or no direct match all fail closed.
+func isAdmin(entry *ldap.Entry, settings *config.Settings) bool {
+	group := strings.TrimSpace(settings.Get(config.ADMIN_GROUP))
+	if group == "" {
+		return false
+	}
+	return memberOfAny(entry, []string{group})
 }
 
 // RequiredGroupNames returns human-readable names of the groups listed in

@@ -79,6 +79,46 @@ func TestAuthenticateAccessWithExplicitEmail(t *testing.T) {
 	}
 }
 
+func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	ldapURL, cleanup := startGlauth(ctx, t)
+	defer cleanup()
+
+	applyLDAPSettings(t, ldapURL)
+	// admin is a direct member of devbox-admins and the normal team10_r access
+	// group in testldap/default-config.cfg; johndoe is not an administrator.
+	t.Setenv(config.ADMIN_GROUP, "devbox-admins")
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "team10_r")
+	settings := config.NewSettings(false)
+
+	admin, err := AuthenticateAccess("admin", "dogood", settings)
+	if err != nil {
+		t.Fatalf("AuthenticateAccess(admin): %v", err)
+	}
+	if admin == nil || !admin.IsAdmin {
+		t.Fatalf("expected admin to be an administrator, got %#v", admin)
+	}
+
+	regular, err := AuthenticateAccess("johndoe", "dogood", settings)
+	if err != nil {
+		t.Fatalf("AuthenticateAccess(johndoe): %v", err)
+	}
+	if regular == nil || regular.IsAdmin {
+		t.Fatalf("expected johndoe to remain a non-administrator, got %#v", regular)
+	}
+
+	// Administrator membership grants a role, not login access. The normal
+	// required-group gate must still reject this otherwise-admin user.
+	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
+	restrictedSettings := config.NewSettings(false)
+	denied, err := AuthenticateAccess("admin", "dogood", restrictedSettings)
+	if err == nil || denied != nil {
+		t.Fatalf("expected required-group denial before administrator access, got user=%#v err=%v", denied, err)
+	}
+}
+
 func TestAuthenticateAccessRejectsUnexpectedDomain(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

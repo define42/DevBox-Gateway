@@ -43,6 +43,16 @@ func covxSessionCookieWithDeadline(
 	if err != nil {
 		t.Fatalf("new user %q: %v", username, err)
 	}
+	return covxSessionCookieForUser(t, manager, user, deadline)
+}
+
+func covxSessionCookieForUser(
+	t *testing.T,
+	manager *session.Manager,
+	user *identity.User,
+	deadline time.Time,
+) *http.Cookie {
+	t.Helper()
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -81,6 +91,7 @@ func covxDashboardServer(t *testing.T, manager *session.Manager) *httptest.Serve
 	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(manager))
 	router.Get("/api/dashboard/vnc/{name}/ws", HandleDashboardVNCWS(manager))
 	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, config.NewSettings(false)))
+	router.Get("/api/admin/ws", HandleAdminDashboardWS(manager, config.NewSettings(false)))
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
@@ -170,6 +181,33 @@ func TestCovxDashboardWSRejectsUnauthenticated(t *testing.T) {
 	}
 	if !strings.Contains(body, "Login required.") {
 		t.Fatalf("expected login required message, got %q", body)
+	}
+}
+
+func TestCovxAdminDashboardWSAuthorization(t *testing.T) {
+	manager := session.New()
+	server := covxDashboardServer(t, manager)
+
+	status, body := covxGetStatus(t, server, "/api/admin/ws", nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated status %d, got %d with body %s", http.StatusUnauthorized, status, body)
+	}
+
+	userCookie := covxSessionCookie(t, manager, "ordinary-user")
+	status, body = covxGetStatus(t, server, "/api/admin/ws", userCookie)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected non-admin status %d, got %d with body %s", http.StatusForbidden, status, body)
+	}
+	if !strings.Contains(body, "Administrator access required.") {
+		t.Fatalf("expected administrator error, got %q", body)
+	}
+
+	admin := &identity.User{Name: "admin-user", IsAdmin: true}
+	adminCookie := covxSessionCookieForUser(t, manager, admin, time.Time{})
+	conn := covxDialWebsocket(t, server, "/api/admin/ws", adminCookie)
+	message := readDashboardMessageType(t, conn, "dashboard")
+	if message.Data == nil || !message.Data.IsAdmin {
+		t.Fatalf("expected admin inventory data, got %+v", message)
 	}
 }
 

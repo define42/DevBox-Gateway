@@ -12,4 +12,7 @@ func TestNewUser(t *testing.T) {
 	if user.Name != "alice" {
 		t.Fatalf("expected name %q, got %q", "alice", user.Name)
 	}
+	if user.IsAdmin {
+		t.Fatal("expected a newly created user to be a non-administrator")
+	}
 }

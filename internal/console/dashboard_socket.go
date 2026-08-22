@@ -35,17 +35,39 @@ type dashboardServerMessage struct {
 	Error string                  `json:"error,omitempty"`
 }
 
+type dashboardView struct {
+	username string
+	isAdmin  bool
+	allVMs   bool
+}
+
 // HandleDashboardWS serves the dashboard's shared control websocket. Typed
 // messages multiplex application-level RTT probes with user-filtered VM status
 // pushes, avoiding a second long-lived SSE connection. Browsers do not expose
 // protocol-level ping/pong to JavaScript, so RTT still uses explicit ping/pong
 // messages while WebSocket control frames keep the transport alive.
 func HandleDashboardWS(sessionManager *session.Manager, settings *config.Settings) http.HandlerFunc {
+	return handleDashboardWS(sessionManager, settings, false)
+}
+
+// HandleAdminDashboardWS serves the administrator inventory WebSocket. It
+// shares the dashboard transport and RTT protocol, but publishes every VM and
+// performs its own server-side role check before upgrading the connection.
+func HandleAdminDashboardWS(sessionManager *session.Manager, settings *config.Settings) http.HandlerFunc {
+	return handleDashboardWS(sessionManager, settings, true)
+}
+
+func handleDashboardWS(sessionManager *session.Manager, settings *config.Settings, adminView bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := sessionManager.UserFromContext(r.Context())
 		if !ok {
 			log.Printf("reject dashboard websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
+			return
+		}
+		if adminView && !user.IsAdmin {
+			log.Printf("reject admin dashboard websocket from %s for non-admin user %q", strconv.Quote(r.RemoteAddr), user.Name)
+			http.Error(w, "Administrator access required.", http.StatusForbidden)
 			return
 		}
 		sessionDeadline := sessionManager.Deadline(r.Context())
@@ -68,13 +90,26 @@ func HandleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 		}
 		defer unregisterConnection()
 
-		bridgeDashboardControlSocket(ws, user.Name, settings, sessionDeadline)
+		bridgeDashboardControlSocketForView(ws, dashboardView{
+			username: user.Name,
+			isAdmin:  user.IsAdmin,
+			allVMs:   adminView,
+		}, settings, sessionDeadline)
 	}
 }
 
 func bridgeDashboardControlSocket(
 	ws *websocket.Conn,
 	username string,
+	settings *config.Settings,
+	sessionDeadline time.Time,
+) {
+	bridgeDashboardControlSocketForView(ws, dashboardView{username: username}, settings, sessionDeadline)
+}
+
+func bridgeDashboardControlSocketForView(
+	ws *websocket.Conn,
+	view dashboardView,
 	settings *config.Settings,
 	sessionDeadline time.Time,
 ) {
@@ -87,7 +122,7 @@ func bridgeDashboardControlSocket(
 	socketCloserDone := make(chan struct{})
 
 	go writeDashboardMessages(ctx, cancel, ws, outbound, writerDone)
-	go publishDashboardVMUpdates(ctx, username, settings, outbound, publisherDone)
+	go publishDashboardVMUpdates(ctx, view, settings, outbound, publisherDone)
 	go pingWebsocketUntil(ws, keepaliveDone)
 	go closeDashboardSocketWhenDone(ctx, ws, socketCloserDone)
 
@@ -153,7 +188,7 @@ func writeDashboardMessages(
 
 func publishDashboardVMUpdates(
 	ctx context.Context,
-	username string,
+	view dashboardView,
 	settings *config.Settings,
 	outbound chan<- dashboardServerMessage,
 	done chan<- struct{},
@@ -161,29 +196,37 @@ func publishDashboardVMUpdates(
 	defer close(done)
 	worker := virt.NewInventory()
 
-	// Readiness belongs to this authenticated dashboard connection. Probe before
-	// the initial WebSocket snapshot, then repeat until its context is cancelled.
-	// Separate tabs intentionally run separate probe rounds.
-	worker.RefreshRDPReadiness(ctx, username)
+	// RDP readiness belongs to an interactive owner dashboard connection. Probe
+	// before its initial snapshot, then repeat until cancellation. The
+	// administrator inventory has lifecycle controls but no RDP connection
+	// controls, so it deliberately does not probe every user's RDP port from each
+	// open admin tab.
+	if !view.allVMs {
+		worker.RefreshRDPReadiness(ctx, view.username)
+	}
 
 	updates, unsubscribe := worker.SubscribeVMChanges()
 	defer unsubscribe()
 
-	if !queueDashboardDataUpdate(ctx, username, settings, outbound) {
+	if !queueDashboardDataUpdate(ctx, view, settings, outbound) {
 		return
 	}
 
-	readinessTicker := time.NewTicker(dashboardRDPReadinessPoll)
-	defer readinessTicker.Stop()
+	var readiness <-chan time.Time
+	if !view.allVMs {
+		readinessTicker := time.NewTicker(dashboardRDPReadinessPoll)
+		defer readinessTicker.Stop()
+		readiness = readinessTicker.C
+	}
 
 	for {
 		select {
 		case _, ok := <-updates:
-			if !ok || !queueDashboardDataUpdate(ctx, username, settings, outbound) {
+			if !ok || !queueDashboardDataUpdate(ctx, view, settings, outbound) {
 				return
 			}
-		case <-readinessTicker.C:
-			worker.RefreshRDPReadiness(ctx, username)
+		case <-readiness:
+			worker.RefreshRDPReadiness(ctx, view.username)
 		case <-ctx.Done():
 			return
 		}
@@ -192,11 +235,18 @@ func publishDashboardVMUpdates(
 
 func queueDashboardDataUpdate(
 	ctx context.Context,
-	username string,
+	view dashboardView,
 	settings *config.Settings,
 	outbound chan<- dashboardServerMessage,
 ) bool {
-	data, err := dashboard.DataForUser(settings, username)
+	var data dashboard.DataResponse
+	var err error
+	if view.allVMs {
+		data, err = dashboard.DataForAdmin(settings)
+	} else {
+		data, err = dashboard.DataForUser(settings, view.username)
+		data.IsAdmin = view.isAdmin
+	}
 	message := dashboardServerMessage{Type: "dashboard", Data: &data}
 	if err != nil {
 		log.Printf("list vms for dashboard websocket: %v", err)

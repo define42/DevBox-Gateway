@@ -3,10 +3,12 @@ package console
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
 
@@ -127,6 +129,27 @@ func covxOpenConsole(t *testing.T, name string) *virt.SerialConsole {
 	return console
 }
 
+func covxAssertDashboardChannelsStatus(
+	t *testing.T,
+	server *httptest.Server,
+	cookie *http.Cookie,
+	domainName string,
+	wantStatus int,
+	wantBody string,
+) {
+	t.Helper()
+
+	for _, channel := range []string{"console", "vnc"} {
+		status, body := covxGetStatus(t, server, "/api/dashboard/"+channel+"/"+domainName+"/ws", cookie)
+		if status != wantStatus {
+			t.Errorf("%s: expected %d, got %d with body %s", channel, wantStatus, status, body)
+		}
+		if !strings.Contains(body, wantBody) {
+			t.Errorf("%s: expected body to contain %q, got %q", channel, wantBody, body)
+		}
+	}
+}
+
 func TestCovxConsoleAndVNCOwnershipAndStoppedBranches(t *testing.T) {
 	dom := covxDefineDomain(t, "own")
 	manager := session.New()
@@ -147,17 +170,27 @@ func TestCovxConsoleAndVNCOwnershipAndStoppedBranches(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			dom.setOwnerMetadata(tc.metadata)
-			for _, channel := range []string{"console", "vnc"} {
-				status, body := covxGetStatus(t, server, "/api/dashboard/"+channel+"/"+dom.name+"/ws", cookie)
-				if status != tc.wantStatus {
-					t.Fatalf("%s: expected %d, got %d with body %s", channel, tc.wantStatus, status, body)
-				}
-				if !strings.Contains(body, tc.wantBody) {
-					t.Fatalf("%s: expected body to contain %q, got %q", channel, tc.wantBody, body)
-				}
-			}
+			covxAssertDashboardChannelsStatus(t, server, cookie, dom.name, tc.wantStatus, tc.wantBody)
 		})
 	}
+
+	t.Run("administrator remains owner scoped", func(t *testing.T) {
+		dom.setOwnerMetadata(covxOtherOwnerMetadata)
+		adminCookie := covxSessionCookieForUser(
+			t,
+			manager,
+			&identity.User{Name: "covx-admin", IsAdmin: true},
+			time.Time{},
+		)
+		covxAssertDashboardChannelsStatus(
+			t,
+			server,
+			adminCookie,
+			dom.name,
+			http.StatusForbidden,
+			"You do not have permission",
+		)
+	})
 }
 
 func TestCovxConsoleAndVNCOnRunningVM(t *testing.T) {

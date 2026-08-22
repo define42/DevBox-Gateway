@@ -11,7 +11,9 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
+	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/vmname"
 )
 
 func TestExtractCredentialsFromForm(t *testing.T) {
@@ -442,6 +444,9 @@ func TestValidateLoginUsername(t *testing.T) {
 }
 
 func TestParseDashboardVMName(t *testing.T) {
+	maxFullName := strings.Repeat("a", vmname.MaxUsernameLength) +
+		vmname.Separator +
+		strings.Repeat("b", vmname.MaxHostnameLength)
 	tests := []struct {
 		name     string
 		username string
@@ -453,6 +458,7 @@ func TestParseDashboardVMName(t *testing.T) {
 		{name: "valid owned vm name with email prefix", username: "alice@example.com", vmName: "alice@example.com.desktop", want: "alice@example.com.desktop"},
 		{name: "owned suffix too long", username: "alice", vmName: "alice." + strings.Repeat("x", maxVMNameLength+1), wantErr: true},
 		{name: "legacy unprefixed name", username: "alice", vmName: "legacy-imported-vm", want: "legacy-imported-vm"},
+		{name: "maximum canonical name for administrator", username: "", vmName: maxFullName, want: maxFullName},
 		{name: "empty", username: "alice", vmName: "", wantErr: true},
 		{name: "too long", username: "alice", vmName: strings.Repeat("x", maxVMNameFieldLen+1), wantErr: true},
 	}
@@ -829,6 +835,96 @@ func TestDashboardDataRequiresSession(t *testing.T) {
 
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303 redirect, got %d", rec.Code)
+	}
+}
+
+func TestAdminRoutesRequireSession(t *testing.T) {
+	sm := session.New()
+	router := NewHandler(sm, config.NewSettings(false))
+
+	for _, path := range []string{"/api/admin", "/api/admin/data"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected 303 redirect, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if location := rec.Header().Get("Location"); location != "/login" {
+				t.Fatalf("expected redirect to /login, got %q", location)
+			}
+		})
+	}
+}
+
+func TestAdminRoutesRejectNonAdmin(t *testing.T) {
+	sm := session.New()
+	router := NewHandler(sm, config.NewSettings(false))
+	cookie := issueSessionCookie(t, sm, "alice")
+
+	for _, path := range []string{"/api/admin", "/api/admin/data"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.AddCookie(cookie)
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "Administrator access required.") {
+				t.Fatalf("unexpected response: %q", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestAdminRoutesAllowAdmin(t *testing.T) {
+	sm := session.New()
+	router := NewHandler(sm, config.NewSettings(false))
+	admin := &identity.User{Name: "alice", IsAdmin: true}
+	cookie := issueSessionCookieForUser(t, sm, admin, "192.0.2.1:12345", testGuestPasswordHash)
+
+	page := httptest.NewRecorder()
+	pageReq := httptest.NewRequest(http.MethodGet, "/api/admin", nil)
+	pageReq.AddCookie(cookie)
+	router.ServeHTTP(page, pageReq)
+	if page.Code != http.StatusOK {
+		t.Fatalf("expected admin page status 200, got %d: %s", page.Code, page.Body.String())
+	}
+	if !strings.Contains(page.Body.String(), "/static/dashboard.js") {
+		t.Fatalf("expected dashboard shell, got %q", page.Body.String())
+	}
+
+	data := httptest.NewRecorder()
+	dataReq := httptest.NewRequest(http.MethodGet, "/api/admin/data", nil)
+	dataReq.AddCookie(cookie)
+	router.ServeHTTP(data, dataReq)
+	if data.Code != http.StatusOK {
+		t.Fatalf("expected admin data status 200, got %d: %s", data.Code, data.Body.String())
+	}
+	var response dashboard.DataResponse
+	if err := json.NewDecoder(data.Body).Decode(&response); err != nil {
+		t.Fatalf("decode admin response: %v", err)
+	}
+	if !response.IsAdmin {
+		t.Fatalf("expected admin capability in response: %+v", response)
+	}
+
+	userData := httptest.NewRecorder()
+	userDataReq := httptest.NewRequest(http.MethodGet, "/api/dashboard/data", nil)
+	userDataReq.AddCookie(cookie)
+	router.ServeHTTP(userData, userDataReq)
+	if userData.Code != http.StatusOK {
+		t.Fatalf("expected user data status 200, got %d: %s", userData.Code, userData.Body.String())
+	}
+	response = dashboard.DataResponse{}
+	if err := json.NewDecoder(userData.Body).Decode(&response); err != nil {
+		t.Fatalf("decode user dashboard response: %v", err)
+	}
+	if !response.IsAdmin {
+		t.Fatalf("expected ordinary dashboard to advertise admin capability: %+v", response)
 	}
 }
 

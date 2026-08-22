@@ -174,3 +174,45 @@ func TestMemberOfAnyWithoutMemberOfAttribute(t *testing.T) {
 		t.Fatal("expected entry without memberOf to match no groups")
 	}
 }
+
+func TestIsAdmin(t *testing.T) {
+	entry := &ldap.Entry{Attributes: []*ldap.EntryAttribute{{
+		Name:   "memberOf",
+		Values: []string{"cn=VDI-Admins,ou=Groups,dc=example,dc=com"},
+	}}}
+
+	tests := []struct {
+		name  string
+		group string
+		want  bool
+	}{
+		{name: "empty setting", group: "", want: false},
+		{name: "bare name", group: "vdi-admins", want: true},
+		{name: "bare name case insensitive", group: "VDI-ADMINS", want: true},
+		{
+			name:  "full dn case insensitive",
+			group: "CN=vdi-admins,OU=groups,DC=EXAMPLE,DC=COM",
+			want:  true,
+		},
+		{name: "different group", group: "desktop-users", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(config.ADMIN_GROUP, tt.group)
+			settings := config.NewSettings(false)
+
+			if got := isAdmin(entry, settings); got != tt.want {
+				t.Fatalf("isAdmin with ADMIN_GROUP %q = %v, want %v", tt.group, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAdminWithoutMemberOfAttribute(t *testing.T) {
+	t.Setenv(config.ADMIN_GROUP, "vdi-admins")
+
+	if isAdmin(&ldap.Entry{}, config.NewSettings(false)) {
+		t.Fatal("expected entry without memberOf to remain non-administrator")
+	}
+}

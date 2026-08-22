@@ -10,9 +10,16 @@ const RTT_YELLOW_MAX_MS = 50;
 const JITTER_GREEN_MAX_MS = 20;
 const JITTER_YELLOW_MAX_MS = 50;
 const LOGIN_PATH = "/login";
+const ADMIN_PATH = "/api/admin";
+// The dashboard and administrator inventory share this bundle. Keep the path
+// check deliberately narrow so an unrelated route below /api/admin is not
+// mistaken for the administrator page; accepting trailing slashes makes direct
+// navigation and redirects behave consistently.
+const adminView = window.location.pathname.replace(/\/+$/, "") === ADMIN_PATH;
 const state = {
     vms: [],
     filename: "rdpgw.rdp",
+    isAdmin: false,
     autoShutdownHours: 0,
     vmError: "",
     actionMessage: "",
@@ -143,7 +150,11 @@ function terminalWebSocketURL(name) {
 }
 function dashboardWebSocketURL() {
     const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${scheme}://${window.location.host}/api/dashboard/ws`;
+    const path = adminView ? "/api/admin/ws" : "/api/dashboard/ws";
+    return `${scheme}://${window.location.host}${path}`;
+}
+function dashboardDataURL() {
+    return adminView ? "/api/admin/data" : "/api/dashboard/data";
 }
 function vncFrameURL(name) {
     const params = new URLSearchParams({
@@ -168,12 +179,14 @@ function bootstrap() {
         <div class="card-body">
           <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
             <div>
-              <h1 class="h4 mb-1">Available DevBoxes</h1>
-              <p class="text-body-secondary mb-0">Live inventory.</p>
+              <h1 class="h4 mb-1" id="page-title">Available DevBoxes</h1>
+              <p class="text-body-secondary mb-0" id="page-subtitle">Live inventory.</p>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2">
               <span id="rtt-indicator" class="badge rounded-pill text-bg-secondary rtt-indicator" title="Live round-trip time to the gateway" aria-live="polite"><i class="bi bi-activity me-1" aria-hidden="true"></i>RTT: &ndash;&ndash;</span>
               <span id="jitter-indicator" class="badge rounded-pill text-bg-secondary jitter-indicator" title="Live RTT jitter (variation between samples)" aria-live="polite"><i class="bi bi-graph-up me-1" aria-hidden="true"></i>Jitter: &ndash;&ndash;</span>
+              <a class="btn btn-outline-primary btn-sm" id="admin-view-link" href="/api/admin" hidden><i class="bi bi-shield-lock me-1" aria-hidden="true"></i>Admin</a>
+              <a class="btn btn-outline-secondary btn-sm" id="dashboard-view-link" href="/api/dashboard" hidden><i class="bi bi-display me-1" aria-hidden="true"></i>My DevBoxes</a>
               <button class="btn btn-primary" id="open-create-button" type="button"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Create DevBox</button>
               <form method="post" action="/logout" class="m-0">
                 <button class="btn btn-outline-secondary btn-sm" type="submit"><i class="bi bi-box-arrow-right me-1" aria-hidden="true"></i>Logout</button>
@@ -301,6 +314,10 @@ function bootstrap() {
       </div>
     </div>
   `;
+    const pageTitle = root.querySelector("#page-title");
+    const pageSubtitle = root.querySelector("#page-subtitle");
+    const adminViewLink = root.querySelector("#admin-view-link");
+    const dashboardViewLink = root.querySelector("#dashboard-view-link");
     const form = root.querySelector("#create-form");
     const input = root.querySelector("#vm-name");
     const usernameInput = root.querySelector("#vm-username");
@@ -346,7 +363,11 @@ function bootstrap() {
     const infoLastUsed = root.querySelector("#info-last-used");
     const infoAutoShutdown = root.querySelector("#info-auto-shutdown");
     const infoClose = root.querySelector("#info-close");
-    if (!form ||
+    if (!pageTitle ||
+        !pageSubtitle ||
+        !adminViewLink ||
+        !dashboardViewLink ||
+        !form ||
         !input ||
         !usernameInput ||
         !baseImageSelect ||
@@ -393,6 +414,10 @@ function bootstrap() {
         !infoClose) {
         return;
     }
+    const pageTitleEl = pageTitle;
+    const pageSubtitleEl = pageSubtitle;
+    const adminViewLinkEl = adminViewLink;
+    const dashboardViewLinkEl = dashboardViewLink;
     const formEl = form;
     const inputEl = input;
     const usernameInputEl = usernameInput;
@@ -447,6 +472,16 @@ function bootstrap() {
     let defaultUsername = "";
     let usernameInitialized = false;
     let baseImages = [];
+    function renderPageMode() {
+        if (adminView) {
+            pageTitleEl.textContent = "All DevBoxes";
+            pageSubtitleEl.textContent = "All VDIs on this system, grouped by user. Lifecycle controls apply system-wide.";
+        }
+        adminViewLinkEl.hidden = adminView || !state.isAdmin;
+        dashboardViewLinkEl.hidden = !adminView;
+        openCreateButtonEl.hidden = adminView;
+    }
+    renderPageMode();
     const terminalResizeObserver = new ResizeObserver(() => {
         requestTerminalFit();
     });
@@ -589,6 +624,13 @@ function bootstrap() {
     }
     function applyDashboardData(data) {
         state.vms = data.vms || [];
+        // Preserve the last authenticated capability when a later WebSocket
+        // snapshot omits the optional field. The normal dashboard starts with
+        // the Admin link hidden and exposes it only after an explicit true.
+        if (typeof data.isAdmin === "boolean") {
+            state.isAdmin = data.isAdmin;
+            renderPageMode();
+        }
         // Serialized with omitempty, so an absent field means auto-shutdown is
         // disabled (0), not "keep the previous value".
         state.autoShutdownHours = typeof data.autoShutdownHours === "number" ? data.autoShutdownHours : 0;
@@ -688,7 +730,7 @@ function bootstrap() {
                     dashboardSocketErrorChecked = true;
                     // WebSocket does not expose handshake status codes. This
                     // request redirects an expired session to the login page.
-                    void requestJSON("/api/dashboard/data");
+                    void requestJSON(dashboardDataURL());
                 }
             }
         };
@@ -1116,6 +1158,247 @@ function bootstrap() {
         state.vnc.src = vncFrameURL(vm.name);
         renderVNC();
     }
+    function createInfoButton(vm) {
+        const infoButton = document.createElement("button");
+        infoButton.type = "button";
+        infoButton.className = "btn btn-sm btn-outline-secondary";
+        setIconLabel(infoButton, "bi-info-circle", "Info");
+        infoButton.addEventListener("click", () => {
+            openInfo(vm);
+        });
+        return infoButton;
+    }
+    // appendVMTable is shared by the personal dashboard and administrator
+    // inventory. Capabilities stay independent so administrators get lifecycle
+    // controls without gaining RDP, terminal, or noVNC access to another user's
+    // VM.
+    function appendVMTable(container, vms, capabilities) {
+        const wrap = document.createElement("div");
+        wrap.className = "table-responsive";
+        const table = document.createElement("table");
+        table.className = "table table-dark table-hover align-middle mb-0";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        const columns = ["Name"];
+        if (capabilities.connections) {
+            columns.push("Connect");
+        }
+        columns.push("State", "Memory (GB)", "vCPU", "Disk");
+        if (!capabilities.connections) {
+            columns.push("Details");
+        }
+        if (capabilities.lifecycle) {
+            columns.push("Actions");
+        }
+        for (const label of columns) {
+            const th = document.createElement("th");
+            th.scope = "col";
+            th.textContent = label;
+            headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        for (const vm of vms) {
+            const row = document.createElement("tr");
+            const rawName = vm.name || "";
+            const displayName = vm.displayName || rawName;
+            const normalizedState = (vm.state || "").trim().toLowerCase();
+            const rdpReady = Boolean(vm.rdpReady);
+            const hasName = rawName.trim() !== "";
+            const isActive = isActiveState(normalizedState);
+            const isBooting = capabilities.connections && normalizedState === "running" && !rdpReady;
+            const nameCell = document.createElement("td");
+            nameCell.className = "fw-semibold";
+            nameCell.textContent = displayName || "n/a";
+            row.appendChild(nameCell);
+            if (capabilities.connections) {
+                const connectCell = document.createElement("td");
+                connectCell.className = "align-top";
+                if (hasName) {
+                    const connectStack = document.createElement("div");
+                    connectStack.className = "d-flex flex-column gap-2";
+                    const connectActions = document.createElement("div");
+                    connectActions.className = "d-flex flex-wrap gap-2";
+                    if (displayName.trim() !== "") {
+                        if (rdpReady) {
+                            // The RDP button is a deliberate action, not a static
+                            // download link: clicking it POSTs to the server, which
+                            // opens a short-lived RDP authorization window for this
+                            // VM from the user's IP and returns the .rdp file. The
+                            // RDP front handler rejects connections without that
+                            // recent grant, so the file alone is not enough.
+                            const connectButton = document.createElement("button");
+                            connectButton.type = "button";
+                            connectButton.className = "btn btn-sm btn-success";
+                            setIconLabel(connectButton, "bi-display", "RDP");
+                            connectButton.disabled = state.busy;
+                            connectButton.addEventListener("click", () => {
+                                void connectRDP(vm);
+                            });
+                            connectActions.appendChild(connectButton);
+                        }
+                        else {
+                            const offlineBadge = document.createElement("span");
+                            offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
+                            setIconLabel(offlineBadge, "bi-slash-circle", "Offline");
+                            offlineBadge.setAttribute("aria-disabled", "true");
+                            connectActions.appendChild(offlineBadge);
+                        }
+                    }
+                    const terminalButton = document.createElement("button");
+                    terminalButton.type = "button";
+                    terminalButton.className = "btn btn-sm btn-outline-info";
+                    setIconLabel(terminalButton, "bi-terminal", "Terminal");
+                    terminalButton.disabled = state.busy || !isActive;
+                    terminalButton.addEventListener("click", () => {
+                        openTerminal(vm);
+                    });
+                    connectActions.appendChild(terminalButton);
+                    const vncButton = document.createElement("button");
+                    vncButton.type = "button";
+                    vncButton.className = "btn btn-sm btn-outline-primary";
+                    setIconLabel(vncButton, "bi-window-desktop", "NoVNC");
+                    vncButton.disabled = state.busy || !isActive;
+                    vncButton.addEventListener("click", () => {
+                        openVNC(vm);
+                    });
+                    connectActions.appendChild(vncButton);
+                    connectActions.appendChild(createInfoButton(vm));
+                    connectStack.appendChild(connectActions);
+                    connectCell.appendChild(connectStack);
+                }
+                else {
+                    connectCell.textContent = "n/a";
+                    connectCell.classList.add("text-body-secondary");
+                }
+                row.appendChild(connectCell);
+            }
+            const stateCell = document.createElement("td");
+            const stateBadge = document.createElement("span");
+            let stateClass = "text-bg-secondary";
+            if (normalizedState === "running" && (!capabilities.connections || rdpReady)) {
+                stateClass = "text-bg-success";
+            }
+            else if (isBooting || normalizedState === "paused") {
+                stateClass = "text-bg-warning";
+            }
+            else if (normalizedState === "suspended") {
+                stateClass = "text-bg-danger";
+            }
+            const stateText = isBooting ? "booting" : normalizedState ? (vm.state || "").trim() : "n/a";
+            stateBadge.className = `badge ${stateClass}`;
+            if (normalizedState) {
+                stateBadge.classList.add("text-capitalize");
+            }
+            stateBadge.textContent = stateText;
+            stateCell.appendChild(stateBadge);
+            row.appendChild(stateCell);
+            const memoryCell = document.createElement("td");
+            memoryCell.textContent = formatMemoryGB(vm.memoryMiB);
+            row.appendChild(memoryCell);
+            const vcpuCell = document.createElement("td");
+            vcpuCell.textContent = vm.vcpu ? `${vm.vcpu}` : "n/a";
+            row.appendChild(vcpuCell);
+            const diskCell = document.createElement("td");
+            diskCell.textContent = vm.volumeGB ? `${vm.volumeGB} GB` : "n/a";
+            row.appendChild(diskCell);
+            if (!capabilities.connections) {
+                const detailsCell = document.createElement("td");
+                detailsCell.className = "align-top";
+                detailsCell.appendChild(createInfoButton(vm));
+                row.appendChild(detailsCell);
+            }
+            if (capabilities.lifecycle) {
+                const actionCell = document.createElement("td");
+                actionCell.className = "align-top";
+                const actionStack = document.createElement("div");
+                actionStack.className = "d-flex flex-column gap-2";
+                const actions = document.createElement("div");
+                actions.className = "d-flex flex-wrap gap-2";
+                const startButton = document.createElement("button");
+                startButton.type = "button";
+                startButton.className = "btn btn-sm btn-outline-success";
+                setIconLabel(startButton, "bi-play-fill", "Start");
+                startButton.disabled = state.busy || !hasName || isActive;
+                startButton.addEventListener("click", () => {
+                    void startVM(rawName);
+                });
+                actions.appendChild(startButton);
+                const restartButton = document.createElement("button");
+                restartButton.type = "button";
+                restartButton.className = "btn btn-sm btn-outline-secondary";
+                setIconLabel(restartButton, "bi-arrow-clockwise", "Restart");
+                restartButton.disabled = state.busy || !hasName || !isActive;
+                restartButton.addEventListener("click", () => {
+                    void restartVM(rawName);
+                });
+                actions.appendChild(restartButton);
+                const shutdownButton = document.createElement("button");
+                shutdownButton.type = "button";
+                shutdownButton.className = "btn btn-sm btn-outline-warning";
+                setIconLabel(shutdownButton, "bi-stop-fill", "Stop");
+                shutdownButton.disabled = state.busy || !hasName || !isActive;
+                shutdownButton.addEventListener("click", () => {
+                    void shutdownVM(rawName);
+                });
+                actions.appendChild(shutdownButton);
+                const removeButton = document.createElement("button");
+                removeButton.type = "button";
+                removeButton.className = "btn btn-sm btn-outline-danger";
+                setIconLabel(removeButton, "bi-trash", "Remove");
+                removeButton.disabled = state.busy || !hasName;
+                removeButton.addEventListener("click", () => {
+                    if (!confirmRemoval(rawName)) {
+                        return;
+                    }
+                    void removeVM(rawName);
+                });
+                actions.appendChild(removeButton);
+                actionStack.appendChild(actions);
+                actionCell.appendChild(actionStack);
+                row.appendChild(actionCell);
+            }
+            tbody.appendChild(row);
+        }
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        container.appendChild(wrap);
+    }
+    function renderAdminVMGroups() {
+        const vmsByOwner = new Map();
+        for (const vm of state.vms) {
+            const owner = (vm.owner || "").trim();
+            const ownerVMs = vmsByOwner.get(owner);
+            if (ownerVMs) {
+                ownerVMs.push(vm);
+            }
+            else {
+                vmsByOwner.set(owner, [vm]);
+            }
+        }
+        // Named owners sort first; VMs without owner metadata remain visible in
+        // an explicit final group instead of disappearing from the admin view.
+        const owners = Array.from(vmsByOwner.keys()).sort((left, right) => {
+            if (left === "") {
+                return right === "" ? 0 : 1;
+            }
+            if (right === "") {
+                return -1;
+            }
+            return left.localeCompare(right);
+        });
+        for (const owner of owners) {
+            const section = document.createElement("section");
+            section.className = "mb-4";
+            const heading = document.createElement("h2");
+            heading.className = "h5 mb-2";
+            heading.textContent = owner === "" ? "Unowned" : `User: ${owner}`;
+            section.appendChild(heading);
+            appendVMTable(section, vmsByOwner.get(owner) || [], { connections: false, lifecycle: true });
+            listAreaEl.appendChild(section);
+        }
+    }
     function renderVMList() {
         listAreaEl.innerHTML = "";
         if (state.loading) {
@@ -1147,192 +1430,11 @@ function bootstrap() {
             listAreaEl.appendChild(empty);
             return;
         }
-        const wrap = document.createElement("div");
-        wrap.className = "table-responsive";
-        const table = document.createElement("table");
-        table.className = "table table-dark table-hover align-middle mb-0";
-        const thead = document.createElement("thead");
-        const headRow = document.createElement("tr");
-        const columns = [
-            "Name",
-            "Connect",
-            "State",
-            "Memory (GB)",
-            "vCPU",
-            "Disk",
-            "Actions",
-        ];
-        for (const label of columns) {
-            const th = document.createElement("th");
-            th.scope = "col";
-            th.textContent = label;
-            headRow.appendChild(th);
+        if (adminView) {
+            renderAdminVMGroups();
+            return;
         }
-        thead.appendChild(headRow);
-        table.appendChild(thead);
-        const tbody = document.createElement("tbody");
-        for (const vm of state.vms) {
-            const row = document.createElement("tr");
-            const rawName = vm.name || "";
-            const displayName = vm.displayName || rawName;
-            const normalizedState = (vm.state || "").trim().toLowerCase();
-            const rdpReady = Boolean(vm.rdpReady);
-            const hasName = rawName.trim() !== "";
-            const isActive = isActiveState(normalizedState);
-            const isBooting = normalizedState === "running" && !rdpReady;
-            const nameCell = document.createElement("td");
-            nameCell.className = "fw-semibold";
-            nameCell.textContent = displayName || "n/a";
-            row.appendChild(nameCell);
-            const connectCell = document.createElement("td");
-            connectCell.className = "align-top";
-            if (hasName) {
-                const connectStack = document.createElement("div");
-                connectStack.className = "d-flex flex-column gap-2";
-                const connectActions = document.createElement("div");
-                connectActions.className = "d-flex flex-wrap gap-2";
-                if (displayName.trim() !== "") {
-                    if (rdpReady) {
-                        // The RDP button is a deliberate action, not a static
-                        // download link: clicking it POSTs to the server, which
-                        // opens a short-lived RDP authorization window for this
-                        // VM from the user's IP and returns the .rdp file. The
-                        // RDP front handler rejects connections without that
-                        // recent grant, so the file alone is not enough.
-                        const connectButton = document.createElement("button");
-                        connectButton.type = "button";
-                        connectButton.className = "btn btn-sm btn-success";
-                        setIconLabel(connectButton, "bi-display", "RDP");
-                        connectButton.disabled = state.busy;
-                        connectButton.addEventListener("click", () => {
-                            void connectRDP(vm);
-                        });
-                        connectActions.appendChild(connectButton);
-                    }
-                    else {
-                        const offlineBadge = document.createElement("span");
-                        offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
-                        setIconLabel(offlineBadge, "bi-slash-circle", "Offline");
-                        offlineBadge.setAttribute("aria-disabled", "true");
-                        connectActions.appendChild(offlineBadge);
-                    }
-                }
-                const terminalButton = document.createElement("button");
-                terminalButton.type = "button";
-                terminalButton.className = "btn btn-sm btn-outline-info";
-                setIconLabel(terminalButton, "bi-terminal", "Terminal");
-                terminalButton.disabled = state.busy || !isActive;
-                terminalButton.addEventListener("click", () => {
-                    openTerminal(vm);
-                });
-                connectActions.appendChild(terminalButton);
-                const vncButton = document.createElement("button");
-                vncButton.type = "button";
-                vncButton.className = "btn btn-sm btn-outline-primary";
-                setIconLabel(vncButton, "bi-window-desktop", "NoVNC");
-                vncButton.disabled = state.busy || !isActive;
-                vncButton.addEventListener("click", () => {
-                    openVNC(vm);
-                });
-                connectActions.appendChild(vncButton);
-                const infoButton = document.createElement("button");
-                infoButton.type = "button";
-                infoButton.className = "btn btn-sm btn-outline-secondary";
-                setIconLabel(infoButton, "bi-info-circle", "Info");
-                infoButton.addEventListener("click", () => {
-                    openInfo(vm);
-                });
-                connectActions.appendChild(infoButton);
-                connectStack.appendChild(connectActions);
-                connectCell.appendChild(connectStack);
-            }
-            else {
-                connectCell.textContent = "n/a";
-                connectCell.classList.add("text-body-secondary");
-            }
-            row.appendChild(connectCell);
-            const stateCell = document.createElement("td");
-            const stateBadge = document.createElement("span");
-            let stateClass = "text-bg-secondary";
-            if (normalizedState === "running" && rdpReady) {
-                stateClass = "text-bg-success";
-            }
-            else if (isBooting || normalizedState === "paused") {
-                stateClass = "text-bg-warning";
-            }
-            else if (normalizedState === "suspended") {
-                stateClass = "text-bg-danger";
-            }
-            const stateText = isBooting ? "booting" : normalizedState ? (vm.state || "").trim() : "n/a";
-            stateBadge.className = `badge ${stateClass}`;
-            if (normalizedState) {
-                stateBadge.classList.add("text-capitalize");
-            }
-            stateBadge.textContent = stateText;
-            stateCell.appendChild(stateBadge);
-            row.appendChild(stateCell);
-            const memoryCell = document.createElement("td");
-            memoryCell.textContent = formatMemoryGB(vm.memoryMiB);
-            row.appendChild(memoryCell);
-            const vcpuCell = document.createElement("td");
-            vcpuCell.textContent = vm.vcpu ? `${vm.vcpu}` : "n/a";
-            row.appendChild(vcpuCell);
-            const diskCell = document.createElement("td");
-            diskCell.textContent = vm.volumeGB ? `${vm.volumeGB} GB` : "n/a";
-            row.appendChild(diskCell);
-            const actionCell = document.createElement("td");
-            actionCell.className = "align-top";
-            const actionStack = document.createElement("div");
-            actionStack.className = "d-flex flex-column gap-2";
-            const actions = document.createElement("div");
-            actions.className = "d-flex flex-wrap gap-2";
-            const startButton = document.createElement("button");
-            startButton.type = "button";
-            startButton.className = "btn btn-sm btn-outline-success";
-            setIconLabel(startButton, "bi-play-fill", "Start");
-            startButton.disabled = state.busy || !hasName || isActive;
-            startButton.addEventListener("click", () => {
-                void startVM(rawName);
-            });
-            actions.appendChild(startButton);
-            const restartButton = document.createElement("button");
-            restartButton.type = "button";
-            restartButton.className = "btn btn-sm btn-outline-secondary";
-            setIconLabel(restartButton, "bi-arrow-clockwise", "Restart");
-            restartButton.disabled = state.busy || !hasName || !isActive;
-            restartButton.addEventListener("click", () => {
-                void restartVM(rawName);
-            });
-            actions.appendChild(restartButton);
-            const shutdownButton = document.createElement("button");
-            shutdownButton.type = "button";
-            shutdownButton.className = "btn btn-sm btn-outline-warning";
-            setIconLabel(shutdownButton, "bi-stop-fill", "Stop");
-            shutdownButton.disabled = state.busy || !hasName || !isActive;
-            shutdownButton.addEventListener("click", () => {
-                void shutdownVM(rawName);
-            });
-            actions.appendChild(shutdownButton);
-            const removeButton = document.createElement("button");
-            removeButton.type = "button";
-            removeButton.className = "btn btn-sm btn-outline-danger";
-            setIconLabel(removeButton, "bi-trash", "Remove");
-            removeButton.disabled = state.busy || !hasName;
-            removeButton.addEventListener("click", () => {
-                if (!confirmRemoval(rawName)) {
-                    return;
-                }
-                void removeVM(rawName);
-            });
-            actions.appendChild(removeButton);
-            actionStack.appendChild(actions);
-            actionCell.appendChild(actionStack);
-            row.appendChild(actionCell);
-            tbody.appendChild(row);
-        }
-        table.appendChild(tbody);
-        wrap.appendChild(table);
-        listAreaEl.appendChild(wrap);
+        appendVMTable(listAreaEl, state.vms, { connections: true, lifecycle: true });
     }
     // updateCreateAvailability keeps the base image picker and the create button
     // disabled while busy or when the gateway offers no base images to clone.
@@ -1617,7 +1719,7 @@ function bootstrap() {
         state.vmError = "";
         renderVMList();
         try {
-            const result = await requestJSON("/api/dashboard/data");
+            const result = await requestJSON(dashboardDataURL());
             if (!result) {
                 return;
             }

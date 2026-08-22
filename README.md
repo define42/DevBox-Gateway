@@ -273,6 +273,9 @@ A successful login redirects to `/api/dashboard`, where you can:
 
 The same `johndoe` / `dogood` credentials are exercised by the LDAP
 integration tests, so they are also the recommended local smoke-test account.
+To exercise the administrator inventory in the Docker Compose environment, use
+the seeded `admin` / `dogood` account; it belongs to the `devbox-admins` group
+configured through `ADMIN_GROUP`.
 
 ## Connecting an RDP client
 
@@ -345,6 +348,7 @@ file**, which keeps container and development overrides working.
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |
 | `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Domain appended to bare usernames before they are substituted into `LDAP_USER_FILTER`.            |
 | `LDAP_REQUIRED_GROUPS`    | _(empty)_                                                                                                        | Groups a user must belong to (any one of them) for LDAP login. Bare group names may be `,`- or `;`-delimited; full group DNs must be `;`-delimited because DNs contain commas. Matched case-insensitively against the user's `memberOf` attribute (full DN or its first RDN value). Empty allows every authenticated user. |
+| `ADMIN_GROUP`             | _(empty)_                                                                                                        | Single LDAP group whose direct members receive administrator access at login. Accepts a bare name or full DN and matches `memberOf` case-insensitively. Empty disables administrator access. |
 | `LDAP_STARTTLS`           | `false`                                                                                                          | When `true`, upgrade plain LDAP connections with StartTLS.                                        |
 | `LDAP_SKIP_TLS_VERIFY`    | `false`                                                                                                          | When `true`, skip TLS certificate verification against the LDAP server.                           |
 | `LOCAL_USER_SHA256`       | _(empty)_                                                                                                        | `;`-delimited list of `sha256("username:password")` hex digests for local users authenticated without LDAP. Checked before LDAP. |
@@ -404,16 +408,31 @@ When `LDAP_REQUIRED_GROUPS` is set, the login page shows an informational box
 below the sign-in form listing the groups that give access (full DNs are
 shortened to their first RDN value, e.g. the `cn`).
 
-Nested group membership is not resolved — the group must appear directly in
-the user's `memberOf`. Directories where `memberOf` is an operational
-attribute (e.g. OpenLDAP's `memberof` overlay) are supported; the gateway
-requests the attribute explicitly. Note that `LOCAL_USER_SHA256` users bypass
-LDAP entirely and are therefore not subject to this check.
+To grant administrator access, set `ADMIN_GROUP` to exactly one bare group name
+or full group DN. This grants a role only: the user must still pass the normal
+LDAP login checks, including `LDAP_REQUIRED_GROUPS` when configured. The role is
+determined from `memberOf` at login and retained for that session, so directory
+membership changes take effect after the user logs in again or the current
+session expires.
+
+Administrators get an **Admin** button on their dashboard. It opens an inventory
+of every persistent VM known to the gateway, grouped by its recorded owner. VMs
+without owner metadata appear under **Unowned**. Administrators can start, stop,
+restart, and remove any VM in this inventory, including **Unowned** entries.
+RDP, serial-console, and noVNC access to another user's VM remain owner-only.
+
+Both access and administrator group checks use direct membership only — nested
+group membership is not resolved, so the group must appear directly in the
+user's `memberOf`. Directories where `memberOf` is an operational attribute
+(e.g. OpenLDAP's `memberof` overlay) are supported; the gateway requests the
+attribute explicitly. `LOCAL_USER_SHA256` users bypass LDAP entirely and are
+always non-administrators; `ADMIN_GROUP` never promotes a local login by
+username.
 
 ### Local users
 
 Alongside LDAP, a small set of accounts can be authenticated offline against a
-static list of digests in `LOCAL_USER_SHA256` — useful for a break-glass admin
+static list of digests in `LOCAL_USER_SHA256` — useful for a break-glass login
 or a deployment without a directory. Each entry is the lowercase hex
 `sha256("<username>:<password>")`, and multiple entries are separated by `;`.
 

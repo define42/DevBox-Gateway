@@ -94,6 +94,35 @@ func TestCreateAndGetSession(t *testing.T) {
 	handler2.ServeHTTP(rec2, req2)
 }
 
+func TestCreateSessionPersistsAdminIdentity(t *testing.T) {
+	m := New()
+
+	user, err := identity.New("admin")
+	if err != nil {
+		t.Fatalf("new user: %v", err)
+	}
+	user.IsAdmin = true
+
+	sessionCookie := issueSession(t, m, user, testSessionRemoteAddr)
+	sess, ok := m.getSessionFromUserName("admin")
+	if !ok {
+		t.Fatal("expected to find the stored administrator session")
+	}
+	if sess.User == nil || !sess.User.IsAdmin {
+		t.Fatalf("expected stored session to preserve administrator identity, got %#v", sess.User)
+	}
+
+	withLoadedSession(t, m, testSessionRemoteAddr, sessionCookie, func(r *http.Request) {
+		storedUser, ok := m.UserFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected to load the administrator session")
+		}
+		if storedUser == nil || !storedUser.IsAdmin {
+			t.Fatalf("expected loaded session to preserve administrator identity, got %#v", storedUser)
+		}
+	})
+}
+
 func TestUserFromContextNil(t *testing.T) {
 	m := New()
 

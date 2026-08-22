@@ -46,7 +46,7 @@ const (
 	// maxVMNameLength and maxLoginUsernameLength mirror the canonical limits in
 	// the vmname package, which is the single source of truth for VDI naming.
 	maxVMNameLength   = vmname.MaxHostnameLength
-	maxVMNameFieldLen = 128
+	maxVMNameFieldLen = vmname.MaxUsernameLength + len(vmname.Separator) + vmname.MaxHostnameLength
 	// maxGuestUsernameLength matches the conventional Linux useradd limit.
 	maxGuestUsernameLength = 32
 	maxLoginUsernameLength = vmname.MaxUsernameLength
@@ -407,6 +407,7 @@ func NewHandler(sessionManager *session.Manager, settings *config.Settings) http
 	router.Get("/api/dashboard/console/{name}/ws", consolepkg.HandleDashboardConsoleWS(sessionManager))
 	router.Get("/api/dashboard/vnc/{name}/ws", consolepkg.HandleDashboardVNCWS(sessionManager))
 	router.Get("/api/dashboard/ws", consolepkg.HandleDashboardWS(sessionManager, settings))
+	router.Get("/api/admin/ws", consolepkg.HandleAdminDashboardWS(sessionManager, settings))
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -428,6 +429,8 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 
 	registerDashboardPageRoute(group)
 	registerDashboardDataRoute(group, sessionManager, settings)
+	registerAdminPageRoute(group, sessionManager)
+	registerAdminDataRoute(group, sessionManager, settings)
 	registerDashboardCreateRoute(group, sessionManager, settings)
 	registerDashboardRDPRoute(group, sessionManager, settings)
 	for _, spec := range []dashboardVMActionSpec{
@@ -520,6 +523,7 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 			return
 		}
 		response, err := dashboard.DataForUser(settings, user.Name)
+		response.IsAdmin = user.IsAdmin
 		if err != nil {
 			log.Printf("list vms: %v", err)
 			response.Error = "Unable to load virtual machines right now."
@@ -534,6 +538,47 @@ func registerDashboardDataRoute(group huma.API, sessionManager *session.Manager,
 		}
 		dashboard.WriteJSON(w, http.StatusOK, response)
 	})
+}
+
+func registerAdminPageRoute(group huma.API, sessionManager *session.Manager) {
+	registerHiddenGet(group, "/admin", func(ctx huma.Context) {
+		req, w := humachi.Unwrap(ctx)
+		if _, ok := requireAdmin(req, w, sessionManager); !ok {
+			return
+		}
+		dashboard.RenderPage(w, staticFiles())
+	})
+}
+
+func registerAdminDataRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
+	registerHiddenGet(group, "/admin/data", func(ctx huma.Context) {
+		req, w := humachi.Unwrap(ctx)
+		if _, ok := requireAdmin(req, w, sessionManager); !ok {
+			return
+		}
+
+		response, err := dashboard.DataForAdmin(settings)
+		if err != nil {
+			log.Printf("list vms for admin dashboard: %v", err)
+			response.Error = "Unable to load virtual machines right now."
+			dashboard.WriteJSON(w, http.StatusInternalServerError, response)
+			return
+		}
+		dashboard.WriteJSON(w, http.StatusOK, response)
+	})
+}
+
+func requireAdmin(req *http.Request, w http.ResponseWriter, sessionManager *session.Manager) (*identity.User, bool) {
+	user, ok := sessionManager.UserFromContext(req.Context())
+	if !ok {
+		http.Error(w, "Login required.", http.StatusUnauthorized)
+		return nil, false
+	}
+	if !user.IsAdmin {
+		http.Error(w, "Administrator access required.", http.StatusForbidden)
+		return nil, false
+	}
+	return user, true
 }
 
 // parseCreateVMInput validates and collects the create-VM form fields into a
@@ -659,7 +704,14 @@ func dashboardCreateResult(name, vmName string, err error, settings *config.Sett
 func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	registerHiddenPost(group, "/dashboard/rdp", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(req, w, sessionManager, "dashboard rdp", "connect to")
+		name, ok := authorizeDashboardVMAction(
+			req,
+			w,
+			sessionManager,
+			"dashboard rdp",
+			"connect to",
+			dashboardVMActionOwnerOnly,
+		)
 		if !ok {
 			return
 		}
@@ -700,7 +752,14 @@ type dashboardVMActionSpec struct {
 func registerDashboardVMActionRoute(group huma.API, sessionManager *session.Manager, spec dashboardVMActionSpec) {
 	registerHiddenPost(group, spec.path, func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(req, w, sessionManager, spec.action, spec.verb)
+		name, ok := authorizeDashboardVMAction(
+			req,
+			w,
+			sessionManager,
+			spec.action,
+			spec.verb,
+			dashboardVMActionLifecycle,
+		)
 		if !ok {
 			return
 		}
@@ -719,7 +778,21 @@ func registerDashboardVMActionRoute(group huma.API, sessionManager *session.Mana
 	})
 }
 
-func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessionManager *session.Manager, dashboardAction string, verb string) (string, bool) {
+type dashboardVMActionScope uint8
+
+const (
+	dashboardVMActionOwnerOnly dashboardVMActionScope = iota
+	dashboardVMActionLifecycle
+)
+
+func authorizeDashboardVMAction(
+	req *http.Request,
+	w http.ResponseWriter,
+	sessionManager *session.Manager,
+	dashboardAction string,
+	verb string,
+	scope dashboardVMActionScope,
+) (string, bool) {
 	user, ok := sessionManager.UserFromContext(req.Context())
 	if !ok {
 		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
@@ -729,9 +802,40 @@ func authorizeDashboardVMAction(req *http.Request, w http.ResponseWriter, sessio
 		return "", false
 	}
 
-	name, err := parseDashboardVMName(w, req, user.Name)
+	nameParserUser := user.Name
+	if user.IsAdmin && scope == dashboardVMActionLifecycle {
+		// An administrator submits the inventory's exact full domain name. Do not
+		// interpret it as being in the administrator's own namespace: directory
+		// usernames may contain vmname.Separator, so a different owner's name can
+		// legitimately begin with the administrator's apparent prefix.
+		nameParserUser = ""
+	}
+	name, err := parseDashboardVMName(w, req, nameParserUser)
 	if handleDashboardFormError(w, dashboardAction, err) {
 		return "", false
+	}
+
+	if user.IsAdmin && scope == dashboardVMActionLifecycle {
+		exists, err := virt.PersistentVMExists(name)
+		if err != nil {
+			log.Printf("verify administrator %q may %s vm %q failed: %v", user.Name, verb, name, err)
+			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
+				OK:    false,
+				Error: "Unable to verify VM.",
+			})
+			return "", false
+		}
+		if !exists {
+			log.Printf("administrator %q attempted to %s missing persistent vm %q", user.Name, verb, name)
+			dashboard.WriteJSON(w, http.StatusNotFound, dashboard.ActionResponse{
+				OK:    false,
+				Error: "VM not found.",
+			})
+			return "", false
+		}
+
+		log.Printf("administrator %q requested to %s vm %q", user.Name, verb, name)
+		return name, true
 	}
 
 	owned, err := virt.UserOwnsVM(name, user.Name)
