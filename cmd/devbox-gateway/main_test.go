@@ -1,3 +1,4 @@
+// Tests for the process entrypoint.
 package main
 
 import (

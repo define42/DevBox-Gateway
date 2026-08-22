@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -115,7 +115,7 @@ func startGlauth(ctx context.Context, t *testing.T, network string) (string, fun
 
 func pathRelative(t *testing.T, elems ...string) string {
 	t.Helper()
-	p := filepath.Join(elems...)
+	p := filepath.Join(append([]string{"..", ".."}, elems...)...)
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		t.Fatalf("abs path: %v", err)

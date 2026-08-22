@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -10,9 +10,11 @@ import (
 	"devboxgateway/internal/types"
 	"devboxgateway/internal/virt"
 	"devboxgateway/internal/vmname"
+	"devboxgateway/static"
 	"errors"
 	"fmt"
 	"html"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -27,6 +29,10 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
+
+func staticFiles() fs.FS {
+	return static.Files()
+}
 
 const (
 	cacheControlValue = "no-store, no-cache, must-revalidate, max-age=0"
@@ -364,7 +370,8 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
+// NewHandler constructs the gateway's HTTP application.
+func NewHandler(sessionManager *session.Manager, settings *config.SettingsType) http.Handler {
 	router := chi.NewRouter()
 	loginLimiter := newLoginRateLimiter(settings)
 	if settings.GetBool(config.DEBUG_CONNECTIONS) {
@@ -407,7 +414,7 @@ func getRemoteGatewayRotuer(sessionManager *session.Manager, settings *config.Se
 }
 
 func noCacheStaticFileServer() http.Handler {
-	fileServer := http.FileServer(http.FS(staticFiles))
+	fileServer := http.FileServer(http.FS(staticFiles()))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setNoCacheHeaders(w)
 		fileServer.ServeHTTP(w, r)
@@ -499,7 +506,7 @@ func requireSameOriginDashboardPost(body dashboardRouteBody) dashboardRouteBody 
 func registerDashboardPageRoute(group huma.API) {
 	registerHiddenGet(group, "/dashboard", func(ctx huma.Context) {
 		_, w := humachi.Unwrap(ctx)
-		dashboard.RenderDashboardPage(w, staticFiles)
+		dashboard.RenderDashboardPage(w, staticFiles())
 	})
 }
 

@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func startGatewayTestServer(t *testing.T, settings *config.SettingsType) gateway
 	virt.GetInstance()
 
 	sessionManager := session.NewManager()
-	mux := getRemoteGatewayRotuer(sessionManager, settings)
+	mux := NewHandler(sessionManager, settings)
 	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)

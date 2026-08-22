@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"io/fs"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestNoVNCPageUsesBrowserCompatibleBundle(t *testing.T) {
-	page, err := fs.ReadFile(staticFiles, "static/novnc/vnc.html")
+	page, err := fs.ReadFile(staticFiles(), "static/novnc/vnc.html")
 	if err != nil {
 		t.Fatalf("read novnc page: %v", err)
 	}

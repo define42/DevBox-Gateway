@@ -1,6 +1,7 @@
-package main
+package gateway
 
 import (
+	"context"
 	"crypto/tls"
 	"devboxgateway/internal/config"
 	"devboxgateway/internal/session"
@@ -10,10 +11,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -195,44 +194,18 @@ func TestMcovBootGatewayListenError(t *testing.T) {
 func TestMcovRunReturnsOneOnBootFailure(t *testing.T) {
 	t.Setenv(config.ConfigFileEnv, mcovWriteBadConfigFile(t))
 
-	if code := run(); code != 1 {
+	if code := Run(context.Background()); code != 1 {
 		t.Fatalf("expected run to return 1 on boot failure, got %d", code)
 	}
 }
 
-func TestMcovRunReturnsZeroOnSigterm(t *testing.T) {
+func TestMcovRunReturnsZeroOnCanceledContext(t *testing.T) {
 	mcovBootEnv(t)
 
-	// Backup registration so a SIGTERM sent before run installs its own
-	// signal.NotifyContext cannot kill the test binary. Deliberately never
-	// Stopped: unregistering could reinstate the default terminate action while
-	// a just-sent SIGTERM is still in flight.
-	backup := make(chan os.Signal, 1)
-	signal.Notify(backup, syscall.SIGTERM)
-
-	codeCh := make(chan int, 1)
-	go func() { codeCh <- run() }()
-
-	// Resend SIGTERM until run observes it: the first signals may arrive while
-	// bootGateway is still initializing libvirt, which is fine because run's
-	// context is canceled as soon as its handler is installed.
-	deadline := time.After(30 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case code := <-codeCh:
-			if code != 0 {
-				t.Fatalf("expected run to return 0 after SIGTERM, got %d", code)
-			}
-			return
-		case <-ticker.C:
-			if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
-				t.Fatalf("send SIGTERM: %v", err)
-			}
-		case <-deadline:
-			t.Fatal("run did not exit after SIGTERM")
-		}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if code := Run(ctx); code != 0 {
+		t.Fatalf("expected run to return 0 after cancellation, got %d", code)
 	}
 }
 

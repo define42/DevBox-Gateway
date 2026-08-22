@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"crypto/sha256"
@@ -137,7 +137,7 @@ func newLocalLoginRouter(t *testing.T) http.Handler {
 	t.Setenv(config.LDAP_URL, "")
 	t.Setenv(config.LOCAL_USER_SHA256, localUserSHA256("alice", "secret"))
 	settings := newRateLimitTestSettings(t)
-	return getRemoteGatewayRotuer(session.NewManager(), settings)
+	return NewHandler(session.NewManager(), settings)
 }
 
 func newRateLimitTestSettings(t *testing.T) *config.SettingsType {

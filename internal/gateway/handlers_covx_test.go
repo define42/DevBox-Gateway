@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"crypto/sha256"
@@ -345,7 +345,7 @@ func hcovPostLoginForm(t *testing.T, handler http.Handler, remoteAddr, body stri
 }
 
 func TestHcovLoginPostRejectsOversizedFormBody(t *testing.T) {
-	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.NewManager(), config.NewSettingType(false))
 	body := "username=" + strings.Repeat("a", maxFormBodyBytes) + "&password=x"
 
 	rec := hcovPostLoginForm(t, router, "", body)
@@ -358,7 +358,7 @@ func TestHcovLoginPostRejectsOversizedFormBody(t *testing.T) {
 }
 
 func TestHcovLoginPostMissingCredentials(t *testing.T) {
-	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.NewManager(), config.NewSettingType(false))
 
 	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {""}, "password": {""}}.Encode())
 	if rec.Code != http.StatusOK {
@@ -370,7 +370,7 @@ func TestHcovLoginPostMissingCredentials(t *testing.T) {
 }
 
 func TestHcovLoginPostRejectsInvalidUsername(t *testing.T) {
-	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.NewManager(), config.NewSettingType(false))
 
 	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"bad name"}, "password": {"pw"}}.Encode())
 	if rec.Code != http.StatusOK {
@@ -390,7 +390,7 @@ func TestHcovLoginPostPairLockAllowsSameUserFromNewIP(t *testing.T) {
 	t.Setenv(config.LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "50")
 	t.Setenv(config.LOGIN_RATE_LIMIT_WINDOW, "1m")
 	t.Setenv(config.LOGIN_RATE_LIMIT_LOCKOUT, "1h")
-	router := getRemoteGatewayRotuer(session.NewManager(), config.NewSettingType(false))
+	router := NewHandler(session.NewManager(), config.NewSettingType(false))
 	failedForm := url.Values{"username": {"hcovlockuser"}, "password": {"wrong"}}.Encode()
 
 	rec := hcovPostLoginForm(t, router, "198.51.100.71:4000", failedForm)
@@ -420,7 +420,7 @@ func TestHcovLoginPostLocalUserSuccess(t *testing.T) {
 	if err := settings.OverwriteForTestString(config.LOCAL_USER_SHA256, hex.EncodeToString(digest[:])); err != nil {
 		t.Fatalf("overwrite LOCAL_USER_SHA256: %v", err)
 	}
-	router := getRemoteGatewayRotuer(session.NewManager(), settings)
+	router := NewHandler(session.NewManager(), settings)
 
 	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"hcovlocal"}, "password": {"Secret1!"}}.Encode())
 	if rec.Code != http.StatusSeeOther {
@@ -463,7 +463,7 @@ func TestHcovCompleteLoginFailsWhenSessionStoreBroken(t *testing.T) {
 func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 	sessionManager := session.NewManager()
 	sessionManager.Store = hcovDeleteFailStore{inner: sessionManager.Store}
-	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettingType(false))
 	cookie := issueSessionCookie(t, sessionManager, "hcovlogout")
 	closed := 0
 	sessionManager.RegisterUserConnection("hcovlogout", func() { closed++ })
@@ -498,7 +498,7 @@ func TestHcovDebugConnectionLoggerRequests(t *testing.T) {
 	if err := settings.OverwriteForTestBool(config.DEBUG_CONNECTIONS, true); err != nil {
 		t.Fatalf("overwrite DEBUG_CONNECTIONS: %v", err)
 	}
-	router := getRemoteGatewayRotuer(session.NewManager(), settings)
+	router := NewHandler(session.NewManager(), settings)
 
 	rec := hcovGet(t, router, nil, "/api/health")
 	if rec.Code != http.StatusOK {
@@ -533,7 +533,7 @@ func TestHcovDashboardDataToleratesBaseImageListFailure(t *testing.T) {
 	if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, notADir); err != nil {
 		t.Fatalf("overwrite BASE_IMAGE_DIR: %v", err)
 	}
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	user := hcovUniqueName("hcovdata")
 	cookie := issueSessionCookie(t, sessionManager, user)
 
@@ -561,7 +561,7 @@ func TestHcovDashboardDataListsSeededBaseImages(t *testing.T) {
 		t.Fatalf("overwrite BASE_IMAGE_DIR: %v", err)
 	}
 	baseImage := hcovSeedBaseImage(t, dir)
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	user := hcovUniqueName("hcovdatb")
 	cookie := issueSessionCookie(t, sessionManager, user)
 
@@ -600,7 +600,7 @@ func TestHcovDashboardRoutesRequireLoginWithoutSessionMiddleware(t *testing.T) {
 
 func TestHcovDashboardRDPRejectsBadAndUnownedNames(t *testing.T) {
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettingType(false))
 	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovnoown"))
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard/rdp", url.Values{"vm_name": {""}})
@@ -641,7 +641,7 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	hcovDefineOwnedDomain(t, domainName, user)
 
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettingType(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
 	form := url.Values{"vm_name": {domainName}}
 
@@ -671,7 +671,7 @@ func TestHcovDashboardStartThenShutdown(t *testing.T) {
 	hcovDefineOwnedDomain(t, domainName, user)
 
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, config.NewSettingType(false))
+	router := NewHandler(sessionManager, config.NewSettingType(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
 	nameForm := url.Values{"vm_name": {domainName}}
 
@@ -695,7 +695,7 @@ func TestHcovDashboardRemoveFailsWithoutStoragePool(t *testing.T) {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, user)
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard/remove", url.Values{"vm_name": {domainName}})
@@ -708,7 +708,7 @@ func TestHcovDashboardCreateConflictsWhenVMExists(t *testing.T) {
 	settings, baseImage := hcovVirtCreateSettings(t, hcovUniqueName("hcov-pool-dup"))
 
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, user)
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard", hcovCreateForm("dup", baseImage))
@@ -728,7 +728,7 @@ func TestHcovDashboardCreateEnforcesPerUserLimit(t *testing.T) {
 	}
 
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, user)
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard", hcovCreateForm("two", baseImage))
@@ -744,7 +744,7 @@ func TestHcovDashboardCreateFailsOnStoragePoolPathConflict(t *testing.T) {
 	settings, baseImage := hcovVirtCreateSettings(t, poolName)
 
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovpoolc"))
 
 	rec := hcovPostForm(t, router, cookie, "/api/dashboard", hcovCreateForm("clash", baseImage))
@@ -759,7 +759,7 @@ func TestHcovDashboardCreateFormValidationErrors(t *testing.T) {
 	}
 	baseImage := hcovSeedBaseImage(t, dir)
 	sessionManager := session.NewManager()
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, hcovUniqueName("hcovform"))
 
 	tests := []struct {

@@ -498,7 +498,7 @@ Build the dashboard bundle and the binary locally:
 
 ```sh
 tsc -p tsconfig.json          # compile ui/dashboard.ts → static/dashboard.js
-CGO_ENABLED=1 go build -o devbox-gateway
+CGO_ENABLED=1 go build -o devbox-gateway ./cmd/devbox-gateway
 ```
 
 Or build the production container image:
@@ -571,8 +571,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 
 ```
 .
-├── main.go, handlers.go, dashboard.go, console.go, html.go, assets.go
-│       Top-level HTTP/RDP entrypoints and request handlers.
+├── cmd/devbox-gateway/  Minimal process entrypoint.
 ├── internal/
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
 │   ├── config/      Environment-backed settings registry (the only place env
@@ -580,6 +579,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── console/     Serial console and noVNC WebSocket handlers.
 │   ├── contextKey/  Typed context-key helpers.
 │   ├── dashboard/   Dashboard HTML / JSON rendering and VM listing.
+│   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
 │   ├── hash/        Password/credential hashing helpers.
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
@@ -587,10 +587,9 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── types/       Shared types (e.g. authenticated user).
 │   └── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 ├── ui/              TypeScript sources for the dashboard.
-├── static/          Static assets, including the compiled dashboard.js.
+├── static/          Embedded static assets, including the compiled dashboard.js.
 ├── testldap/        glauth config + cert/key used for local LDAP.
-├── Dockerfile, docker-compose.yml, makefile, tsconfig.json
-└── *_test.go        Unit and integration tests.
+└── Dockerfile, docker-compose.yml, Makefile, tsconfig.json
 ```
 
 ## Security notes

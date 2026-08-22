@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"devboxgateway/internal/config"
@@ -11,7 +11,7 @@ import (
 func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 	sessionManager := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sessionManager, settings)
+	router := NewHandler(sessionManager, settings)
 
 	want := map[string]string{
 		"Strict-Transport-Security": "max-age=31536000; includeSubDomains",

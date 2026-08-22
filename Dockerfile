@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 
 # Copy source
-COPY *.go ./
+COPY cmd cmd
 COPY internal internal
 COPY static static
 COPY ui ui
@@ -34,7 +34,7 @@ COPY tsconfig.json ./
 RUN tsc -p tsconfig.json
 # Build
 RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -o /app/devbox-gateway
+    CGO_ENABLED=1 go build -o /app/devbox-gateway ./cmd/devbox-gateway
 
 
 # ---------- runtime stage ----------

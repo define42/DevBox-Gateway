@@ -1,4 +1,4 @@
-package main
+package gateway
 
 const loginHTML = `<!doctype html>
 <html lang="en" data-bs-theme="dark">

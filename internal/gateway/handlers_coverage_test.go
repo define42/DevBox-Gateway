@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"devboxgateway/internal/config"
@@ -559,7 +559,7 @@ func TestWriteJSON(t *testing.T) {
 func TestHandleHealthEndpoint(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -576,7 +576,7 @@ func TestHandleHealthEndpoint(t *testing.T) {
 func TestRootRedirectsToLogin(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -593,7 +593,7 @@ func TestRootRedirectsToLogin(t *testing.T) {
 func TestLoginGetServesPage(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -630,7 +630,7 @@ func responseSetsSessionCookie(res *http.Response) bool {
 func TestLoginPostRejectsMissingSameOriginHeader(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
@@ -653,7 +653,7 @@ func TestLoginPostRejectsMissingSameOriginHeader(t *testing.T) {
 func TestLoginPostRejectsCrossOriginHeader(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
@@ -679,7 +679,7 @@ func TestLoginPostRejectsCrossOriginHeader(t *testing.T) {
 func TestLoginPostAllowsSameOriginRequest(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/login", loginForm())
@@ -701,7 +701,7 @@ func TestLoginPostAllowsSameOriginRequest(t *testing.T) {
 func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	rec := httptest.NewRecorder()
@@ -720,7 +720,7 @@ func TestLogoutRejectsGetWithoutDestroyingSession(t *testing.T) {
 func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 	closed := 0
 	sm.RegisterUserConnection("alice", func() { closed++ })
@@ -744,7 +744,7 @@ func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
 func TestLogoutRedirects(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookieFromIP(t, sm, "alice", "192.0.2.10:12345")
 	issueSessionCookieFromIP(t, sm, "alice", "192.0.2.11:12345")
 	issueSessionCookieFromIP(t, sm, "bob", "192.0.2.12:12345")
@@ -787,7 +787,7 @@ func TestLogoutRedirects(t *testing.T) {
 func TestLogoutWithoutSessionRedirects(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
@@ -805,7 +805,7 @@ func TestLogoutWithoutSessionRedirects(t *testing.T) {
 func TestDashboardRequiresSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
@@ -820,7 +820,7 @@ func TestDashboardRequiresSession(t *testing.T) {
 func TestDashboardDataRequiresSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/data", nil)
@@ -834,7 +834,7 @@ func TestDashboardDataRequiresSession(t *testing.T) {
 func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 
 	form := url.Values{
 		"vm_name": {"test-vm"},
@@ -853,7 +853,7 @@ func TestDashboardPostCreateVMRequiresSession(t *testing.T) {
 func TestDashboardPostRejectsMissingSameOriginHeader(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{"vm_name": {"alice-devbox"}}
@@ -878,7 +878,7 @@ func TestDashboardPostRejectsMissingSameOriginHeader(t *testing.T) {
 func TestDashboardPostRejectsCrossOriginHeader(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{"vm_name": {"alice-devbox"}}
@@ -904,7 +904,7 @@ func TestDashboardPostRejectsCrossOriginHeader(t *testing.T) {
 func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{
@@ -925,7 +925,7 @@ func TestDashboardPostAllowsSameOriginReferer(t *testing.T) {
 func TestDashboardPostInvalidVMName(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	form := url.Values{
@@ -949,7 +949,7 @@ func TestDashboardPostInvalidVMName(t *testing.T) {
 func TestDashboardPostMissingSessionPasswordHash(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookieWithHash(t, sm, "alice", "192.0.2.1:12345", "")
 
 	form := url.Values{
@@ -977,7 +977,7 @@ func TestDashboardPostMissingSessionPasswordHash(t *testing.T) {
 func TestDashboardPostRejectsOversizedForm(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	body := "vm_name=" + strings.Repeat("a", maxFormBodyBytes)
@@ -1004,7 +1004,7 @@ func TestDashboardPostRejectsOversizedForm(t *testing.T) {
 func TestDashboardMutationEndpointsRejectMissingVMName(t *testing.T) {
 	sm := session.NewManager()
 	settings := config.NewSettingType(false)
-	router := getRemoteGatewayRotuer(sm, settings)
+	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 
 	paths := []string{

@@ -14,7 +14,7 @@ BINARY   := dist/devbox-gateway
 # Requires the libvirt development headers and a C toolchain on the build host.
 build: ui
 	mkdir -p dist
-	CGO_ENABLED=1 go build -o $(BINARY) .
+	CGO_ENABLED=1 go build -o $(BINARY) ./cmd/devbox-gateway
 
 # rpm packages the prebuilt binary, systemd unit, and sample env file into an RPM
 # via the pure-Go cmd/mkrpm helper (no rpmbuild/spec file needed).

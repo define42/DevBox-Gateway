@@ -1,224 +1,196 @@
-// main.go
-//
-// DevBox Gateway multiplexes HTTPS and RDP-over-TLS for development desktops.
-// Routing is based on the client's TLS SNI.
-// Backend TLS certificates are NOT validated (InsecureSkipVerify=true).
-//
-// Flow (front side):
-//   1) Read client's X.224 Connection Request (TPKT)
-//   2) Reply with X.224 Connection Confirm selecting TLS (PROTOCOL_SSL)
-//   3) Do TLS handshake with client, read SNI
-//
-// Flow (backend side):
-//   4) TCP connect to chosen backend
-//   5) Send a new Connection Request to backend that only requests TLS (RDP_NEG_REQ)
-//   6) Read backend Connection Confirm, require it selects TLS (PROTOCOL_SSL)
-//   7) Do TLS handshake to backend (skip cert verification)
-//   8) Proxy bytes both ways: clientTLS <-> backendTLS
-//
-// Note: This is NOT Microsoft RD Gateway (no HTTP/UDP transports). It’s a TLS-to-TLS RDP proxy.
-
-package main
+package gateway
 
 import (
 	"bufio"
-	"context"
 	"crypto/tls"
 	"devboxgateway/internal/cert"
 	"devboxgateway/internal/config"
-	consolepkg "devboxgateway/internal/console"
 	"devboxgateway/internal/rdp"
 	"devboxgateway/internal/session"
-	"devboxgateway/internal/virt"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"os/signal"
+	"net/netip"
 	"runtime/debug"
 	"strings"
 	"sync"
-	"syscall"
+	"sync/atomic"
 	"time"
 )
 
-func main() {
-	os.Exit(run())
+// rejectionLogInterval throttles connection-cap logging so a flood at the cap
+// reports a periodic count instead of one line per rejected connection.
+const rejectionLogInterval = 30 * time.Second
+
+// rejectionThrottle counts rejected connections and admits at most one log
+// line per rejectionLogInterval, so saturation is visible without flooding
+// the log.
+type rejectionThrottle struct {
+	rejectedSinceLog atomic.Uint64
+	lastRejectionLog atomic.Int64 // unix nanoseconds of the last saturation log
 }
 
-func run() int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	gateway, err := bootGateway()
-	if err != nil {
-		// If booting the gateway fails, we can't do much about it, so log and exit.
-		log.Printf("Failed to boot gateway: %v", err)
-		return 1
+// note counts one rejection. When it returns true the caller should log,
+// reporting the returned number of rejections since the previous log line.
+func (t *rejectionThrottle) note() (uint64, bool) {
+	count := t.rejectedSinceLog.Add(1)
+	now := time.Now().UnixNano()
+	last := t.lastRejectionLog.Load()
+	if now-last < int64(rejectionLogInterval) || !t.lastRejectionLog.CompareAndSwap(last, now) {
+		return 0, false
 	}
-	defer func() {
-		if err := gateway.Close(); err != nil {
-			log.Printf("gateway shutdown: %v", err)
-		}
-	}()
+	t.rejectedSinceLog.Store(0)
+	return count, true
+}
 
-	select {
-	case <-ctx.Done():
-		return 0
-	case <-gateway.done:
-		// The accept loop exited without a shutdown signal, i.e. Accept failed
-		// permanently. Exit non-zero so systemd's Restart=on-failure replaces
-		// the process instead of leaving it alive but unable to serve anything
-		// (including /api/health, which is answered through this listener).
-		if gateway.serveErr != nil {
-			log.Printf("gateway stopped serving: %v", gateway.serveErr)
-		}
-		return 1
+// failFastLimitListener caps the number of simultaneously open accepted
+// connections. Unlike netutil.LimitListener, which blocks Accept at the cap —
+// leaving new clients hanging in the kernel accept backlog with no trace in
+// the logs — this listener keeps accepting and immediately closes connections
+// over the cap: clients fail fast and retry, and every saturation episode is
+// visible in the logs.
+type failFastLimitListener struct {
+	net.Listener
+
+	// slots holds one token per open accepted connection; capacity is the cap.
+	slots chan struct{}
+
+	rejections rejectionThrottle
+}
+
+func newFailFastLimitListener(ln net.Listener, maxConns int) *failFastLimitListener {
+	return &failFastLimitListener{
+		Listener: ln,
+		slots:    make(chan struct{}, maxConns),
 	}
 }
 
-type gatewayRuntime struct {
-	listener net.Listener
-	frontTLS *cert.TLSManager
-
-	// stopAutoShutdown stops the VDI auto-shutdown worker; nil when the
-	// feature is disabled or the worker was never started.
-	stopAutoShutdown func()
-
-	// done is closed when the accept loop exits; serveErr is written exactly
-	// once before that close, so it may be read only after done is observed
-	// closed. A non-nil serveErr means the loop died on a permanent Accept
-	// failure rather than a listener close.
-	done     <-chan struct{}
-	serveErr error
-}
-
-func (g *gatewayRuntime) Close() error {
-	var errs []error
-
-	if g.stopAutoShutdown != nil {
-		g.stopAutoShutdown()
-	}
-
-	if g.listener != nil {
-		if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			errs = append(errs, err)
+func (l *failFastLimitListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
 		}
-	}
-
-	if g.done != nil {
 		select {
-		case <-g.done:
-		case <-time.After(5 * time.Second):
-			errs = append(errs, fmt.Errorf("gateway listener did not stop in time"))
+		case l.slots <- struct{}{}:
+			return &slotTrackedConn{Conn: conn, release: l.releaseSlot}, nil
+		default:
+			_ = conn.Close()
+			if count, ok := l.rejections.note(); ok {
+				log.Printf("front connection cap (%d) reached: %d connections rejected since last report (latest from %s); consider raising MAX_CONCURRENT_CONNECTIONS", cap(l.slots), count, conn.RemoteAddr())
+			}
 		}
 	}
+}
 
-	if g.frontTLS != nil {
-		if err := g.frontTLS.Close(); err != nil {
-			errs = append(errs, err)
+func (l *failFastLimitListener) releaseSlot() {
+	<-l.slots
+}
+
+// perSourceLimitListener caps the number of simultaneously open accepted
+// connections per source address, so one unauthenticated source cannot occupy
+// the whole shared connection budget enforced by failFastLimitListener (e.g.
+// by parking idle keep-alive connections on the unauthenticated health
+// endpoint). Like failFastLimitListener it fails fast: connections over a
+// source's cap are accepted and immediately closed, and saturation is logged.
+type perSourceLimitListener struct {
+	net.Listener
+
+	maxPerSource int
+
+	mu     sync.Mutex
+	counts map[string]int // open connections per perSourceLimitKey bucket
+
+	rejections rejectionThrottle
+}
+
+func newPerSourceLimitListener(ln net.Listener, maxPerSource int) *perSourceLimitListener {
+	return &perSourceLimitListener{
+		Listener:     ln,
+		maxPerSource: maxPerSource,
+		counts:       make(map[string]int),
+	}
+}
+
+func (l *perSourceLimitListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		key := perSourceLimitKey(conn.RemoteAddr())
+		if l.acquire(key) {
+			return &slotTrackedConn{Conn: conn, release: func() { l.release(key) }}, nil
+		}
+		_ = conn.Close()
+		if count, ok := l.rejections.note(); ok {
+			log.Printf("per-source connection cap (%d) reached: %d connections rejected since last report (latest from %s); consider raising MAX_CONNECTIONS_PER_SOURCE if this source is a shared NAT or proxy", l.maxPerSource, count, conn.RemoteAddr())
 		}
 	}
-
-	return errors.Join(errs...)
 }
 
-func bootGateway() (*gatewayRuntime, error) {
-	virt.GetInstance()
-
-	rdp.InitLogging()
-
-	settings, err := loadBootSettings()
-	if err != nil {
-		return nil, err
+func (l *perSourceLimitListener) acquire(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts[key] >= l.maxPerSource {
+		return false
 	}
-
-	sessionManager := session.NewManager()
-	sessionManager.SetUserConnectionLimit(settings.GetInt(config.MAX_CONNECTIONS_PER_USER))
-
-	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
-	debugConns := settings.GetBool(config.DEBUG_CONNECTIONS)
-	consolepkg.SetDebugLogging(debugConns)
-	virt.SetVNCDebugLogging(debugConns)
-	rdp.SetDebugLogging(debugConns)
-
-	if err := virt.InitVirt(settings); err != nil {
-		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
-	}
-
-	if err := config.EnsureSNIHashSecret(settings); err != nil {
-		return nil, fmt.Errorf("failed to resolve SNI hash secret: %w", err)
-	}
-
-	mux := getRemoteGatewayRotuer(sessionManager, settings)
-
-	frontTLS, err := cert.NewTLSManager(settings)
-	if err != nil {
-		return nil, fmt.Errorf("tls setup: %w", err)
-	}
-
-	ln, err := openFrontListener(settings)
-	if err != nil {
-		_ = frontTLS.Close()
-		return nil, err
-	}
-
-	done := make(chan struct{})
-	runtime := &gatewayRuntime{
-		listener: ln,
-		frontTLS: frontTLS,
-		done:     done,
-	}
-	go func() {
-		runtime.serveErr = serveListener(ln, mux, frontTLS, sessionManager, settings)
-		close(done)
-	}()
-
-	// Start ACME only once the front listener is accepting connections: ACME
-	// TLS-ALPN-01 validation is answered through that listener. This is
-	// non-fatal — the gateway serves the self-signed fallback while certmagic
-	// keeps retrying issuance in the background, so slow DNS does not prevent
-	// boot.
-	if err := frontTLS.StartManaging(); err != nil {
-		log.Printf("%v; continuing with the fallback certificate", err)
-	}
-
-	// Started last so no bootGateway failure path has to unwind it; a no-op
-	// when VDI_AUTO_SHUTDOWN_HOURS is unset or non-positive.
-	runtime.stopAutoShutdown = virt.StartAutoShutdownWorker(settings)
-
-	return runtime, nil
+	l.counts[key]++
+	return true
 }
 
-// loadBootSettings resolves the process configuration for boot. Configuration
-// lives in a KEY=VALUE config file (default
-// /etc/devbox-gateway/devbox-gateway.conf, overridable via CONFIG_FILE), with
-// explicit environment variables taking precedence so containers and
-// development setups can override individual values.
-func loadBootSettings() (*config.SettingsType, error) {
-	if err := config.LoadConfigFile(config.FilePath()); err != nil {
-		return nil, fmt.Errorf("failed to load config file: %w", err)
+// release returns one slot for key, dropping the map entry at zero so the
+// table stays bounded by open connections rather than by distinct sources seen.
+func (l *perSourceLimitListener) release(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.counts[key] <= 1 {
+		delete(l.counts, key)
+		return
 	}
+	l.counts[key]--
+}
 
-	// Refuse to boot when a leftover config still enables the removed SSH
-	// reverse-tunnel mode, rather than silently bind LISTEN_ADDR on a host that
-	// only ever published itself through an outbound tunnel.
-	if err := config.ValidateRemovedSSHTunnelMode(); err != nil {
-		return nil, err
+// perSourceLimitKey buckets a remote address for the per-source cap: one
+// bucket per IPv4 address, one per /64 prefix for IPv6 — a single IPv6 host
+// commonly controls an entire /64, so per-address buckets would be trivial to
+// rotate through. Unparseable addresses fall back to the raw string so they
+// are still limited rather than exempt.
+func perSourceLimitKey(remote net.Addr) string {
+	if remote == nil {
+		return "unknown"
 	}
-
-	settings := config.NewSettingType(true)
-
-	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
-	// routing label; with it empty every RDP connection is rejected while the
-	// dashboard still issues .rdp files. Refuse to boot in that broken state
-	// rather than fail silently at connect time.
-	if err := config.ValidateFrontDomain(settings); err != nil {
-		return nil, err
+	raw := remote.String()
+	addrPort, err := netip.ParseAddrPort(raw)
+	if err != nil {
+		return raw
 	}
-	return settings, nil
+	addr := addrPort.Addr().Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	prefix, err := addr.Prefix(64)
+	if err != nil {
+		return addr.String()
+	}
+	return prefix.String()
+}
+
+// slotTrackedConn returns its listener slot exactly once when closed, however
+// many times Close is called on it along the connection's teardown paths.
+type slotTrackedConn struct {
+	net.Conn
+
+	releaseOnce sync.Once
+	release     func()
+}
+
+func (c *slotTrackedConn) Close() error {
+	err := c.Conn.Close()
+	c.releaseOnce.Do(c.release)
+	return err
 }
 
 // openFrontListener binds LISTEN_ADDR and returns the listener that feeds the

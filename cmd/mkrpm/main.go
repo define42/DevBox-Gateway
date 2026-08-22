@@ -2,7 +2,7 @@
 // systemd unit, sample config file, and license into an RPM using the
 // pure-Go github.com/google/rpmpack. No rpmbuild, spec file, or Go toolchain is
 // needed in a buildroot, so the package can be produced on any build host. It is
-// invoked by the makefile `rpm` target after `make build`.
+// invoked by the Makefile `rpm` target after `make build`.
 package main
 
 import (
