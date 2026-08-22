@@ -33,6 +33,7 @@ type dashboardServerMessage struct {
 	ID           *float64                `json:"id,omitempty"`
 	Data         *dashboard.DataResponse `json:"data,omitempty"`
 	ServerMemory *dashboard.ServerMemory `json:"serverMemory,omitempty"`
+	ServerDisk   *dashboard.ServerDisk   `json:"serverDisk,omitempty"`
 	Error        string                  `json:"error,omitempty"`
 }
 
@@ -41,6 +42,7 @@ type dashboardView struct {
 	isAdmin          bool
 	allVMs           bool
 	readServerMemory func() (dashboard.ServerMemory, error)
+	readServerDisk   func() (dashboard.ServerDisk, error)
 }
 
 // HandleDashboardWS serves the dashboard's shared control websocket. Typed
@@ -99,6 +101,9 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 		}
 		if adminView {
 			view.readServerMemory = dashboard.ReadServerMemory
+			view.readServerDisk = func() (dashboard.ServerDisk, error) {
+				return dashboard.ReadServerDisk(config.VirtStoragePoolPath(settings))
+			}
 		}
 		bridgeDashboardControlSocketForView(ws, view, settings, sessionDeadline)
 	}
@@ -161,18 +166,24 @@ func bridgeDashboardControlSocketForView(
 
 func dashboardPong(view dashboardView, id *float64) dashboardServerMessage {
 	response := dashboardServerMessage{Type: "pong", ID: id}
-	if !view.allVMs || view.readServerMemory == nil {
+	if !view.allVMs {
 		return response
 	}
 
-	memory, err := view.readServerMemory()
-	if err != nil {
-		// Pongs run every two seconds while an admin tab is visible. Leave the
-		// optional sample out rather than flooding logs if host statistics are
-		// temporarily unavailable; the browser renders that as an unknown value.
-		return response
+	// Pongs run every two seconds while an admin tab is visible. Leave an
+	// optional sample out rather than flooding logs if host statistics are
+	// temporarily unavailable; each metric remains independent and the browser
+	// renders only the failed sample as an unknown value.
+	if view.readServerMemory != nil {
+		if memory, err := view.readServerMemory(); err == nil {
+			response.ServerMemory = &memory
+		}
 	}
-	response.ServerMemory = &memory
+	if view.readServerDisk != nil {
+		if disk, err := view.readServerDisk(); err == nil {
+			response.ServerDisk = &disk
+		}
+	}
 	return response
 }
 

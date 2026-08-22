@@ -4,7 +4,8 @@
 
 .rtt-indicator,
 .jitter-indicator,
-.server-memory-indicator {
+.server-memory-indicator,
+.server-disk-indicator {
   min-width: 7.5rem;
   justify-content: center;
   font-variant-numeric: tabular-nums;
@@ -12,7 +13,8 @@
   align-items: center;
 }
 
-.server-memory-indicator {
+.server-memory-indicator,
+.server-disk-indicator {
   min-width: min(21rem, 100%);
   max-width: 100%;
   white-space: normal;

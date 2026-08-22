@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -86,12 +87,20 @@ func covxSessionCookieForUser(
 func covxDashboardServer(t *testing.T, manager *session.Manager) *httptest.Server {
 	t.Helper()
 
+	settings := config.NewSettings(false)
+	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
+		t.Fatalf("configure dashboard data root: %v", err)
+	}
+	if err := os.MkdirAll(config.VirtStoragePoolPath(settings), 0o755); err != nil {
+		t.Fatalf("create dashboard storage pool path: %v", err)
+	}
+
 	router := chi.NewRouter()
 	router.Use(manager.LoadAndSave)
 	router.Get("/api/dashboard/console/{name}/ws", HandleDashboardConsoleWS(manager))
 	router.Get("/api/dashboard/vnc/{name}/ws", HandleDashboardVNCWS(manager))
-	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, config.NewSettings(false)))
-	router.Get("/api/admin/ws", HandleAdminDashboardWS(manager, config.NewSettings(false)))
+	router.Get("/api/dashboard/ws", HandleDashboardWS(manager, settings))
+	router.Get("/api/admin/ws", HandleAdminDashboardWS(manager, settings))
 
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
@@ -221,6 +230,12 @@ func TestCovxAdminDashboardWSAuthorization(t *testing.T) {
 	if pong.ServerMemory.UsedBytes > pong.ServerMemory.TotalBytes {
 		t.Fatalf("admin pong reported invalid server memory: %+v", pong.ServerMemory)
 	}
+	if pong.ServerDisk == nil || pong.ServerDisk.TotalBytes == 0 {
+		t.Fatalf("expected admin pong to contain server disk usage, got %+v", pong.ServerDisk)
+	}
+	if pong.ServerDisk.UsedBytes > pong.ServerDisk.TotalBytes {
+		t.Fatalf("admin pong reported invalid server disk usage: %+v", pong.ServerDisk)
+	}
 }
 
 func TestCovxDashboardWSUpgradeFailure(t *testing.T) {
@@ -258,6 +273,9 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	}
 	if pong.ServerMemory != nil {
 		t.Fatalf("ordinary dashboard pong exposed server memory: %+v", pong.ServerMemory)
+	}
+	if pong.ServerDisk != nil {
+		t.Fatalf("ordinary dashboard pong exposed server disk usage: %+v", pong.ServerDisk)
 	}
 
 	closeWebsocketClient(t, conn)
