@@ -1,5 +1,4 @@
-// Package virt manages libvirt-backed virtual machine operations for the gateway.
-package virt
+package storage
 
 import (
 	"fmt"
@@ -11,9 +10,9 @@ import (
 	"github.com/define42/devbox-gateway/internal/config"
 )
 
-// isBaseImageName reports whether name has a recognised base-image extension
+// IsBaseImageName reports whether name has a recognised base-image extension
 // (.img, .qcow2, or .raw, case-insensitive).
-func isBaseImageName(name string) bool {
+func IsBaseImageName(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".img", ".qcow2", ".raw":
 		return true
@@ -40,7 +39,7 @@ func ListBaseImages(settings *config.SettingsType) ([]string, error) {
 
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if entry.IsDir() || !isBaseImageName(entry.Name()) {
+		if entry.IsDir() || !IsBaseImageName(entry.Name()) {
 			continue
 		}
 		info, err := entry.Info()
@@ -53,10 +52,10 @@ func ListBaseImages(settings *config.SettingsType) ([]string, error) {
 	return names, nil
 }
 
-// isBareFileName reports whether name is a plain file name that can only refer
+// IsBareFileName reports whether name is a plain file name that can only refer
 // to an entry directly inside a directory: not "." or "..", no path separators,
 // and identical to its own filepath.Base.
-func isBareFileName(name string) bool {
+func IsBareFileName(name string) bool {
 	if name == "." || name == ".." {
 		return false
 	}
@@ -66,17 +65,17 @@ func isBareFileName(name string) bool {
 	return name == filepath.Base(name)
 }
 
-// resolveBaseImagePath validates the user-selected base image name and returns
+// ResolveBaseImagePath validates the user-selected base image name and returns
 // its absolute path. The name must be a bare file name (no path separators or
 // "."/"..") and must match one of the images currently in the base-image
 // directory. This is the single guard against path traversal or selecting an
 // arbitrary host file.
-func resolveBaseImagePath(settings *config.SettingsType, selected string) (string, error) {
+func ResolveBaseImagePath(settings *config.SettingsType, selected string) (string, error) {
 	selected = strings.TrimSpace(selected)
 	if selected == "" {
 		return "", fmt.Errorf("base image is required")
 	}
-	if !isBareFileName(selected) {
+	if !IsBareFileName(selected) {
 		return "", fmt.Errorf("invalid base image %q", selected)
 	}
 

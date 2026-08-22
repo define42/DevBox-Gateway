@@ -7,6 +7,7 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/types"
+	"github.com/define42/devbox-gateway/internal/virt/storage"
 	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"libvirt.org/go/libvirt"
@@ -163,12 +164,12 @@ func prepareVMCreation(req VMCreateRequest, settings *config.SettingsType) (vmPr
 	// Validate the selected base image against the library and resolve it to an
 	// absolute path (the single path-traversal guard) before anything is created.
 	spec.baseImage = req.BaseImage
-	spec.baseImagePath, err = resolveBaseImagePath(settings, req.BaseImage)
+	spec.baseImagePath, err = storage.ResolveBaseImagePath(settings, req.BaseImage)
 	if err != nil {
 		return spec, err
 	}
 
-	spec.poolName, spec.poolPath = storagePoolConfig(settings)
+	spec.poolName, spec.poolPath = storage.PoolConfig(settings)
 	return spec, nil
 }
 
@@ -198,7 +199,7 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.SettingsType, r
 		_, _ = conn.Close()
 	}()
 
-	if err := ensureBootStoragePool(conn, spec.poolName, spec.poolPath); err != nil {
+	if err := storage.EnsureBootPool(conn, spec.poolName, spec.poolPath); err != nil {
 		return spec.vmName, err
 	}
 	// Serialize the whole check-and-act region for this name: the availability
@@ -258,13 +259,13 @@ func RemoveVM(name string, settings *config.SettingsType) error {
 		_, _ = conn.Close()
 	}()
 
-	poolName, _ := storagePoolConfig(settings)
+	poolName, _ := storage.PoolConfig(settings)
 
 	if err := DestroyExistingDomain(conn, name); err != nil {
 		return err
 	}
 	seedIso := name + "_seed.iso"
-	if err := RemoveVolumes(conn, poolName, name, seedIso); err != nil {
+	if err := storage.RemoveVolumes(conn, poolName, name, seedIso); err != nil {
 		return err
 	}
 	vmLastUsed.remove(name)
@@ -281,7 +282,7 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso s
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
 		return fmt.Errorf("failed to destroy existing domain: %w", err)
 	}
-	if err := RemoveVolumes(conn, poolName, vmName, seedIso); err != nil {
+	if err := storage.RemoveVolumes(conn, poolName, vmName, seedIso); err != nil {
 		return fmt.Errorf("failed to remove existing volumes: %w", err)
 	}
 	// The VNC socket and serial PTY are libvirt-managed and removed with the
@@ -293,10 +294,26 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedIso s
 // image) and its cloud-init seed ISO in the storage pool. A nil report
 // disables disk-copy progress reporting.
 func provisionBootVolumes(conn *libvirt.Connect, settings *config.SettingsType, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
-	if err := copyAndResizeVolumeWithSettingsAndProgress(conn, settings, spec.poolName, spec.vmName, spec.baseImagePath, config.VMDiskCapacityBytes(settings), report); err != nil {
+	if err := storage.CopyAndResizeVolumeWithSettingsAndProgress(
+		conn,
+		settings,
+		spec.poolName,
+		spec.vmName,
+		spec.baseImagePath,
+		config.VMDiskCapacityBytes(settings),
+		report,
+	); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
-	if err := createUbuntuSeedISOToPoolWithSettings(settings, conn, spec.poolName, spec.seedISO, spec.guestUsername, spec.passwordHash, spec.hostname); err != nil {
+	if err := storage.CreateUbuntuSeedISOToPoolWithSettings(
+		settings,
+		conn,
+		spec.poolName,
+		spec.seedISO,
+		spec.guestUsername,
+		spec.passwordHash,
+		spec.hostname,
+	); err != nil {
 		return fmt.Errorf("failed to create seed ISO: %w", err)
 	}
 	return nil

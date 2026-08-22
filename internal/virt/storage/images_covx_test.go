@@ -1,4 +1,4 @@
-package virt
+package storage
 
 import (
 	"os"
@@ -30,7 +30,7 @@ func TestViocovBaseImageDirReadErrors(t *testing.T) {
 	if _, err := ListBaseImages(settings); err == nil {
 		t.Fatal("expected ListBaseImages to surface the read error")
 	}
-	if _, err := resolveBaseImagePath(settings, "base.img"); err == nil {
+	if _, err := ResolveBaseImagePath(settings, "base.img"); err == nil {
 		t.Fatal("expected resolveBaseImagePath to surface the read error")
 	}
 	if err := EnsureBaseImagesAvailable(settings); err == nil {

@@ -1,4 +1,4 @@
-package virt
+package storage
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 
 func TestStreamReaderChunksWithProgressReportsBytesRead(t *testing.T) {
 	var reads []int
-	nextChunk := streamReaderChunksWithProgress(strings.NewReader("abcdef"), func(n int) {
+	nextChunk := StreamReaderChunksWithProgress(strings.NewReader("abcdef"), func(n int) {
 		reads = append(reads, n)
 	})
 
@@ -46,7 +46,7 @@ func TestStreamReaderChunksWithProgressDoesNotReportDiscardedPartialRead(t *test
 	readErr := errors.New("source read failed")
 	src := &readThenError{data: []byte("xy"), err: readErr}
 	var reported int
-	nextChunk := streamReaderChunksWithProgress(src, func(n int) {
+	nextChunk := StreamReaderChunksWithProgress(src, func(n int) {
 		reported += n
 	})
 
@@ -65,7 +65,7 @@ func TestStreamReaderChunksWithProgressDoesNotReportDiscardedPartialRead(t *test
 func TestStreamReaderChunksWithProgressReportsPartialEOFChunk(t *testing.T) {
 	src := &readThenError{data: []byte("xy"), err: io.EOF}
 	var reported int
-	nextChunk := streamReaderChunksWithProgress(src, func(n int) {
+	nextChunk := StreamReaderChunksWithProgress(src, func(n int) {
 		reported += n
 	})
 
@@ -91,11 +91,11 @@ func TestReportDiskCopyProgress(t *testing.T) {
 		got = append(got, observation{copied: copiedBytes, total: totalBytes})
 	}
 
-	reportDiskCopyProgress(report, 0, 11)
-	reportDiskCopyProgress(report, 7, 11)
-	reportDiskCopyProgress(report, 11, 11)
+	ReportProgress(report, 0, 11)
+	ReportProgress(report, 7, 11)
+	ReportProgress(report, 11, 11)
 	// BootNewVM uses this nil-callback path to preserve its existing API.
-	reportDiskCopyProgress(nil, 11, 11)
+	ReportProgress(nil, 11, 11)
 
 	want := []observation{
 		{copied: 0, total: 11},

@@ -1,4 +1,5 @@
-package virt
+// Package storage manages libvirt storage pools, VM volumes, and selectable base images.
+package storage
 
 import (
 	"fmt"
@@ -16,7 +17,8 @@ import (
 // they run from the libvirt upload stream's reader.
 type DiskCopyProgressFunc func(copiedBytes, totalBytes int64)
 
-func reportDiskCopyProgress(report DiskCopyProgressFunc, copiedBytes, totalBytes int64) {
+// ReportProgress calls report when it is non-nil.
+func ReportProgress(report DiskCopyProgressFunc, copiedBytes, totalBytes int64) {
 	if report == nil {
 		return
 	}
@@ -59,10 +61,11 @@ func CopyAndResizeVolume(
 	sourceImagePath string,
 	capacityBytes uint64,
 ) error {
-	return copyAndResizeVolumeWithSettings(conn, nil, storagePoolName, volumeName, sourceImagePath, capacityBytes)
+	return CopyAndResizeVolumeWithSettings(conn, nil, storagePoolName, volumeName, sourceImagePath, capacityBytes)
 }
 
-func copyAndResizeVolumeWithSettings(
+// CopyAndResizeVolumeWithSettings creates and resizes a volume using explicit settings.
+func CopyAndResizeVolumeWithSettings(
 	conn *libvirt.Connect,
 	settings *config.SettingsType,
 	storagePoolName string,
@@ -70,10 +73,11 @@ func copyAndResizeVolumeWithSettings(
 	sourceImagePath string,
 	capacityBytes uint64,
 ) error {
-	return copyAndResizeVolumeWithSettingsAndProgress(conn, settings, storagePoolName, volumeName, sourceImagePath, capacityBytes, nil)
+	return CopyAndResizeVolumeWithSettingsAndProgress(conn, settings, storagePoolName, volumeName, sourceImagePath, capacityBytes, nil)
 }
 
-func copyAndResizeVolumeWithSettingsAndProgress(
+// CopyAndResizeVolumeWithSettingsAndProgress creates and resizes a volume while reporting copy progress.
+func CopyAndResizeVolumeWithSettingsAndProgress(
 	conn *libvirt.Connect,
 	settings *config.SettingsType,
 	storagePoolName string,
@@ -92,7 +96,7 @@ func copyAndResizeVolumeWithSettingsAndProgress(
 		}
 	}()
 
-	vol, err := createQCOW2Volume(settings, pool, volumeName, capacityBytes)
+	vol, err := CreateQCOW2Volume(settings, pool, volumeName, capacityBytes)
 	if err != nil {
 		return err
 	}
@@ -104,15 +108,16 @@ func copyAndResizeVolumeWithSettingsAndProgress(
 		return err
 	}
 
-	if err := resizeVolumeIfNeeded(vol, capacityBytes); err != nil {
+	if err := ResizeVolumeIfNeeded(vol, capacityBytes); err != nil {
 		return err
 	}
 
-	return applyStorageVolPermissions(settings, vol)
+	return ApplyVolumePermissions(settings, vol)
 }
 
-func createQCOW2Volume(settings *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64) (*libvirt.StorageVol, error) {
-	volXML, err := storageVolCreateXMLWithSettings(settings, pool, volumeName, capacityBytes, "qcow2")
+// CreateQCOW2Volume creates an empty qcow2 volume in pool.
+func CreateQCOW2Volume(settings *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64) (*libvirt.StorageVol, error) {
+	volXML, err := VolumeCreateXMLWithSettings(settings, pool, volumeName, capacityBytes, "qcow2")
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +129,8 @@ func createQCOW2Volume(settings *config.SettingsType, pool *libvirt.StoragePool,
 	return vol, nil
 }
 
-func uploadFileToVolume(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string) error {
+// UploadFileToVolume uploads a source image into a libvirt volume.
+func UploadFileToVolume(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string) error {
 	return uploadFileToVolumeWithProgress(conn, vol, sourceImagePath, nil)
 }
 
@@ -150,11 +156,11 @@ func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageV
 		return fmt.Errorf("start upload: %w", err)
 	}
 	copiedBytes := int64(0)
-	reportDiskCopyProgress(report, copiedBytes, srcSize)
-	chunks := streamReaderChunksWithProgress(src, func(n int) {
+	ReportProgress(report, copiedBytes, srcSize)
+	chunks := StreamReaderChunksWithProgress(src, func(n int) {
 		copiedBytes += int64(n)
 		if copiedBytes < srcSize {
-			reportDiskCopyProgress(report, copiedBytes, srcSize)
+			ReportProgress(report, copiedBytes, srcSize)
 		}
 	})
 	if err := stream.SendAll(chunks); err != nil {
@@ -164,15 +170,17 @@ func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageV
 	if err := stream.Finish(); err != nil {
 		return fmt.Errorf("stream finish: %w", err)
 	}
-	reportDiskCopyProgress(report, copiedBytes, srcSize)
+	ReportProgress(report, copiedBytes, srcSize)
 	return nil
 }
 
-func streamReaderChunks(src io.Reader) func(*libvirt.Stream, int) ([]byte, error) {
-	return streamReaderChunksWithProgress(src, nil)
+// StreamReaderChunks adapts an io.Reader to libvirt's stream callback shape.
+func StreamReaderChunks(src io.Reader) func(*libvirt.Stream, int) ([]byte, error) {
+	return StreamReaderChunksWithProgress(src, nil)
 }
 
-func streamReaderChunksWithProgress(src io.Reader, onRead func(int)) func(*libvirt.Stream, int) ([]byte, error) {
+// StreamReaderChunksWithProgress adapts an io.Reader and reports each successful read.
+func StreamReaderChunksWithProgress(src io.Reader, onRead func(int)) func(*libvirt.Stream, int) ([]byte, error) {
 	return func(_ *libvirt.Stream, nbytes int) ([]byte, error) {
 		return readStreamChunk(src, nbytes, onRead)
 	}
@@ -211,7 +219,8 @@ func openSourceImage(sourceImagePath string) (*os.File, int64, error) {
 	return src, srcInfo.Size(), nil
 }
 
-func resizeVolumeIfNeeded(vol *libvirt.StorageVol, capacityBytes uint64) error {
+// ResizeVolumeIfNeeded grows vol to capacityBytes when it is currently smaller.
+func ResizeVolumeIfNeeded(vol *libvirt.StorageVol, capacityBytes uint64) error {
 	if capacityBytes == 0 {
 		return nil
 	}

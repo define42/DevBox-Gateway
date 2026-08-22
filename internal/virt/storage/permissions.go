@@ -1,4 +1,4 @@
-package virt
+package storage
 
 import (
 	"encoding/xml"
@@ -28,7 +28,8 @@ type storagePoolXML struct {
 	} `xml:"target"`
 }
 
-type storageVolumeXML struct {
+// VolumeXML describes a libvirt storage volume definition.
+type VolumeXML struct {
 	XMLName  xml.Name               `xml:"volume"`
 	Name     string                 `xml:"name"`
 	Capacity storageVolumeCapacity  `xml:"capacity"`
@@ -41,37 +42,40 @@ type storageVolumeCapacity struct {
 }
 
 type storageVolumeTargetXML struct {
-	Format      storageVolumeFormatXML       `xml:"format"`
-	Path        string                       `xml:"path,omitempty"`
-	Permissions *storageVolumePermissionsXML `xml:"permissions,omitempty"`
+	Format      storageVolumeFormatXML `xml:"format"`
+	Path        string                 `xml:"path,omitempty"`
+	Permissions *PermissionsXML        `xml:"permissions,omitempty"`
 }
 
 type storageVolumeFormatXML struct {
 	Type string `xml:"type,attr"`
 }
 
-type storageVolumePermissionsXML struct {
+// PermissionsXML describes libvirt volume ownership and mode metadata.
+type PermissionsXML struct {
 	Owner *uint64 `xml:"owner,omitempty"`
 	Group *uint64 `xml:"group,omitempty"`
 	Mode  *string `xml:"mode,omitempty"`
 }
 
-func storageVolCreateXML(pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
-	return storageVolCreateXMLWithSettings(nil, pool, volumeName, capacityBytes, formatType)
+// VolumeCreateXML returns a libvirt volume definition.
+func VolumeCreateXML(pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
+	return VolumeCreateXMLWithSettings(nil, pool, volumeName, capacityBytes, formatType)
 }
 
-func storageVolCreateXMLWithSettings(_ *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
-	poolPath, err := storagePoolTargetPath(pool)
+// VolumeCreateXMLWithSettings returns a libvirt volume definition using explicit settings.
+func VolumeCreateXMLWithSettings(_ *config.SettingsType, pool *libvirt.StoragePool, volumeName string, capacityBytes uint64, formatType string) (string, error) {
+	poolPath, err := PoolTargetPath(pool)
 	if err != nil {
 		return "", err
 	}
 
-	permissions, err := storageVolPermissions()
+	permissions, err := VolumePermissions()
 	if err != nil {
 		return "", err
 	}
 
-	volXML, err := xml.MarshalIndent(storageVolumeXML{
+	volXML, err := xml.MarshalIndent(VolumeXML{
 		Name: volumeName,
 		Capacity: storageVolumeCapacity{
 			Unit:  "bytes",
@@ -90,24 +94,28 @@ func storageVolCreateXMLWithSettings(_ *config.SettingsType, pool *libvirt.Stora
 	return string(volXML), nil
 }
 
-func storageVolPermissions() (*storageVolumePermissionsXML, error) {
+// VolumePermissions returns the fixed permissions applied to gateway volumes.
+func VolumePermissions() (*PermissionsXML, error) {
 	mode := fixedLibvirtVolumeMode
-	return &storageVolumePermissionsXML{Mode: &mode}, nil
+	return &PermissionsXML{Mode: &mode}, nil
 }
 
-func storageVolPermissionsXML() (string, error) {
+// VolumePermissionsXML returns the fixed permissions as an XML fragment.
+func VolumePermissionsXML() (string, error) {
 	return fmt.Sprintf("\n    <permissions>\n      <mode>%s</mode>\n    </permissions>", fixedLibvirtVolumeMode), nil
 }
 
-func storageVolPathXML(pool *libvirt.StoragePool, volumeName string) (string, error) {
-	poolPath, err := storagePoolTargetPath(pool)
+// VolumePathXML returns the target-path XML fragment for a volume.
+func VolumePathXML(pool *libvirt.StoragePool, volumeName string) (string, error) {
+	poolPath, err := PoolTargetPath(pool)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("\n    <path>%s</path>", filepath.Join(poolPath, volumeName)), nil
 }
 
-func storagePoolTargetPath(pool *libvirt.StoragePool) (string, error) {
+// PoolTargetPath reads the configured target path from a libvirt pool.
+func PoolTargetPath(pool *libvirt.StoragePool) (string, error) {
 	xmlDesc, err := pool.GetXMLDesc(0)
 	if err != nil {
 		return "", fmt.Errorf("get storage pool xml: %w", err)
@@ -123,13 +131,14 @@ func storagePoolTargetPath(pool *libvirt.StoragePool) (string, error) {
 	return path, nil
 }
 
-func applyStorageVolPermissions(_ *config.SettingsType, vol *libvirt.StorageVol) error {
+// ApplyVolumePermissions applies the gateway's fixed mode to a volume file.
+func ApplyVolumePermissions(_ *config.SettingsType, vol *libvirt.StorageVol) error {
 	volPath, err := vol.GetPath()
 	if err != nil {
 		return fmt.Errorf("get volume path: %w", err)
 	}
 	if err := os.Chmod(volPath, fixedLibvirtVolumeFileMode); err != nil {
-		if canIgnoreVolumeModeError(err) {
+		if CanIgnoreVolumeModeError(err) {
 			log.Printf("Skipping chmod for volume %s: %v", volPath, err)
 			return nil
 		}
@@ -138,6 +147,7 @@ func applyStorageVolPermissions(_ *config.SettingsType, vol *libvirt.StorageVol)
 	return nil
 }
 
-func canIgnoreVolumeModeError(err error) bool {
+// CanIgnoreVolumeModeError reports whether a driver permission error is non-fatal.
+func CanIgnoreVolumeModeError(err error) bool {
 	return errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES)
 }

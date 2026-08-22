@@ -1,4 +1,4 @@
-package virt
+package storage
 
 import (
 	"errors"
@@ -13,7 +13,8 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
+// PoolConfig returns the configured libvirt storage pool name and path.
+func PoolConfig(settings *config.SettingsType) (poolName string, poolPath string) {
 	poolName = config.DefaultVirtStoragePoolName
 	poolPath = config.VirtStoragePoolPath(nil)
 	if settings == nil {
@@ -29,8 +30,9 @@ func storagePoolConfig(settings *config.SettingsType) (poolName string, poolPath
 	return poolName, filepath.Clean(poolPath)
 }
 
-func ensureStoragePool(conn *libvirt.Connect, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
-	storagePoolName, storagePoolPath, err := normalizeStoragePoolConfig(storagePoolName, storagePoolPath)
+// EnsurePool defines and starts the configured storage pool when needed.
+func EnsurePool(conn *libvirt.Connect, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
+	storagePoolName, storagePoolPath, err := normalizePoolConfig(storagePoolName, storagePoolPath)
 	if err != nil {
 		return nil, err
 	}
@@ -39,22 +41,23 @@ func ensureStoragePool(conn *libvirt.Connect, storagePoolName, storagePoolPath s
 		return nil, fmt.Errorf("create storage pool path %s: %w", storagePoolPath, err)
 	}
 
-	pool, err := lookupOrDefineStoragePool(conn, storagePoolName, storagePoolPath)
+	pool, err := LookupOrDefinePool(conn, storagePoolName, storagePoolPath)
 	if err != nil {
 		return nil, err
 	}
-	if err := startStoragePoolIfNeeded(pool, storagePoolName); err != nil {
+	if err := StartPoolIfNeeded(pool, storagePoolName); err != nil {
 		_ = pool.Free()
 		return nil, err
 	}
 
-	configureStoragePoolAutostart(pool, storagePoolName)
-	logStoragePoolTargetPath(pool, storagePoolName, storagePoolPath)
+	ConfigurePoolAutostart(pool, storagePoolName)
+	LogPoolTargetPath(pool, storagePoolName, storagePoolPath)
 	return pool, nil
 }
 
-func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) error {
-	pool, err := ensureStoragePool(conn, poolName, poolPath)
+// EnsureBootPool ensures the configured boot storage pool is ready.
+func EnsureBootPool(conn *libvirt.Connect, poolName, poolPath string) error {
+	pool, err := EnsurePool(conn, poolName, poolPath)
 	if err != nil {
 		return fmt.Errorf("failed to ensure storage pool %s: %w", poolName, err)
 	}
@@ -62,7 +65,7 @@ func ensureBootStoragePool(conn *libvirt.Connect, poolName, poolPath string) err
 	return nil
 }
 
-func normalizeStoragePoolConfig(storagePoolName, storagePoolPath string) (string, string, error) {
+func normalizePoolConfig(storagePoolName, storagePoolPath string) (string, string, error) {
 	storagePoolName = strings.TrimSpace(storagePoolName)
 	if storagePoolName == "" {
 		return "", "", fmt.Errorf("storage pool name cannot be empty")
@@ -76,10 +79,11 @@ func normalizeStoragePoolConfig(storagePoolName, storagePoolPath string) (string
 	return storagePoolName, storagePoolPath, nil
 }
 
-func lookupOrDefineStoragePool(conn *libvirt.Connect, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
+// LookupOrDefinePool returns the named pool, defining it when absent.
+func LookupOrDefinePool(conn *libvirt.Connect, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
 	pool, err := conn.LookupStoragePoolByName(storagePoolName)
 	if err == nil {
-		return reconcileStoragePoolTargetPath(conn, pool, storagePoolName, storagePoolPath)
+		return ReconcilePoolTargetPath(conn, pool, storagePoolName, storagePoolPath)
 	}
 
 	var libErr libvirt.Error
@@ -87,7 +91,7 @@ func lookupOrDefineStoragePool(conn *libvirt.Connect, storagePoolName, storagePo
 		return nil, fmt.Errorf("lookup storage pool %s: %w", storagePoolName, err)
 	}
 
-	pool, err = conn.StoragePoolDefineXML(storagePoolDefinitionXML(storagePoolName, storagePoolPath), 0)
+	pool, err = conn.StoragePoolDefineXML(PoolDefinitionXML(storagePoolName, storagePoolPath), 0)
 	if err != nil {
 		return nil, fmt.Errorf("define storage pool %s at %s: %w", storagePoolName, storagePoolPath, err)
 	}
@@ -95,8 +99,9 @@ func lookupOrDefineStoragePool(conn *libvirt.Connect, storagePoolName, storagePo
 	return pool, nil
 }
 
-func reconcileStoragePoolTargetPath(conn *libvirt.Connect, pool *libvirt.StoragePool, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
-	targetPath, err := storagePoolTargetPath(pool)
+// ReconcilePoolTargetPath redefines an inactive pool when its configured path changed.
+func ReconcilePoolTargetPath(conn *libvirt.Connect, pool *libvirt.StoragePool, storagePoolName, storagePoolPath string) (*libvirt.StoragePool, error) {
+	targetPath, err := PoolTargetPath(pool)
 	if err != nil {
 		_ = pool.Free()
 		return nil, fmt.Errorf("get storage pool %s target path: %w", storagePoolName, err)
@@ -125,7 +130,7 @@ func reconcileStoragePoolTargetPath(conn *libvirt.Connect, pool *libvirt.Storage
 		return nil, fmt.Errorf("free storage pool %s after undefine: %w", storagePoolName, err)
 	}
 
-	pool, err = conn.StoragePoolDefineXML(storagePoolDefinitionXML(storagePoolName, storagePoolPath), 0)
+	pool, err = conn.StoragePoolDefineXML(PoolDefinitionXML(storagePoolName, storagePoolPath), 0)
 	if err != nil {
 		return nil, fmt.Errorf("redefine storage pool %s from %s to %s: %w", storagePoolName, targetPath, storagePoolPath, err)
 	}
@@ -133,7 +138,8 @@ func reconcileStoragePoolTargetPath(conn *libvirt.Connect, pool *libvirt.Storage
 	return pool, nil
 }
 
-func storagePoolDefinitionXML(storagePoolName, storagePoolPath string) string {
+// PoolDefinitionXML returns a libvirt directory-pool definition.
+func PoolDefinitionXML(storagePoolName, storagePoolPath string) string {
 	return fmt.Sprintf(`
 <pool type='dir'>
   <name>%s</name>
@@ -143,7 +149,8 @@ func storagePoolDefinitionXML(storagePoolName, storagePoolPath string) string {
 </pool>`, storagePoolName, storagePoolPath)
 }
 
-func startStoragePoolIfNeeded(pool *libvirt.StoragePool, storagePoolName string) error {
+// StartPoolIfNeeded starts pool when it is inactive.
+func StartPoolIfNeeded(pool *libvirt.StoragePool, storagePoolName string) error {
 	active, err := pool.IsActive()
 	if err != nil {
 		return fmt.Errorf("check if storage pool %s is active: %w", storagePoolName, err)
@@ -158,7 +165,8 @@ func startStoragePoolIfNeeded(pool *libvirt.StoragePool, storagePoolName string)
 	return nil
 }
 
-func configureStoragePoolAutostart(pool *libvirt.StoragePool, storagePoolName string) {
+// ConfigurePoolAutostart enables autostart when the driver supports it.
+func ConfigurePoolAutostart(pool *libvirt.StoragePool, storagePoolName string) {
 	autostart, err := pool.GetAutostart()
 	if err != nil || autostart {
 		return
@@ -168,8 +176,9 @@ func configureStoragePoolAutostart(pool *libvirt.StoragePool, storagePoolName st
 	}
 }
 
-func logStoragePoolTargetPath(pool *libvirt.StoragePool, storagePoolName, storagePoolPath string) {
-	targetPath, err := storagePoolTargetPath(pool)
+// LogPoolTargetPath logs when libvirt reports a path different from configuration.
+func LogPoolTargetPath(pool *libvirt.StoragePool, storagePoolName, storagePoolPath string) {
+	targetPath, err := PoolTargetPath(pool)
 	if err != nil {
 		return
 	}

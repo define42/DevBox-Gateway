@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/virt/storage"
 
 	"libvirt.org/go/libvirt"
 )
@@ -16,7 +17,7 @@ import (
 // first, before any libvirt connection, so an empty image library fails the boot
 // fast with a clear error.
 func InitVirt(settings *config.SettingsType) error {
-	if err := EnsureBaseImagesAvailable(settings); err != nil {
+	if err := storage.EnsureBaseImagesAvailable(settings); err != nil {
 		return err
 	}
 
@@ -32,8 +33,8 @@ func InitVirt(settings *config.SettingsType) error {
 		return err
 	}
 
-	poolName, poolPath := storagePoolConfig(settings)
-	pool, err := ensureStoragePool(conn, poolName, poolPath)
+	poolName, poolPath := storage.PoolConfig(settings)
+	pool, err := storage.EnsurePool(conn, poolName, poolPath)
 	if err != nil {
 		return fmt.Errorf("failed to ensure storage pool %s: %w", poolName, err)
 	}

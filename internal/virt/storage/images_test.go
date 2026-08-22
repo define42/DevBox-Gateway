@@ -1,4 +1,4 @@
-package virt
+package storage
 
 import (
 	"os"
@@ -88,7 +88,7 @@ func TestEnsureBaseImagesAvailable(t *testing.T) {
 func TestResolveBaseImagePath(t *testing.T) {
 	settings := newBaseImageSettings(t, map[string][]byte{"base.img": []byte("data")})
 
-	path, err := resolveBaseImagePath(settings, "base.img")
+	path, err := ResolveBaseImagePath(settings, "base.img")
 	if err != nil {
 		t.Fatalf("resolveBaseImagePath: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestResolveBaseImagePath(t *testing.T) {
 	}
 
 	for _, bad := range []string{"", "   ", "missing.img", "../escape.img", "sub/base.img", `sub\base.img`, ".", ".."} {
-		if _, err := resolveBaseImagePath(settings, bad); err == nil {
+		if _, err := ResolveBaseImagePath(settings, bad); err == nil {
 			t.Fatalf("expected error for selection %q", bad)
 		}
 	}

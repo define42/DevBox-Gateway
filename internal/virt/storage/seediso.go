@@ -1,9 +1,10 @@
-package virt
+package storage
 
 import (
 	"bytes"
 	"log"
 
+	"github.com/define42/devbox-gateway/internal/cloudinit"
 	"github.com/define42/devbox-gateway/internal/config"
 
 	"github.com/google/uuid"
@@ -19,10 +20,11 @@ func CreateUbuntuSeedISOToPool(
 	cloudInitPasswordHash string,
 	hostname string,
 ) error {
-	return createUbuntuSeedISOToPoolWithSettings(nil, conn, storagePoolName, volumeName, username, cloudInitPasswordHash, hostname)
+	return CreateUbuntuSeedISOToPoolWithSettings(nil, conn, storagePoolName, volumeName, username, cloudInitPasswordHash, hostname)
 }
 
-func createUbuntuSeedISOToPoolWithSettings(
+// CreateUbuntuSeedISOToPoolWithSettings builds and uploads a seed ISO using explicit settings.
+func CreateUbuntuSeedISOToPoolWithSettings(
 	settings *config.SettingsType,
 	conn *libvirt.Connect,
 	storagePoolName string,
@@ -32,7 +34,7 @@ func createUbuntuSeedISOToPoolWithSettings(
 	hostname string,
 ) error {
 	userData, metaData, networkConfig := ubuntuSeedData(username, cloudInitPasswordHash, hostname)
-	seedISOData, err := CreateSeedISO(userData, metaData, networkConfig)
+	seedISOData, err := cloudinit.CreateSeedISO(userData, metaData, networkConfig)
 	if err != nil {
 		return err
 	}
@@ -47,7 +49,7 @@ func createUbuntuSeedISOToPoolWithSettings(
 		}
 	}()
 
-	volXML, err := storageVolCreateXMLWithSettings(settings, pool, volumeName, uint64(len(seedISOData)), "raw")
+	volXML, err := VolumeCreateXMLWithSettings(settings, pool, volumeName, uint64(len(seedISOData)), "raw")
 	if err != nil {
 		return err
 	}
@@ -60,23 +62,23 @@ func createUbuntuSeedISOToPoolWithSettings(
 		_ = vol.Free()
 	}()
 
-	if err := uploadSeedISO(conn, vol, seedISOData); err != nil {
+	if err := UploadSeedISO(conn, vol, seedISOData); err != nil {
 		return err
 	}
 
-	return applyStorageVolPermissions(settings, vol)
+	return ApplyVolumePermissions(settings, vol)
 }
 
-func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*SeedUserData, *SeedMetaData, *SeedNetworkConfig) {
-	userData := &SeedUserData{
-		Output: &SeedOutput{
+func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*cloudinit.UserData, *cloudinit.MetaData, *cloudinit.NetworkConfig) {
+	userData := &cloudinit.UserData{
+		Output: &cloudinit.Output{
 			All: "| tee -a /var/log/cloud-init-output.log",
 		},
-		Keyboard: &SeedKeyboard{
+		Keyboard: &cloudinit.Keyboard{
 			Layout:  "dk",
 			Variant: "",
 		},
-		Users: []SeedUser{
+		Users: []cloudinit.User{
 			{
 				Name: username,
 				// Require the account password to escalate to root (sudo prompts)
@@ -93,17 +95,17 @@ func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*SeedUser
 		},
 	}
 
-	metaData := &SeedMetaData{
+	metaData := &cloudinit.MetaData{
 		InstanceID:    uuid.New().String(),
 		LocalHostname: hostname,
 	}
 
-	networkConfig := &SeedNetworkConfig{
-		Network: SeedNetwork{
+	networkConfig := &cloudinit.NetworkConfig{
+		Network: cloudinit.Network{
 			Version: 2,
-			Ethernets: SeedEthernets{
-				All: SeedEthernet{
-					Match: &SeedInterfaceMatch{
+			Ethernets: cloudinit.Ethernets{
+				All: cloudinit.Ethernet{
+					Match: &cloudinit.InterfaceMatch{
 						Name: "en*",
 					},
 					DHCP4:    true,
@@ -117,7 +119,8 @@ func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*SeedUser
 	return userData, metaData, networkConfig
 }
 
-func uploadSeedISO(conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData []byte) error {
+// UploadSeedISO uploads seedISOData into vol.
+func UploadSeedISO(conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData []byte) error {
 	stream, err := conn.NewStream(0)
 	if err != nil {
 		return err
@@ -130,7 +133,7 @@ func uploadSeedISO(conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData [
 		return err
 	}
 
-	if err := stream.SendAll(streamReaderChunks(bytes.NewReader(seedISOData))); err != nil {
+	if err := stream.SendAll(StreamReaderChunks(bytes.NewReader(seedISOData))); err != nil {
 		_ = stream.Abort()
 		return err
 	}
