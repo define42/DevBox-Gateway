@@ -1,6 +1,8 @@
 package session
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -368,6 +370,185 @@ func TestCloseUserConnectionsClosesOnlyMatchingUser(t *testing.T) {
 	}
 	if bobClosed != 1 {
 		t.Fatalf("expected bob close function to run once, got %d", bobClosed)
+	}
+}
+
+func TestCloseAllConnectionsClosesAndWaitsForUnregister(t *testing.T) {
+	m := New()
+	closeCalled := make(chan struct{})
+	unregister, ok := m.RegisterUserConnection("alice", func() {
+		close(closeCalled)
+	})
+	if !ok {
+		t.Fatal("expected initial connection registration to succeed")
+	}
+
+	type closeResult struct {
+		closed int
+		err    error
+	}
+	result := make(chan closeResult, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		closed, err := m.CloseAllConnections(ctx)
+		result <- closeResult{closed: closed, err: err}
+	}()
+
+	select {
+	case <-closeCalled:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not invoke the registered close function")
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("shutdown returned before unregister: %+v", got)
+	default:
+	}
+
+	unregister()
+	select {
+	case got := <-result:
+		if got.err != nil {
+			t.Fatalf("close all connections: %v", got.err)
+		}
+		if got.closed != 1 {
+			t.Fatalf("closed %d connections, want 1", got.closed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish after unregister")
+	}
+
+	if _, accepted := m.RegisterUserConnection("bob", func() {}); accepted {
+		t.Fatal("connection registration succeeded after terminal shutdown began")
+	}
+}
+
+func TestCloseAllConnectionsWaitsAfterUserLogoutClose(t *testing.T) {
+	m := New()
+	unregisterAlice, ok := m.RegisterUserConnection("alice", func() {})
+	if !ok {
+		t.Fatal("expected initial connection registration to succeed")
+	}
+	if got := m.CloseUserConnections("alice"); got != 1 {
+		t.Fatalf("logout closed %d connections, want 1", got)
+	}
+	shutdownStarted := make(chan struct{})
+	var unregisterBob func()
+	unregisterBob, ok = m.RegisterUserConnection("bob", func() {
+		close(shutdownStarted)
+		unregisterBob()
+	})
+	if !ok {
+		t.Fatal("expected second connection registration to succeed")
+	}
+
+	result := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	go func() {
+		_, err := m.CloseAllConnections(ctx)
+		result <- err
+	}()
+	select {
+	case <-shutdownStarted:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not close the second registered connection")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("shutdown returned before the logout-closed handler unregistered: %v", err)
+	default:
+	}
+
+	unregisterAlice()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("close all connections: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not finish after logout-closed handler unregistered")
+	}
+}
+
+func TestCloseAllConnectionsHonorsCanceledContext(t *testing.T) {
+	m := New()
+	closeCalled := make(chan struct{})
+	unregister, ok := m.RegisterUserConnection("alice", func() {
+		close(closeCalled)
+	})
+	if !ok {
+		t.Fatal("expected initial connection registration to succeed")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	closed, err := m.CloseAllConnections(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("close all connections error = %v, want context canceled", err)
+	}
+	if closed != 1 {
+		t.Fatalf("shutdown closed=%d, want one connection", closed)
+	}
+	select {
+	case <-closeCalled:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not invoke the connection close function")
+	}
+
+	// Release the active registration so the drain signal is not left pending.
+	unregister()
+}
+
+func TestCloseAllConnectionsContextBoundsBlockingClose(t *testing.T) {
+	m := New()
+	blockingCloseStarted := make(chan struct{})
+	releaseBlockingClose := make(chan struct{})
+	unregisterBlocked, ok := m.RegisterUserConnection("alice", func() {
+		close(blockingCloseStarted)
+		<-releaseBlockingClose
+	})
+	if !ok {
+		t.Fatal("expected blocking connection registration to succeed")
+	}
+	t.Cleanup(func() {
+		close(releaseBlockingClose)
+		unregisterBlocked()
+	})
+
+	secondCloseCalled := make(chan struct{})
+	var unregisterSecond func()
+	unregisterSecond, ok = m.RegisterUserConnection("bob", func() {
+		close(secondCloseCalled)
+		unregisterSecond()
+	})
+	if !ok {
+		t.Fatal("expected second connection registration to succeed")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	closed, err := m.CloseAllConnections(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("close all connections error = %v, want deadline exceeded", err)
+	}
+	if closed != 2 {
+		t.Fatalf("shutdown closed=%d, want two connections", closed)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("blocking close bypassed the context deadline: %v", elapsed)
+	}
+	select {
+	case <-blockingCloseStarted:
+	case <-time.After(time.Second):
+		t.Fatal("blocking close function was not invoked")
+	}
+	select {
+	case <-secondCloseCalled:
+	case <-time.After(time.Second):
+		t.Fatal("blocking close prevented another connection from closing")
 	}
 }
 

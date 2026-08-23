@@ -1,12 +1,17 @@
 package rdp
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -414,8 +420,73 @@ func startHandleTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionM
 	return client, done
 }
 
+func captureRDPAuditRecords(t *testing.T) func() []map[string]any {
+	t.Helper()
+
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+	})
+
+	return func() []map[string]any {
+		t.Helper()
+
+		var records []map[string]any
+		scanner := bufio.NewScanner(bytes.NewReader(output.Bytes()))
+		for scanner.Scan() {
+			var record map[string]any
+			if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+				t.Fatalf("decode RDP audit record %q: %v", scanner.Text(), err)
+			}
+			if record["msg"] != "audit" {
+				continue
+			}
+			records = append(records, record)
+		}
+		if err := scanner.Err(); err != nil {
+			t.Fatalf("scan RDP audit records: %v", err)
+		}
+		return records
+	}
+}
+
+func assertRDPAuditRecord(t *testing.T, record map[string]any, action string) {
+	t.Helper()
+
+	want := map[string]any{
+		"action":    action,
+		"user":      "alice",
+		"result":    "success",
+		"source_ip": "192.0.2.100",
+		"vm":        "vm1",
+		"protocol":  audit.ProtocolRDP,
+	}
+	for key, wantValue := range want {
+		if got := record[key]; got != wantValue {
+			t.Errorf("RDP audit attribute %q = %#v, want %#v", key, got, wantValue)
+		}
+	}
+}
+
+func drainRDPTestConnections(t *testing.T, sessionManager *session.Manager, want int) {
+	t.Helper()
+
+	drainCtx, cancelDrain := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancelDrain()
+	closed, err := sessionManager.CloseAllConnections(drainCtx)
+	if err != nil {
+		t.Fatalf("drain live RDP connection: %v", err)
+	}
+	if closed != want {
+		t.Fatalf("drained %d RDP connections, want %d", closed, want)
+	}
+}
+
 func TestHandleSuccessfulProxy(t *testing.T) {
 	InitLogging()
+	auditRecords := captureRDPAuditRecords(t)
 
 	backendHost := "127.0.0.42"
 	stubVMIPs(t, map[string]string{"vm1": backendHost})
@@ -457,8 +528,21 @@ func TestHandleSuccessfulProxy(t *testing.T) {
 		t.Fatalf("expected backend reply %q, got %q", "pong", string(reply))
 	}
 
-	_ = tlsClient.Close()
+	drainRDPTestConnections(t, sessionManager, 1)
 	waitDone(t, done)
+
+	records := auditRecords()
+	if len(records) != 2 {
+		t.Fatalf("got %d RDP audit records, want connect and disconnect: %#v", len(records), records)
+	}
+	assertRDPAuditRecord(t, records[0], audit.ActionConnectionConnect)
+	if _, ok := records[0]["duration_ms"]; ok {
+		t.Error("RDP connect audit record unexpectedly includes duration_ms")
+	}
+	assertRDPAuditRecord(t, records[1], audit.ActionConnectionDisconnect)
+	if _, ok := records[1]["duration_ms"]; !ok {
+		t.Error("RDP disconnect audit record is missing duration_ms")
+	}
 }
 
 func TestHandleRejectsMissingSubdomain(t *testing.T) {
@@ -542,6 +626,7 @@ func TestHandleBackendDialFailure(t *testing.T) {
 
 func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 	InitLogging()
+	auditRecords := captureRDPAuditRecords(t)
 
 	backendHost := "127.0.0.44"
 	stubVMIPs(t, map[string]string{"vmbad": backendHost})
@@ -579,6 +664,9 @@ func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 	}()
 
 	waitDone(t, done)
+	if records := auditRecords(); len(records) != 0 {
+		t.Fatalf("failed backend setup emitted RDP audit records: %#v", records)
+	}
 }
 
 func TestHandleRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {

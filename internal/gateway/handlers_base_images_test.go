@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -174,6 +175,7 @@ func TestAdminBaseImageRoutesRequireAdmin(t *testing.T) {
 }
 
 func TestAdminBaseImageUploadListAndDelete(t *testing.T) {
+	auditOutput := captureStructuredLogs(t)
 	settings := baseImageTestSettings(t)
 	dir := config.BaseImageDir(settings)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -227,6 +229,27 @@ func TestAdminBaseImageUploadListAndDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a.qcow2")); !os.IsNotExist(err) {
 		t.Fatalf("expected image deletion, got %v", err)
+	}
+
+	assertAdminBaseImageAuditRecords(t, auditOutput)
+}
+
+func assertAdminBaseImageAuditRecords(t *testing.T, auditOutput *synchronizedLogBuffer) {
+	t.Helper()
+
+	records := structuredAuditRecords(t, auditOutput)
+	wantActions := []string{audit.ActionAdminBaseImageUpload, audit.ActionAdminBaseImageDelete}
+	if len(records) != len(wantActions) {
+		t.Fatalf("got %d base-image audit records, want %d: %#v", len(records), len(wantActions), records)
+	}
+	for i, wantAction := range wantActions {
+		record := records[i]
+		if record["action"] != wantAction || record["user"] != "admin" {
+			t.Errorf("base-image audit record %d = %#v, want action=%q user=admin", i, record, wantAction)
+		}
+		if record["resource_type"] != "base_image" || record["resource"] != "a.qcow2" || record["administrator"] != true {
+			t.Errorf("base-image audit resource context is incomplete: %#v", record)
+		}
 	}
 }
 

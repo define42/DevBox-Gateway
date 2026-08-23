@@ -59,6 +59,7 @@ func mcovBootEnv(t *testing.T) string {
 	t.Setenv(config.ACME_ENABLE, "false")
 	t.Setenv(config.FRONT_DOMAIN, "mcov.gateway.test")
 	t.Setenv(config.SNI_HASH_SECRET, "")
+	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
 
 	root := newLibvirtAccessibleTempDir(t, "mcov-root-")
 	t.Setenv(config.DATA_ROOT_DIR, root)
@@ -189,6 +190,18 @@ func TestMcovBootGatewayListenError(t *testing.T) {
 	_, err := bootGateway()
 	if err == nil || !strings.Contains(err.Error(), "listen on") {
 		t.Fatalf("expected listen error, got %v", err)
+	}
+}
+
+func TestMcovBootGatewayAuditLogError(t *testing.T) {
+	mcovBootEnv(t)
+	// An audit file path that is itself a directory must fail before the
+	// gateway starts accepting connections.
+	t.Setenv(config.AUDIT_LOG_FILE, t.TempDir())
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), "configure audit log") {
+		t.Fatalf("expected audit log setup error, got %v", err)
 	}
 }
 

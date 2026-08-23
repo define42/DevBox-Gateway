@@ -2,6 +2,7 @@
 package rdp
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/session"
@@ -108,8 +110,7 @@ func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Man
 		return
 	}
 	unregisterConnection, allowed := sessionManager.RegisterUserConnection(owner, func() {
-		_ = clientConn.tlsConn.Close()
-		_ = backendTLS.Close()
+		abortRDPProxy(clientConn.tlsConn, backendTLS)
 	})
 	if !allowed {
 		log.Printf("reject RDP session for user %q from %s: per-user connection limit reached", owner, raw.RemoteAddr())
@@ -119,11 +120,49 @@ func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Man
 	}
 	defer unregisterConnection()
 
+	defer auditRDPConnection(raw.RemoteAddr(), owner, clientConn.hostname)()
+
 	_ = clientConn.tlsConn.SetDeadline(time.Time{})
 	_ = backendTLS.SetDeadline(time.Time{})
 
 	debugf("starting bidirectional proxy")
 	proxyBidirectional(clientConn.tlsConn, backendTLS)
+}
+
+// abortRDPProxy force-closes both underlying transports when logout or gateway
+// shutdown revokes a live connection. TLS Close can wait while sending
+// close-notify, so first expiring both directions and then bypassing that
+// handshake keeps the connection drain bounded and lets Handle reach its
+// disconnect audit promptly.
+func abortRDPProxy(clientTLS, backendTLS *tls.Conn) {
+	now := time.Now()
+	_ = clientTLS.SetDeadline(now)
+	_ = backendTLS.SetDeadline(now)
+	_ = clientTLS.NetConn().Close()
+	_ = backendTLS.NetConn().Close()
+}
+
+func auditRDPConnection(remoteAddr net.Addr, owner, hostname string) func() {
+	clientIP, _ := session.CanonicalClientIP(remoteAddr.String())
+	auditContext := context.Background()
+	connectedAt := time.Now()
+	audit.Log(auditContext, audit.Event{
+		Action:   audit.ActionConnectionConnect,
+		User:     owner,
+		SourceIP: clientIP,
+		VM:       hostname,
+		Protocol: audit.ProtocolRDP,
+	})
+	return func() {
+		audit.Log(auditContext, audit.Event{
+			Action:   audit.ActionConnectionDisconnect,
+			User:     owner,
+			SourceIP: clientIP,
+			VM:       hostname,
+			Protocol: audit.ProtocolRDP,
+			Duration: time.Since(connectedAt),
+		})
+	}
 }
 
 // proxyBufferSize matches the largest TLS record (16 KiB) plus headroom, so a

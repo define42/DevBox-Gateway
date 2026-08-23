@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
 
@@ -83,6 +84,8 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			return
 		}
 		defer unregisterConnection()
+
+		defer auditConsoleConnection(r.Context(), user, r.RemoteAddr, name, audit.ProtocolSerial)()
 
 		bridgeSerialConsole(name, ws, console)
 	}

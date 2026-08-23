@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
@@ -216,6 +217,7 @@ func TestGatewayRejectsDuplicateVMCreate(t *testing.T) {
 }
 
 func TestGatewayHTTPSLifecycle(t *testing.T) {
+	auditOutput := captureStructuredLogs(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -273,4 +275,39 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 
 	assertGatewayRedirect(t, server.client, http.MethodPost, server.baseURL+"/logout", nil, http.StatusSeeOther, "/login")
 	assertGatewayRedirect(t, server.client, http.MethodGet, server.baseURL+"/api/dashboard/data", nil, http.StatusSeeOther, "/login")
+
+	assertGatewayLifecycleAuditRecords(t, auditOutput, fullName)
+}
+
+func assertGatewayLifecycleAuditRecords(t *testing.T, auditOutput *synchronizedLogBuffer, fullName string) {
+	t.Helper()
+
+	records := structuredAuditRecords(t, auditOutput)
+	wantActions := []string{
+		audit.ActionUserLogin,
+		audit.ActionVMCreate,
+		audit.ActionVMStop,
+		audit.ActionVMStart,
+		audit.ActionVMReboot,
+		audit.ActionVMRemove,
+		audit.ActionUserLogout,
+	}
+	if len(records) != len(wantActions) {
+		t.Fatalf("got %d lifecycle audit records, want %d: %#v", len(records), len(wantActions), records)
+	}
+	for i, wantAction := range wantActions {
+		record := records[i]
+		if record["action"] != wantAction || record["user"] != "johndoe" || record["result"] != "success" {
+			t.Errorf("lifecycle audit record %d = %#v, want action=%q user=johndoe", i, record, wantAction)
+		}
+		if wantAction != audit.ActionUserLogin && wantAction != audit.ActionUserLogout && record["vm"] != fullName {
+			t.Errorf("lifecycle audit record %d has vm %#v, want %q", i, record["vm"], fullName)
+		}
+	}
+	if records[2]["operation"] != "shutdown" {
+		t.Errorf("stop audit operation = %#v, want shutdown", records[2]["operation"])
+	}
+	if records[4]["operation"] != "restart" {
+		t.Errorf("reboot audit operation = %#v, want restart", records[4]["operation"])
+	}
 }

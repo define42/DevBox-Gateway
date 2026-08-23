@@ -12,6 +12,9 @@ func TestNewSettingsDefaults(t *testing.T) {
 	if got := s.String(DATA_ROOT_DIR); got != DefaultDataRootDir {
 		t.Fatalf("expected default DATA_ROOT_DIR %q, got %q", DefaultDataRootDir, got)
 	}
+	if got := s.String(AUDIT_LOG_FILE); got != DefaultAuditLogFile {
+		t.Fatalf("expected default AUDIT_LOG_FILE %q, got %q", DefaultAuditLogFile, got)
+	}
 	if got := s.String(LDAP_URL); got != "ldaps://ldap:389" {
 		t.Fatalf("expected default LDAP_URL, got %q", got)
 	}
@@ -44,6 +47,15 @@ func TestNewSettingsDefaults(t *testing.T) {
 	}
 	if got := s.Int(VDI_AUTO_SHUTDOWN_HOURS); got != DefaultVDIAutoShutdownHours {
 		t.Fatalf("expected default VDI_AUTO_SHUTDOWN_HOURS=%d, got %d", DefaultVDIAutoShutdownHours, got)
+	}
+}
+
+func TestNewSettingsAuditLogFileFromEnvironment(t *testing.T) {
+	t.Setenv(AUDIT_LOG_FILE, " /srv/splunk/devbox-audit.jsonl ")
+
+	s := NewSettings(false)
+	if got := s.String(AUDIT_LOG_FILE); got != "/srv/splunk/devbox-audit.jsonl" {
+		t.Fatalf("expected trimmed AUDIT_LOG_FILE, got %q", got)
 	}
 }
 

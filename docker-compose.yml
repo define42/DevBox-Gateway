@@ -13,6 +13,9 @@ services:
       # default is /var/lib/libvirt/devbox-gateway for native (RPM) installs.
       - DATA_ROOT_DIR=/data
       - BASE_IMAGE_DIR=/data/baseimages
+      # Keep the JSON Lines audit stream on the host-mounted /data volume so a
+      # Splunk agent can tail it outside the container.
+      - AUDIT_LOG_FILE=/data/logs/audit.jsonl
       - LDAP_SKIP_TLS_VERIFY=true
       - VDI_AUTO_SHUTDOWN_HOURS=2
       - LDAP_REQUIRED_GROUPS=team10_r

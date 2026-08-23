@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/hash"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -138,6 +139,7 @@ func handleLoginPostWithAuthenticator(
 		user, err := authenticate(username, password, settings)
 		if err != nil {
 			log.Printf("auth failed for %s: %v", strconv.Quote(username), err)
+			auditLoginFailure(r, username)
 			recordFailedLogin(w, settings, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
 			return
 		}
@@ -170,10 +172,22 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.Settings, loginLi
 func completeLogin(sessionManager *session.Manager, settings *config.Settings, w http.ResponseWriter, r *http.Request, user *identity.User, password string) {
 	if err := establishSession(r.Context(), sessionManager, user, r.RemoteAddr, password); err != nil {
 		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
+		auditLoginFailure(r, user.Name)
 		serveLogin(w, settings, "Login failed.")
 		return
 	}
+	markLoginForAudit(r, user)
 	http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
+}
+
+func auditLoginFailure(r *http.Request, username string) {
+	clientIP, _ := session.CanonicalClientIP(r.RemoteAddr)
+	audit.Log(r.Context(), audit.Event{
+		Action:   audit.ActionUserLogin,
+		User:     username,
+		Result:   audit.ResultFailure,
+		SourceIP: clientIP,
+	})
 }
 
 // establishSession digests the password and creates the session. The password
@@ -254,20 +268,31 @@ func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
 
 		user, authenticated := sessionManager.UserFromContext(r.Context())
 		username := ""
+		logoutResult := audit.ResultSuccess
 		if authenticated {
 			username = user.Name
 			if err := sessionManager.DestroyAllSessionsForUser(username); err != nil {
+				logoutResult = audit.ResultFailure
 				log.Printf("destroy sessions for user %q failed: %v", username, err)
 			}
 		}
 		if err := sessionManager.DestroySession(r.Context()); err != nil {
-			log.Printf("session destroy failed: %v", err)
+			logoutResult = audit.ResultFailure
+			log.Printf("destroy current session for user %q failed: %v", username, err)
 		}
 		if authenticated {
 			closed := sessionManager.CloseUserConnections(username)
 			if closed > 0 {
 				log.Printf("closed %d live connection(s) for user %q during logout", closed, username)
 			}
+			clientIP, _ := session.CanonicalClientIP(r.RemoteAddr)
+			audit.Log(r.Context(), audit.Event{
+				Action:        audit.ActionUserLogout,
+				User:          username,
+				Result:        logoutResult,
+				SourceIP:      clientIP,
+				Administrator: user.IsAdmin,
+			})
 		}
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
@@ -299,6 +324,74 @@ func requestScheme(r *http.Request) string {
 		return "https"
 	}
 	return "http"
+}
+
+type loginAuditState struct {
+	user     *identity.User
+	sourceIP string
+}
+
+type loginAuditContextKey struct{}
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusResponseWriter) Write(payload []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(payload)
+}
+
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func auditLoginOutcome(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/login" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		state := &loginAuditState{}
+		request := r.WithContext(context.WithValue(r.Context(), loginAuditContextKey{}, state))
+		response := &statusResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(response, request)
+		if state.user == nil {
+			return
+		}
+
+		result := audit.ResultFailure
+		if response.status == http.StatusSeeOther {
+			result = audit.ResultSuccess
+		}
+		audit.Log(request.Context(), audit.Event{
+			Action:        audit.ActionUserLogin,
+			User:          state.user.Name,
+			Result:        result,
+			SourceIP:      state.sourceIP,
+			Administrator: state.user.IsAdmin,
+		})
+	})
+}
+
+func markLoginForAudit(r *http.Request, user *identity.User) {
+	state, ok := r.Context().Value(loginAuditContextKey{}).(*loginAuditState)
+	if !ok {
+		return
+	}
+	state.user = user
+	state.sourceIP, _ = session.CanonicalClientIP(r.RemoteAddr)
 }
 
 // debugConnectionLogger logs every HTTP request (including WebSocket upgrades)
@@ -373,6 +466,7 @@ func NewHandler(sessionManager *session.Manager, settings *config.Settings) http
 	if settings.Bool(config.DEBUG_CONNECTIONS) {
 		router.Use(debugConnectionLogger)
 	}
+	router.Use(auditLoginOutcome)
 	router.Use(securityHeaders)
 	router.Use(sessionManager.LoadAndSave)
 	router.Use(sessionManager.EnforceClientIP)
@@ -434,6 +528,7 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 			path:           "/dashboard/remove",
 			action:         "dashboard remove",
 			verb:           "remove",
+			auditAction:    audit.ActionVMRemove,
 			failureMessage: "Failed to remove VM.",
 			successMessage: "VM removed.",
 			run: func(name string) error {
@@ -444,6 +539,7 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 			path:           "/dashboard/start",
 			action:         "dashboard start",
 			verb:           "start",
+			auditAction:    audit.ActionVMStart,
 			failureMessage: "Failed to start VM.",
 			successMessage: "VM start requested.",
 			run:            virt.StartExistingVM,
@@ -452,6 +548,8 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 			path:           "/dashboard/restart",
 			action:         "dashboard restart",
 			verb:           "restart",
+			auditAction:    audit.ActionVMReboot,
+			auditOperation: "restart",
 			failureMessage: "Failed to restart VM.",
 			successMessage: "VM restart requested.",
 			run:            virt.RestartVM,
@@ -460,6 +558,8 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 			path:           "/dashboard/shutdown",
 			action:         "dashboard shutdown",
 			verb:           "shutdown",
+			auditAction:    audit.ActionVMStop,
+			auditOperation: "shutdown",
 			failureMessage: "Failed to shutdown VM.",
 			successMessage: "VM shutdown requested.",
 			run:            virt.ShutdownVM,
@@ -586,7 +686,9 @@ func requireAdmin(req *http.Request, w http.ResponseWriter, sessionManager *sess
 // of the user's own gateway login password, captured at login and held in the
 // in-memory session (never in cleartext).
 func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager *session.Manager, settings *config.Settings) (virt.VMCreateRequest, bool) {
+	user, authenticated := sessionManager.UserFromContext(req.Context())
 	if err := parseFormWithBodyLimit(w, req); err != nil {
+		auditCreateVMValidationFailure(req, user, "")
 		log.Printf("dashboard form parse failed: %v", err)
 		dashboard.WriteJSON(w, http.StatusBadRequest, dashboard.ActionResponse{
 			OK:    false,
@@ -597,10 +699,10 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 
 	name, err := validateVMName(req.FormValue("vm_name"))
 	if handleDashboardFormError(w, "dashboard create", err) {
+		auditCreateVMValidationFailure(req, user, "")
 		return virt.VMCreateRequest{}, false
 	}
-	user, ok := sessionManager.UserFromContext(req.Context())
-	if !ok {
+	if !authenticated {
 		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
 			OK:    false,
 			Error: "Login required.",
@@ -609,6 +711,7 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	}
 	guestUsername, err := validateGuestUsername(req.FormValue("vm_username"), user.Name)
 	if handleDashboardFormError(w, "dashboard create", err) {
+		auditCreateVMValidationFailure(req, user, name)
 		return virt.VMCreateRequest{}, false
 	}
 	// The guest account password is the user's own gateway login password. Only
@@ -618,6 +721,7 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	// cannot provision a guest account, so ask for a fresh login.
 	guestPasswordHash, ok := sessionManager.PasswordHashFromContext(req.Context())
 	if !ok {
+		auditCreateVMValidationFailure(req, user, name)
 		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
 			OK:    false,
 			Error: "Your session is missing the credentials needed to create a DevBox. Log out and log in again.",
@@ -626,6 +730,7 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 	}
 	baseImage, err := validateBaseImage(req.FormValue("vm_base_image"), settings)
 	if handleDashboardFormError(w, "dashboard create", err) {
+		auditCreateVMValidationFailure(req, user, name)
 		return virt.VMCreateRequest{}, false
 	}
 	return virt.VMCreateRequest{
@@ -635,6 +740,22 @@ func parseCreateVMInput(w http.ResponseWriter, req *http.Request, sessionManager
 		PasswordHash:  guestPasswordHash,
 		BaseImage:     baseImage,
 	}, true
+}
+
+// auditCreateVMValidationFailure records an authenticated create attempt that
+// failed before provisioning. validatedName must be empty or the canonical
+// hostname returned by validateVMName; raw request values must never reach this
+// helper. Compose supplies the full VM name only when both identity components
+// remain valid, otherwise the event safely omits the target.
+func auditCreateVMValidationFailure(req *http.Request, user *identity.User, validatedName string) {
+	if user == nil {
+		return
+	}
+	vmName := ""
+	if validatedName != "" {
+		vmName, _ = vmname.Compose(user.Name, validatedName)
+	}
+	auditVMAction(req, user, audit.ActionVMCreate, vmName, "", audit.ResultFailure)
 }
 
 func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
@@ -653,6 +774,11 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 		}
 
 		vmName, err := virt.BootNewVMWithProgress(input, settings, reportProgress)
+		auditResult := audit.ResultSuccess
+		if err != nil {
+			auditResult = audit.ResultFailure
+		}
+		auditVMAction(req, input.Owner, audit.ActionVMCreate, vmName, "", auditResult)
 		status, result := dashboardCreateResult(input.Name, vmName, err, settings)
 		if creationStream != nil && creationStream.Started() {
 			if result.OK {
@@ -700,23 +826,17 @@ func dashboardCreateResult(name, vmName string, err error, settings *config.Sett
 func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	registerHiddenPost(group, "/dashboard/rdp", func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(
+		name, user, ok := authorizeDashboardVMAction(
 			req,
 			w,
 			sessionManager,
 			"dashboard rdp",
 			"connect to",
 			dashboardVMActionOwnerOnly,
+			"",
+			"",
 		)
 		if !ok {
-			return
-		}
-		user, ok := sessionManager.UserFromContext(req.Context())
-		if !ok {
-			dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
-				OK:    false,
-				Error: "Login required.",
-			})
 			return
 		}
 		if err := sessionManager.GrantRDPConnect(req.Context(), name); err != nil {
@@ -740,6 +860,8 @@ type dashboardVMActionSpec struct {
 	path           string
 	action         string
 	verb           string
+	auditAction    string
+	auditOperation string
 	failureMessage string
 	successMessage string
 	run            func(string) error
@@ -748,30 +870,53 @@ type dashboardVMActionSpec struct {
 func registerDashboardVMActionRoute(group huma.API, sessionManager *session.Manager, spec dashboardVMActionSpec) {
 	registerHiddenPost(group, spec.path, func(ctx huma.Context) {
 		req, w := humachi.Unwrap(ctx)
-		name, ok := authorizeDashboardVMAction(
+		name, user, ok := authorizeDashboardVMAction(
 			req,
 			w,
 			sessionManager,
 			spec.action,
 			spec.verb,
 			dashboardVMActionLifecycle,
+			spec.auditAction,
+			spec.auditOperation,
 		)
 		if !ok {
 			return
 		}
 		if err := spec.run(name); err != nil {
-			log.Printf("%s vm %q failed: %v", spec.verb, name, err)
+			auditVMAction(req, user, spec.auditAction, name, spec.auditOperation, audit.ResultFailure)
+			log.Printf("%s vm %q for user %q failed: %v", spec.verb, name, user.Name, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
 				Error: spec.failureMessage,
 			})
 			return
 		}
+		auditVMAction(req, user, spec.auditAction, name, spec.auditOperation, audit.ResultSuccess)
 		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
 			OK:      true,
 			Message: spec.successMessage,
 		})
 	})
+}
+
+func auditVMAction(req *http.Request, user *identity.User, action, name, operation, result string) {
+	clientIP, _ := session.CanonicalClientIP(req.RemoteAddr)
+	audit.Log(req.Context(), audit.Event{
+		Action:        action,
+		User:          user.Name,
+		Result:        result,
+		SourceIP:      clientIP,
+		VM:            name,
+		Operation:     operation,
+		Administrator: user.IsAdmin,
+	})
+}
+
+func auditFailedVMAction(req *http.Request, user *identity.User, action, name, operation string) {
+	if action != "" {
+		auditVMAction(req, user, action, name, operation, audit.ResultFailure)
+	}
 }
 
 type dashboardVMActionScope uint8
@@ -788,14 +933,16 @@ func authorizeDashboardVMAction(
 	dashboardAction string,
 	verb string,
 	scope dashboardVMActionScope,
-) (string, bool) {
+	auditAction string,
+	auditOperation string,
+) (string, *identity.User, bool) {
 	user, ok := sessionManager.UserFromContext(req.Context())
 	if !ok {
 		dashboard.WriteJSON(w, http.StatusUnauthorized, dashboard.ActionResponse{
 			OK:    false,
 			Error: "Login required.",
 		})
-		return "", false
+		return "", nil, false
 	}
 
 	nameParserUser := user.Name
@@ -808,44 +955,62 @@ func authorizeDashboardVMAction(
 	}
 	name, err := parseDashboardVMName(w, req, nameParserUser)
 	if handleDashboardFormError(w, dashboardAction, err) {
-		return "", false
+		auditFailedVMAction(req, user, auditAction, name, auditOperation)
+		return "", nil, false
 	}
 
 	if user.IsAdmin && scope == dashboardVMActionLifecycle {
-		exists, err := virt.PersistentVMExists(name)
-		if err != nil {
-			log.Printf("verify administrator %q may %s vm %q failed: %v", user.Name, verb, name, err)
-			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
-				OK:    false,
-				Error: "Unable to verify VM.",
-			})
-			return "", false
+		if !authorizeAdminVMActionTarget(req, w, user, name, verb, auditAction, auditOperation) {
+			return "", nil, false
 		}
-		if !exists {
-			log.Printf("administrator %q attempted to %s missing persistent vm %q", user.Name, verb, name)
-			dashboard.WriteJSON(w, http.StatusNotFound, dashboard.ActionResponse{
-				OK:    false,
-				Error: "VM not found.",
-			})
-			return "", false
-		}
-
-		log.Printf("administrator %q requested to %s vm %q", user.Name, verb, name)
-		return name, true
+		return name, user, true
 	}
 
 	owned, err := virt.UserOwnsVM(name, user.Name)
 	if err != nil {
+		auditFailedVMAction(req, user, auditAction, name, auditOperation)
 		writeDashboardVMActionOwnershipError(w, name, user.Name, verb, err)
-		return "", false
+		return "", nil, false
 	}
 
 	if !owned {
+		auditFailedVMAction(req, user, auditAction, name, auditOperation)
 		writeDashboardVMActionOwnershipError(w, name, user.Name, verb, nil)
-		return "", false
+		return "", nil, false
 	}
 
-	return name, true
+	return name, user, true
+}
+
+func authorizeAdminVMActionTarget(
+	req *http.Request,
+	w http.ResponseWriter,
+	user *identity.User,
+	name string,
+	verb string,
+	auditAction string,
+	auditOperation string,
+) bool {
+	exists, err := virt.PersistentVMExists(name)
+	if err != nil {
+		auditFailedVMAction(req, user, auditAction, name, auditOperation)
+		log.Printf("verify administrator %q may %s vm %q failed: %v", user.Name, verb, name, err)
+		dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
+			OK:    false,
+			Error: "Unable to verify VM.",
+		})
+		return false
+	}
+	if !exists {
+		auditFailedVMAction(req, user, auditAction, name, auditOperation)
+		log.Printf("administrator %q attempted to %s missing persistent vm %q", user.Name, verb, name)
+		dashboard.WriteJSON(w, http.StatusNotFound, dashboard.ActionResponse{
+			OK:    false,
+			Error: "VM not found.",
+		})
+		return false
+	}
+	return true
 }
 
 func writeDashboardVMActionOwnershipError(w http.ResponseWriter, name, username, verb string, err error) {

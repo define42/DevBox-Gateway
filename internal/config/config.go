@@ -55,6 +55,9 @@ const (
 	// libvirt/QEMU can use under SELinux (svirt) without relabeling a custom path
 	// such as /data. Override with DATA_ROOT_DIR.
 	DefaultDataRootDir = "/var/lib/libvirt/devbox-gateway"
+	// DefaultAuditLogFile is the default append-only JSON Lines audit log used
+	// by log collectors such as the Splunk Universal Forwarder.
+	DefaultAuditLogFile = "/var/log/devbox-gateway/audit.jsonl"
 	// DefaultVirtStoragePoolName is the default libvirt storage pool name.
 	DefaultVirtStoragePoolName = "desktop"
 	// DefaultVMDiskSizeGB is the default virtual disk capacity, in GiB, for newly
@@ -111,6 +114,7 @@ func NewSettings(printSettings bool) *Settings {
 	s := &Settings{m: make(map[string]*Setting)}
 
 	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
+	s.SetString(AUDIT_LOG_FILE, "Append-only JSON Lines file for security audit events; one JSON object is written per line", DefaultAuditLogFile)
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
 
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable QCOW2 base VDI images named .img/.qcow2/.raw; must contain at least one valid image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
@@ -488,6 +492,7 @@ const (
 	ACME_CA                          = "ACME_CA"
 	ACME_ENABLE                      = "ACME_ENABLE"
 	ADMIN_GROUP                      = "ADMIN_GROUP"
+	AUDIT_LOG_FILE                   = "AUDIT_LOG_FILE"
 	CERT_FILE                        = "CERT_FILE"
 	DATA_ROOT_DIR                    = "DATA_ROOT_DIR"
 	FRONT_DOMAIN                     = "FRONT_DOMAIN"

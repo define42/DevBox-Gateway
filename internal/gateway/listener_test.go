@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -342,6 +343,8 @@ func TestOpenFrontListener(t *testing.T) {
 }
 
 func TestBootGatewayErrors(t *testing.T) {
+	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
+
 	t.Run("invalid listen address", func(t *testing.T) {
 		t.Setenv(config.LISTEN_ADDR, "bad::addr")
 		t.Setenv(config.CERT_FILE, "")

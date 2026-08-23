@@ -4,12 +4,17 @@
 package console
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/audit"
+	"github.com/define42/devbox-gateway/internal/identity"
+	"github.com/define42/devbox-gateway/internal/session"
 
 	"github.com/gorilla/websocket"
 )
@@ -37,6 +42,30 @@ const (
 	// conventional gorilla ratio is ~9/10.
 	wsPingPeriod = (wsPongWait * 9) / 10
 )
+
+func auditConsoleConnection(ctx context.Context, user *identity.User, remoteAddr, name, protocol string) func() {
+	clientIP, _ := session.CanonicalClientIP(remoteAddr)
+	connectedAt := time.Now()
+	audit.Log(ctx, audit.Event{
+		Action:        audit.ActionConnectionConnect,
+		User:          user.Name,
+		SourceIP:      clientIP,
+		VM:            name,
+		Protocol:      protocol,
+		Administrator: user.IsAdmin,
+	})
+	return func() {
+		audit.Log(ctx, audit.Event{
+			Action:        audit.ActionConnectionDisconnect,
+			User:          user.Name,
+			SourceIP:      clientIP,
+			VM:            name,
+			Protocol:      protocol,
+			Administrator: user.IsAdmin,
+			Duration:      time.Since(connectedAt),
+		})
+	}
+}
 
 // configureWebsocketKeepalive installs the inbound frame-size cap, an initial
 // read deadline, and a pong handler that refreshes it. Pair it with

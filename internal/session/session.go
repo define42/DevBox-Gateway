@@ -67,16 +67,19 @@ var registerSessionTypesOnce sync.Once //nolint:gochecknoglobals // package-leve
 type Manager struct {
 	*scs.SessionManager
 
-	connectionsMu    sync.Mutex
-	nextConnectionID uint64
-	userConnections  map[string]map[uint64]func()
+	connectionsMu      sync.Mutex
+	nextConnectionID   uint64
+	userConnections    map[string]map[uint64]func()
+	connectionsClosing bool
+	activeConnections  int
+	connectionsDrained chan struct{}
 	// userConnectionLimit caps concurrently registered connections per user;
 	// values <=0 disable the cap. Set once at boot via SetUserConnectionLimit.
 	userConnectionLimit int
 }
 
 // SetUserConnectionLimit sets how many live connections (dashboard, serial,
-// and VNC websockets) each user may hold at once before
+// VNC, and RDP) each user may hold at once before
 // RegisterUserConnection refuses new ones. Values <=0 disable the cap.
 func (m *Manager) SetUserConnectionLimit(limit int) {
 	m.connectionsMu.Lock()
@@ -87,9 +90,12 @@ func (m *Manager) SetUserConnectionLimit(limit int) {
 // New constructs the gateway session manager.
 func New() *Manager {
 	registerSessionTypes()
+	connectionsDrained := make(chan struct{})
+	close(connectionsDrained)
 	return &Manager{
-		SessionManager:  newSessionManager(),
-		userConnections: make(map[string]map[uint64]func()),
+		SessionManager:     newSessionManager(),
+		userConnections:    make(map[string]map[uint64]func()),
+		connectionsDrained: connectionsDrained,
 	}
 }
 
@@ -408,11 +414,11 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 
 // RegisterUserConnection records a live, long-running connection for username
 // and returns an idempotent unregister function. closeFn is called by
-// CloseUserConnections when the user logs out everywhere. When the per-user
-// connection limit is reached the registration is refused: ok is false, the
-// returned unregister is a no-op, and the caller must close the connection —
-// this is what keeps one scripted user from exhausting the gateway-wide
-// front-connection budget with websockets.
+// CloseUserConnections when the user logs out everywhere and by
+// CloseAllConnections during gateway shutdown. When registration is refused,
+// ok is false, the returned unregister is a no-op, and the caller must close
+// the connection. Refusal happens at the per-user limit and once terminal
+// shutdown begins.
 func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unregister func(), ok bool) {
 	username = strings.TrimSpace(username)
 	if username == "" || closeFn == nil {
@@ -422,6 +428,9 @@ func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unreg
 	m.connectionsMu.Lock()
 	defer m.connectionsMu.Unlock()
 
+	if m.connectionsClosing {
+		return func() {}, false
+	}
 	if m.userConnectionLimit > 0 && len(m.userConnections[username]) >= m.userConnectionLimit {
 		return func() {}, false
 	}
@@ -434,19 +443,26 @@ func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unreg
 	if m.userConnections[username] == nil {
 		m.userConnections[username] = make(map[uint64]func())
 	}
+	if m.activeConnections == 0 {
+		m.connectionsDrained = make(chan struct{})
+	}
+	m.activeConnections++
 	m.userConnections[username][id] = closeFn
 
 	var unregisterOnce sync.Once
 	return func() {
 		unregisterOnce.Do(func() {
 			m.connectionsMu.Lock()
-			defer m.connectionsMu.Unlock()
-
 			connections := m.userConnections[username]
 			delete(connections, id)
 			if len(connections) == 0 {
 				delete(m.userConnections, username)
 			}
+			m.activeConnections--
+			if m.activeConnections == 0 {
+				close(m.connectionsDrained)
+			}
+			m.connectionsMu.Unlock()
 		})
 	}, true
 }
@@ -472,6 +488,46 @@ func (m *Manager) CloseUserConnections(username string) int {
 		closeFn()
 	}
 	return len(closeFns)
+}
+
+// CloseAllConnections begins the terminal connection drain used during gateway
+// shutdown. It atomically refuses future registrations, closes every currently
+// registered connection after releasing the registry lock, and waits for their
+// handlers to call the idempotent unregister functions returned by
+// RegisterUserConnection. The caller bounds the wait with ctx. Explicit user
+// logout continues to use the non-blocking CloseUserConnections method.
+func (m *Manager) CloseAllConnections(ctx context.Context) (int, error) {
+	m.connectionsMu.Lock()
+	m.connectionsClosing = true
+	closeFns := make([]func(), 0, m.activeConnections)
+	for _, connections := range m.userConnections {
+		for _, closeFn := range connections {
+			closeFns = append(closeFns, closeFn)
+		}
+	}
+	clear(m.userConnections)
+	drained := m.connectionsDrained
+	if drained == nil {
+		drained = make(chan struct{})
+		close(drained)
+		m.connectionsDrained = drained
+	}
+	m.connectionsMu.Unlock()
+
+	// A transport close may block (for example, while TLS tries to send a
+	// close-notify alert). Dispatch all closes independently so one stalled
+	// transport cannot prevent the others from unwinding and so ctx still bounds
+	// the overall drain.
+	for _, closeFn := range closeFns {
+		go closeFn()
+	}
+
+	select {
+	case <-drained:
+		return len(closeFns), nil
+	case <-ctx.Done():
+		return len(closeFns), ctx.Err()
+	}
 }
 
 // EnforceClientIP is router middleware that destroys an authenticated session

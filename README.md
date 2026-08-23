@@ -34,6 +34,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Login flow](#login-flow)
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
+  - [Audit logs and Splunk](#audit-logs-and-splunk)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
   - [Libvirt and VM storage](#libvirt-and-vm-storage)
@@ -59,6 +60,8 @@ else is treated as an RDP X.224 Connection Request.
 - **Libvirt integration** for managing QEMU/KVM virtual machines from a
   configurable storage pool, with base image auto-download.
 - **Single port** (`:443`) for everything: dashboard, websockets, and RDP.
+- **JSON Lines audit trail** for authentication, VM lifecycle, console/RDP
+  connections, and administrator actions, ready for file-based ingestion.
 
 ## Architecture
 
@@ -104,8 +107,8 @@ Requirements on the host:
 - A libvirt daemon reachable at `/var/run/libvirt` (the compose file
   bind-mounts it into the gateway container).
 - A `virbr0` bridge for the macvlan network (the default libvirt NAT bridge).
-- Write access to `/data/` on the host (used for ACME data, VM images, and
-  serial / VNC sockets).
+- Write access to `/data/` on the host (used for ACME data, VM images, serial /
+  VNC sockets, and the persistent audit log at `/data/logs/audit.jsonl`).
 - At least one QCOW2 base disk image in `/data/baseimages`, named with an
   `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
   valid QCOW2 image — see
@@ -133,13 +136,15 @@ For a native (non-container) deployment on an RPM-based distribution
 [GitHub Releases](https://github.com/define42/devbox-gateway/releases) page. The
 RPM version matches the container image tag for the same release.
 
-The package installs:
+The package installs its binary, unit, and config; the service creates the
+audit file at runtime:
 
 | Path                                            | Purpose                                              |
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                        | The gateway binary.                                  |
 | `/usr/lib/systemd/system/devbox-gateway.service` | systemd unit (runs as root, binds `:443`).           |
 | `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests), marked `%config(noreplace)` so your edits survive upgrades. |
+| `/var/log/devbox-gateway/audit.jsonl`             | Append-only JSON Lines audit log, created when the gateway starts. |
 
 It requires `libvirt-libs` and `ca-certificates`, plus `libvirt-daemon-kvm` and
 `qemu-kvm` — the local libvirt/KVM stack that hosts the virtual desktops.
@@ -217,13 +222,15 @@ artifact on the
 [GitHub Releases](https://github.com/define42/devbox-gateway/releases) page,
 built from the same binary as the RPM and container for that release.
 
-The package installs:
+The package installs its binary, unit, and config; the service creates the
+audit file at runtime:
 
 | Path                                            | Purpose                                              |
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                     | The gateway binary.                                  |
 | `/lib/systemd/system/devbox-gateway.service`  | systemd unit (runs as root, binds `:443`).           |
 | `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests), registered as a `conffile` so your edits survive upgrades. |
+| `/var/log/devbox-gateway/audit.jsonl`          | Append-only JSON Lines audit log, created when the gateway starts. |
 
 It depends on `libvirt0` and `ca-certificates`, plus `libvirt-daemon-system` and
 `qemu-system-x86` — the local libvirt/KVM stack that hosts the virtual desktops
@@ -336,6 +343,7 @@ file**, which keeps container and development overrides working.
 | `ACME_CA`                 | _(empty)_                                                                                                        | ACME directory URL, or `staging` for the Let's Encrypt staging endpoint.                          |
 | `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Domain served by the dashboard and used as the suffix for VM SNI routing labels.                  |
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
+| `AUDIT_LOG_FILE`          | `/var/log/devbox-gateway/audit.jsonl`                                                                            | Append-only audit destination. Every event is one complete JSON object followed by a newline, suitable for Splunk file monitoring. The Docker Compose setup overrides this to `/data/logs/audit.jsonl`. |
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
@@ -360,6 +368,38 @@ file**, which keeps container and development overrides working.
 Booleans accept anything `strconv.ParseBool` recognises (`true`, `false`,
 `1`, `0`, `yes`, `no`, …). Durations accept Go's `time.ParseDuration`
 syntax (e.g. `15s`, `2m`, `500ms`).
+
+### Audit logs and Splunk
+
+Security-relevant activity is appended to `AUDIT_LOG_FILE` as JSON Lines
+(NDJSON): each physical line is an independently parseable JSON event. The
+native packages default to `/var/log/devbox-gateway/audit.jsonl`; systemd
+creates its parent directory before starting the gateway. Docker Compose writes
+the same stream to `/data/logs/audit.jsonl`, which is visible at that path on
+the host through the existing `/data` bind mount.
+
+Configure the Splunk Universal Forwarder with a file monitor for the selected
+path and set the source type to `_json`. For example:
+
+```ini
+[monitor:///var/log/devbox-gateway/audit.jsonl]
+disabled = false
+sourcetype = _json
+index = main
+```
+
+The audit file is deliberately not a credential store, but it contains user,
+source-address, VM, resource, result, protocol, and duration metadata. Keep it
+access-controlled. If the forwarder runs as a dedicated `splunk` user, grant
+that account read/traverse access after the service has created the path:
+
+```sh
+sudo setfacl -m u:splunk:rx /var/log/devbox-gateway
+sudo setfacl -m u:splunk:r /var/log/devbox-gateway/audit.jsonl
+```
+
+Ordinary process diagnostics remain available through `journalctl` (or Docker
+logs); `AUDIT_LOG_FILE` is the dedicated security-event stream.
 
 ### TLS certificates
 

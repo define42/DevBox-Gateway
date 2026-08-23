@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	consolepkg "github.com/define42/devbox-gateway/internal/console"
@@ -16,6 +19,8 @@ import (
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
 )
+
+const gatewayShutdownTimeout = 5 * time.Second
 
 // Run boots the gateway and blocks until ctx is canceled or the listener stops.
 // It returns a process exit code so the command entrypoint remains a thin
@@ -49,8 +54,10 @@ func Run(ctx context.Context) int {
 }
 
 type gatewayRuntime struct {
-	listener net.Listener
-	frontTLS *cert.TLSManager
+	listener       net.Listener
+	frontTLS       *cert.TLSManager
+	sessionManager *session.Manager
+	auditSink      io.Closer
 
 	// stopAutoShutdown stops the VDI auto-shutdown worker; nil when the
 	// feature is disabled or the worker was never started.
@@ -62,14 +69,33 @@ type gatewayRuntime struct {
 	// failure rather than a listener close.
 	done     <-chan struct{}
 	serveErr error
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (g *gatewayRuntime) Close() error {
-	var errs []error
+	g.closeOnce.Do(func() {
+		g.closeErr = g.close()
+	})
+	return g.closeErr
+}
 
+func (g *gatewayRuntime) close() error {
 	if g.stopAutoShutdown != nil {
 		g.stopAutoShutdown()
 	}
+
+	return errors.Join(
+		g.closeListener(),
+		g.drainConnections(),
+		g.closeFrontTLS(),
+		g.closeAuditSink(),
+	)
+}
+
+func (g *gatewayRuntime) closeListener() error {
+	var errs []error
 
 	if g.listener != nil {
 		if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -80,21 +106,48 @@ func (g *gatewayRuntime) Close() error {
 	if g.done != nil {
 		select {
 		case <-g.done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(gatewayShutdownTimeout):
 			errs = append(errs, fmt.Errorf("gateway listener did not stop in time"))
-		}
-	}
-
-	if g.frontTLS != nil {
-		if err := g.frontTLS.Close(); err != nil {
-			errs = append(errs, err)
 		}
 	}
 
 	return errors.Join(errs...)
 }
 
-func bootGateway() (*gatewayRuntime, error) {
+func (g *gatewayRuntime) drainConnections() error {
+	if g.sessionManager == nil {
+		return nil
+	}
+
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), gatewayShutdownTimeout)
+	defer cancelDrain()
+	closed, err := g.sessionManager.CloseAllConnections(drainCtx)
+	if err != nil {
+		return fmt.Errorf("drain %d live gateway connection(s): %w", closed, err)
+	}
+	return nil
+}
+
+func (g *gatewayRuntime) closeFrontTLS() error {
+	if g.frontTLS == nil {
+		return nil
+	}
+	return g.frontTLS.Close()
+}
+
+func (g *gatewayRuntime) closeAuditSink() error {
+	// Keep the audit sink open until all active gateway connections have been
+	// drained so their disconnect records are durably emitted before shutdown.
+	if g.auditSink == nil {
+		return nil
+	}
+	if err := g.auditSink.Close(); err != nil {
+		return fmt.Errorf("close audit log: %w", err)
+	}
+	return nil
+}
+
+func bootGateway() (_ *gatewayRuntime, retErr error) {
 	vmInventory := virt.NewInventory()
 
 	rdp.InitLogging()
@@ -104,14 +157,24 @@ func bootGateway() (*gatewayRuntime, error) {
 		return nil, err
 	}
 
+	auditSink, err := audit.ConfigureJSONFile(settings.Get(config.AUDIT_LOG_FILE))
+	if err != nil {
+		return nil, fmt.Errorf("configure audit log: %w", err)
+	}
+	keepAuditSink := false
+	defer func() {
+		if keepAuditSink {
+			return
+		}
+		if err := auditSink.Close(); err != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close audit log after failed startup: %w", err))
+		}
+	}()
+
 	sessionManager := session.New()
 	sessionManager.SetUserConnectionLimit(settings.Int(config.MAX_CONNECTIONS_PER_USER))
 
-	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
-	debugConns := settings.Bool(config.DEBUG_CONNECTIONS)
-	consolepkg.SetDebugLogging(debugConns)
-	virt.SetVNCDebugLogging(debugConns)
-	rdp.SetDebugLogging(debugConns)
+	configureConnectionDebugLogging(settings)
 
 	if err := virt.Init(settings); err != nil {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
@@ -121,8 +184,20 @@ func bootGateway() (*gatewayRuntime, error) {
 		return nil, fmt.Errorf("failed to resolve sni hash secret: %w", err)
 	}
 
-	mux := NewHandler(sessionManager, settings)
+	runtime, err := startGatewayRuntime(settings, vmInventory, sessionManager, auditSink)
+	if err != nil {
+		return nil, err
+	}
+	keepAuditSink = true
+	return runtime, nil
+}
 
+func startGatewayRuntime(
+	settings *config.Settings,
+	vmInventory *virt.Inventory,
+	sessionManager *session.Manager,
+	auditSink io.Closer,
+) (*gatewayRuntime, error) {
 	frontTLS, err := cert.NewTLSManager(settings, vmInventory.VMNames)
 	if err != nil {
 		return nil, fmt.Errorf("tls setup: %w", err)
@@ -136,29 +211,36 @@ func bootGateway() (*gatewayRuntime, error) {
 
 	done := make(chan struct{})
 	runtime := &gatewayRuntime{
-		listener: ln,
-		frontTLS: frontTLS,
-		done:     done,
+		listener:       ln,
+		frontTLS:       frontTLS,
+		sessionManager: sessionManager,
+		auditSink:      auditSink,
+		done:           done,
 	}
+	mux := NewHandler(sessionManager, settings)
 	go func() {
 		runtime.serveErr = serveListener(ln, mux, frontTLS, sessionManager, settings)
 		close(done)
 	}()
 
-	// Start ACME only once the front listener is accepting connections: ACME
-	// TLS-ALPN-01 validation is answered through that listener. This is
-	// non-fatal — the gateway serves the self-signed fallback while certmagic
-	// keeps retrying issuance in the background, so slow DNS does not prevent
-	// boot.
+	// Start ACME only once the front listener is accepting connections. Failure
+	// is non-fatal: the gateway continues with its fallback certificate.
 	if err := frontTLS.StartManaging(); err != nil {
 		log.Printf("%v; continuing with the fallback certificate", err)
 	}
 
-	// Started last so no bootGateway failure path has to unwind it; a no-op
-	// when VDI_AUTO_SHUTDOWN_HOURS is unset or non-positive.
+	// Started last so no failure path has to unwind it; this is a no-op when
+	// VDI_AUTO_SHUTDOWN_HOURS is unset or non-positive.
 	runtime.stopAutoShutdown = virt.StartAutoShutdownWorker(settings)
-
 	return runtime, nil
+}
+
+func configureConnectionDebugLogging(settings *config.Settings) {
+	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
+	debugConns := settings.Bool(config.DEBUG_CONNECTIONS)
+	consolepkg.SetDebugLogging(debugConns)
+	virt.SetVNCDebugLogging(debugConns)
+	rdp.SetDebugLogging(debugConns)
 }
 
 // loadBootSettings resolves the process configuration for boot. Configuration

@@ -18,6 +18,12 @@ ExecStart=/usr/bin/devbox-gateway
 Restart=on-failure
 RestartSec=5s
 
+# Create /var/log/devbox-gateway before ExecStart for the default JSON Lines
+# audit log. The gateway creates missing parents for a custom AUDIT_LOG_FILE;
+# its selected path must still be writable and allowed by this service sandbox.
+LogsDirectory=devbox-gateway
+LogsDirectoryMode=0750
+
 # The gateway listens on :443 by default; allow binding the privileged port
 # without granting full root networking privileges.
 AmbientCapabilities=CAP_NET_BIND_SERVICE

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -483,6 +484,7 @@ func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 	sessionManager.Store = hcovDeleteFailStore{inner: sessionManager.Store}
 	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, "hcovlogout")
+	auditOutput := captureStructuredLogs(t)
 	closed := 0
 	sessionManager.RegisterUserConnection("hcovlogout", func() { closed++ })
 
@@ -508,6 +510,10 @@ func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 	}
 	if closed != 1 {
 		t.Fatalf("expected logout to close the live connection once, got %d", closed)
+	}
+	record := requireSingleAuditRecord(t, auditOutput)
+	if record["action"] != audit.ActionUserLogout || record["user"] != "hcovlogout" || record["result"] != audit.ResultFailure {
+		t.Fatalf("unexpected failed-logout audit record: %#v", record)
 	}
 }
 
@@ -695,6 +701,7 @@ func TestHcovDashboardLifecycleRejectsAnotherUsersVM(t *testing.T) {
 }
 
 func TestHcovAdminCanManageAnotherUsersVMLifecycle(t *testing.T) {
+	auditOutput := captureStructuredLogs(t)
 	owner := hcovUniqueName("hcovmanagedowner")
 	domainName := owner + vmname.Separator + "desk"
 	hcovDefineOwnedDomain(t, domainName, owner)
@@ -751,6 +758,52 @@ func TestHcovAdminCanManageAnotherUsersVMLifecycle(t *testing.T) {
 		url.Values{"vm_name": {missingName}},
 	)
 	hcovAssertAction(t, rec, http.StatusNotFound, "VM not found.")
+
+	assertAdminVMLifecycleAuditRecords(t, auditOutput, admin.Name, domainName, missingName)
+}
+
+func assertAdminVMLifecycleAuditRecords(
+	t *testing.T,
+	auditOutput *synchronizedLogBuffer,
+	adminName string,
+	domainName string,
+	missingName string,
+) {
+	t.Helper()
+
+	records := structuredAuditRecords(t, auditOutput)
+	want := []struct {
+		action string
+		vm     string
+		result string
+	}{
+		{action: audit.ActionVMStart, vm: domainName, result: audit.ResultSuccess},
+		{action: audit.ActionVMReboot, vm: domainName, result: audit.ResultSuccess},
+		{action: audit.ActionVMStop, vm: domainName, result: audit.ResultSuccess},
+		{action: audit.ActionVMRemove, vm: domainName, result: audit.ResultSuccess},
+		{action: audit.ActionVMRemove, vm: missingName, result: audit.ResultFailure},
+	}
+	if len(records) != len(want) {
+		t.Fatalf("got %d administrator VM audit records, want %d: %#v", len(records), len(want), records)
+	}
+	for i, expected := range want {
+		record := records[i]
+		if record["action"] != expected.action || record["user"] != adminName ||
+			record["vm"] != expected.vm || record["result"] != expected.result {
+			t.Errorf(
+				"administrator VM audit record %d = %#v, want action=%q user=%q vm=%q result=%q",
+				i,
+				record,
+				expected.action,
+				adminName,
+				expected.vm,
+				expected.result,
+			)
+		}
+		if record["administrator"] != true || record["source_ip"] != "192.0.2.1" {
+			t.Errorf("administrator VM audit context is incomplete: %#v", record)
+		}
+	}
 }
 
 func hcovAssertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, user string) {

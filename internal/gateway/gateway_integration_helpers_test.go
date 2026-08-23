@@ -3,6 +3,7 @@ package gateway
 import (
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,6 +25,7 @@ func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Setting
 	t.Setenv(config.FRONT_DOMAIN, "gateway.test")
 	t.Setenv(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-"))
 	t.Setenv(config.VIRT_STORAGE_POOL_NAME, "gateway-test-"+uniqueGatewayVMShortName("pool"))
+	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
 
 	settings := config.NewSettings(false)
 	stageExistingBaseImageFromDefaultRoot(t, settings)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/dashboard"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -77,17 +78,26 @@ func registerAdminBaseImageUploadRoute(group huma.API, sessionManager *session.M
 		req.Body = http.MaxBytesReader(w, req.Body, maxBytes+baseImageMultipartOverheadBytes)
 		part, name, err := baseImageUploadPart(req)
 		if err != nil {
-			writeAdminBaseImageError(w, user, "upload", "", true, err)
+			writeAdminBaseImageError(w, req, user, "upload", "", true, err)
 			return
 		}
 
 		written, err := virt.StoreBaseImage(settings, name, part, maxBytes)
 		if err != nil {
-			writeAdminBaseImageError(w, user, "upload", name, false, err)
+			writeAdminBaseImageError(w, req, user, "upload", name, false, err)
 			return
 		}
 		_ = part.Close()
 		log.Printf("admin base image upload succeeded: user=%q image=%q bytes=%d", user.Name, name, written)
+		clientIP, _ := session.CanonicalClientIP(req.RemoteAddr)
+		audit.Log(req.Context(), audit.Event{
+			Action:        audit.ActionAdminBaseImageUpload,
+			User:          user.Name,
+			SourceIP:      clientIP,
+			ResourceType:  "base_image",
+			Resource:      name,
+			Administrator: true,
+		})
 		dashboard.WriteJSON(w, http.StatusCreated, dashboard.ActionResponse{
 			OK:      true,
 			Message: "Base image uploaded.",
@@ -103,16 +113,25 @@ func registerAdminBaseImageDeleteRoute(group huma.API, sessionManager *session.M
 			return
 		}
 		if err := parseFormWithBodyLimit(w, req); err != nil {
-			writeAdminBaseImageError(w, user, "delete", "", true, err)
+			writeAdminBaseImageError(w, req, user, "delete", "", true, err)
 			return
 		}
 
 		name := req.FormValue("base_image")
 		if err := virt.DeleteBaseImage(settings, name); err != nil {
-			writeAdminBaseImageError(w, user, "delete", name, false, err)
+			writeAdminBaseImageError(w, req, user, "delete", name, false, err)
 			return
 		}
 		log.Printf("admin base image delete succeeded: user=%q image=%q", user.Name, name)
+		clientIP, _ := session.CanonicalClientIP(req.RemoteAddr)
+		audit.Log(req.Context(), audit.Event{
+			Action:        audit.ActionAdminBaseImageDelete,
+			User:          user.Name,
+			SourceIP:      clientIP,
+			ResourceType:  "base_image",
+			Resource:      name,
+			Administrator: true,
+		})
 		dashboard.WriteJSON(w, http.StatusOK, dashboard.ActionResponse{
 			OK:      true,
 			Message: "Base image deleted.",
@@ -170,6 +189,7 @@ func baseImageUploadPart(req *http.Request) (*multipart.Part, string, error) {
 
 func writeAdminBaseImageError(
 	w http.ResponseWriter,
+	req *http.Request,
 	user *identity.User,
 	action string,
 	name string,
@@ -206,5 +226,19 @@ func writeAdminBaseImageError(
 		message = "Invalid base image deletion request."
 	}
 	log.Printf("admin base image %s failed: user=%q image=%q error=%v", action, user.Name, name, err)
+	auditAction := audit.ActionAdminBaseImageUpload
+	if action == "delete" {
+		auditAction = audit.ActionAdminBaseImageDelete
+	}
+	clientIP, _ := session.CanonicalClientIP(req.RemoteAddr)
+	audit.Log(req.Context(), audit.Event{
+		Action:        auditAction,
+		User:          user.Name,
+		Result:        audit.ResultFailure,
+		SourceIP:      clientIP,
+		ResourceType:  "base_image",
+		Resource:      name,
+		Administrator: true,
+	})
 	dashboard.WriteJSON(w, status, dashboard.ActionResponse{OK: false, Error: message})
 }
