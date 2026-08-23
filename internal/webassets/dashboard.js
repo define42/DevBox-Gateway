@@ -1611,30 +1611,25 @@ function bootstrap() {
                     const connectActions = document.createElement("div");
                     connectActions.className = "d-flex flex-wrap gap-2";
                     if (displayName.trim() !== "") {
+                        const connectButton = document.createElement("button");
+                        connectButton.type = "button";
+                        connectButton.className = rdpReady
+                            ? "btn btn-sm btn-success"
+                            : "btn btn-sm btn-outline-secondary";
+                        setIconLabel(connectButton, "bi-display", "RDP");
+                        connectButton.disabled = state.busy || !rdpReady;
                         if (rdpReady) {
-                            // The RDP button is a deliberate action, not a static
-                            // download link: clicking it POSTs to the server, which
-                            // opens a short-lived RDP authorization window for this
-                            // VM from the user's IP and returns the .rdp file. The
-                            // RDP front handler rejects connections without that
-                            // recent grant, so the file alone is not enough.
-                            const connectButton = document.createElement("button");
-                            connectButton.type = "button";
-                            connectButton.className = "btn btn-sm btn-success";
-                            setIconLabel(connectButton, "bi-display", "RDP");
-                            connectButton.disabled = state.busy;
+                            // Clicking RDP POSTs to the server, which opens a
+                            // short-lived authorization window and returns the
+                            // .rdp file. The file alone is not enough to connect.
                             connectButton.addEventListener("click", () => {
                                 void connectRDP(vm);
                             });
-                            connectActions.appendChild(connectButton);
                         }
                         else {
-                            const offlineBadge = document.createElement("span");
-                            offlineBadge.className = "btn btn-sm btn-outline-danger disabled";
-                            setIconLabel(offlineBadge, "bi-slash-circle", "Offline");
-                            offlineBadge.setAttribute("aria-disabled", "true");
-                            connectActions.appendChild(offlineBadge);
+                            connectButton.title = "RDP is unavailable until this DevBox is ready.";
                         }
+                        connectActions.appendChild(connectButton);
                     }
                     const terminalButton = document.createElement("button");
                     terminalButton.type = "button";

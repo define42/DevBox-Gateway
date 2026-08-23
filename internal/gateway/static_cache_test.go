@@ -208,6 +208,18 @@ func TestDashboardJavaScriptOpensConsolesOnDemand(t *testing.T) {
 	if !strings.Contains(body, "terminalButton.disabled = state.busy || !isActive") {
 		t.Fatal("expected Terminal button availability to depend on active VM state")
 	}
+	if !strings.Contains(body, "connectButton.disabled = state.busy || !rdpReady") {
+		t.Fatal("expected unavailable RDP to use the native disabled button state")
+	}
+	if !strings.Contains(body, `setIconLabel(connectButton, "bi-display", "RDP")`) {
+		t.Fatal("expected available and unavailable RDP controls to retain the RDP label")
+	}
+	if !strings.Contains(body, `: "btn btn-sm btn-outline-secondary"`) {
+		t.Fatal("expected unavailable RDP to use muted secondary styling")
+	}
+	if strings.Contains(body, `setIconLabel(offlineBadge, "bi-slash-circle", "Offline")`) {
+		t.Fatal("unavailable RDP must retain the RDP label instead of saying Offline")
+	}
 	if !strings.Contains(body, "state.vnc.src = vncFrameURL(vm.name)") {
 		t.Fatal("expected NoVNC to resolve its websocket only when the viewer opens")
 	}
