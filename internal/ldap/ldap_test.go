@@ -87,18 +87,18 @@ func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 	defer cleanup()
 
 	applyLDAPSettings(t, ldapURL)
-	// admin is a direct member of devbox-admins and the normal team10_r access
-	// group in testldap/default-config.cfg; johndoe is not an administrator.
+	// administrator is a direct member of devbox-admins and the normal team10_r
+	// access group in testldap/default-config.cfg; johndoe is not an administrator.
 	t.Setenv(config.ADMIN_GROUP, "devbox-admins")
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "team10_r")
 	settings := config.NewSettings(false)
 
-	admin, err := AuthenticateAccess("admin", "dogood", settings)
+	admin, err := AuthenticateAccess("administrator", "dogood", settings)
 	if err != nil {
-		t.Fatalf("AuthenticateAccess(admin): %v", err)
+		t.Fatalf("AuthenticateAccess(administrator): %v", err)
 	}
 	if admin == nil || !admin.IsAdmin {
-		t.Fatalf("expected admin to be an administrator, got %#v", admin)
+		t.Fatalf("expected administrator to be an administrator, got %#v", admin)
 	}
 
 	regular, err := AuthenticateAccess("johndoe", "dogood", settings)
@@ -113,7 +113,7 @@ func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 	// required-group gate must still reject this otherwise-admin user.
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
 	restrictedSettings := config.NewSettings(false)
-	denied, err := AuthenticateAccess("admin", "dogood", restrictedSettings)
+	denied, err := AuthenticateAccess("administrator", "dogood", restrictedSettings)
 	if err == nil || denied != nil {
 		t.Fatalf("expected required-group denial before administrator access, got user=%#v err=%v", denied, err)
 	}
