@@ -2,6 +2,65 @@
   color-scheme: dark;
 }
 
+.dashboard-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.dashboard-heading {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.dashboard-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dashboard-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.dashboard-header--admin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 1rem;
+  row-gap: 1rem;
+}
+
+.dashboard-header--admin .dashboard-heading {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.dashboard-header--admin .dashboard-actions {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.dashboard-header--admin .dashboard-metrics {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns:
+    minmax(0, 0.65fr)
+    minmax(0, 0.65fr)
+    minmax(0, 1.65fr)
+    minmax(0, 1.6fr)
+    minmax(0, 1.75fr)
+    minmax(0, 0.65fr);
+  align-items: stretch;
+  width: 100%;
+}
+
 .rtt-indicator,
 .jitter-indicator,
 .server-memory-indicator,
@@ -20,6 +79,17 @@
 .server-disk-io-indicator {
   min-width: min(21rem, 100%);
   max-width: 100%;
+  white-space: normal;
+}
+
+.dashboard-header--admin .dashboard-metrics > .badge {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  min-height: 2rem;
+  padding: 0.45rem 0.65rem;
+  line-height: 1.25;
+  text-align: center;
   white-space: normal;
 }
 
@@ -135,5 +205,35 @@
 
   .terminal-modal__surface {
     min-height: 300px;
+  }
+}
+
+@media (max-width: 1199.98px) {
+  .dashboard-header--admin .dashboard-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767.98px) {
+  .dashboard-header--admin .dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 575.98px) {
+  .dashboard-header--admin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-header--admin .dashboard-actions {
+    grid-column: 1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .dashboard-header--admin .dashboard-metrics {
+    grid-column: 1;
+    grid-row: 3;
+    grid-template-columns: minmax(0, 1fr);
   }
 }

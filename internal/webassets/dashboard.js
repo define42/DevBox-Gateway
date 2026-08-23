@@ -218,18 +218,20 @@ function bootstrap() {
     <main class="container py-4">
       <div class="card shadow-sm">
         <div class="card-body">
-          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
-            <div>
+          <div class="dashboard-header ${adminView ? "dashboard-header--admin" : ""} mb-4">
+            <div class="dashboard-heading">
               <h1 class="h4 mb-1" id="page-title">Available DevBoxes</h1>
               <p class="text-body-secondary mb-0" id="page-subtitle">Live inventory.</p>
             </div>
-            <div class="d-flex flex-wrap align-items-center gap-2">
+            <div class="dashboard-metrics" role="group" aria-label="Gateway health metrics">
               <span id="rtt-indicator" class="badge rounded-pill text-bg-secondary rtt-indicator" title="Live round-trip time to the gateway" aria-live="polite"><i class="bi bi-activity me-1" aria-hidden="true"></i>RTT: &ndash;&ndash;</span>
               <span id="jitter-indicator" class="badge rounded-pill text-bg-secondary jitter-indicator" title="Live RTT jitter (variation between samples)" aria-live="polite"><i class="bi bi-graph-up me-1" aria-hidden="true"></i>Jitter: &ndash;&ndash;</span>
               <span id="server-memory-indicator" class="badge rounded-pill text-bg-secondary server-memory-indicator" title="Current server memory usage" aria-live="polite" hidden><i class="bi bi-memory me-1" aria-hidden="true"></i>Memory: &ndash;&ndash;</span>
               <span id="server-disk-indicator" class="badge rounded-pill text-bg-secondary server-disk-indicator" title="Current usage of the filesystem backing VM storage" aria-live="polite" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Disk: &ndash;&ndash;</span>
               <span id="server-disk-io-indicator" class="badge rounded-pill text-bg-secondary server-disk-io-indicator" title="Current disk I/O utilization and throughput" aria-live="polite" hidden><i class="bi bi-arrow-down-up me-1" aria-hidden="true"></i>Disk I/O: &ndash;&ndash;</span>
               <span id="server-cpu-indicator" class="badge rounded-pill text-bg-secondary server-cpu-indicator" title="CPU utilization averaged across all logical CPUs" aria-live="polite" hidden><i class="bi bi-cpu me-1" aria-hidden="true"></i>CPU: &ndash;&ndash;</span>
+            </div>
+            <div class="dashboard-actions d-flex flex-wrap align-items-center gap-2">
               <a class="btn btn-outline-primary btn-sm" id="admin-view-link" href="/api/admin" hidden><i class="bi bi-shield-lock me-1" aria-hidden="true"></i>Admin</a>
               <button class="btn btn-outline-primary btn-sm" id="base-images-button" type="button" hidden><i class="bi bi-device-hdd me-1" aria-hidden="true"></i>Base Images</button>
               <a class="btn btn-outline-secondary btn-sm" id="dashboard-view-link" href="/api/dashboard" hidden><i class="bi bi-display me-1" aria-hidden="true"></i>My DevBoxes</a>

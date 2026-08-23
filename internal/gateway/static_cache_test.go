@@ -139,6 +139,8 @@ func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
 func dashboardAdminInventoryFragments() map[string]string {
 	return map[string]string{
 		"conditional admin navigation": `id="admin-view-link" href="/api/admin" hidden`,
+		"admin dashboard header":       `dashboard-header ${adminView ? "dashboard-header--admin" : ""}`,
+		"health metrics group":         `class="dashboard-metrics" role="group" aria-label="Gateway health metrics"`,
 		"admin data endpoint":          `"/api/admin/data"`,
 		"admin websocket endpoint":     `"/api/admin/ws"`,
 		"admin memory badge":           `id="server-memory-indicator" class="badge rounded-pill text-bg-secondary server-memory-indicator"`,
