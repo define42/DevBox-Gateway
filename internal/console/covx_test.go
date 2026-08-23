@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
+	"github.com/define42/devbox-gateway/internal/dashboard"
 	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
 
@@ -193,6 +194,9 @@ func covxAwaitServerCPU(t *testing.T, conn *websocket.Conn) float64 {
 			t.Fatalf("write CPU sample ping: %v", err)
 		}
 		pong := readDashboardMessageType(t, conn, "pong")
+		if pong.ServerDiskIO != nil {
+			assertValidServerDiskIO(t, *pong.ServerDiskIO)
+		}
 		if pong.ServerCPU != nil {
 			return pong.ServerCPU.UsagePercent
 		}
@@ -217,8 +221,28 @@ func assertInitialAdminServerUsage(t *testing.T, pong dashboardServerMessage) {
 	if pong.ServerDisk.UsedBytes > pong.ServerDisk.TotalBytes {
 		t.Fatalf("admin pong reported invalid server disk usage: %+v", pong.ServerDisk)
 	}
+	if pong.ServerDiskIO != nil {
+		t.Fatalf("first admin pong reported disk I/O before establishing a baseline: %+v", pong.ServerDiskIO)
+	}
 	if pong.ServerCPU != nil {
 		t.Fatalf("first admin pong reported CPU before establishing a baseline: %+v", pong.ServerCPU)
+	}
+}
+
+func assertValidServerDiskIO(t *testing.T, usage dashboard.ServerDiskIO) {
+	t.Helper()
+
+	if math.IsNaN(usage.UsagePercent) || math.IsInf(usage.UsagePercent, 0) ||
+		usage.UsagePercent < 0 || usage.UsagePercent > 100 {
+		t.Fatalf("admin pong reported invalid disk I/O utilization: %+v", usage)
+	}
+	if math.IsNaN(usage.ReadBytesPerSecond) || math.IsInf(usage.ReadBytesPerSecond, 0) ||
+		usage.ReadBytesPerSecond < 0 {
+		t.Fatalf("admin pong reported invalid disk read throughput: %+v", usage)
+	}
+	if math.IsNaN(usage.WriteBytesPerSecond) || math.IsInf(usage.WriteBytesPerSecond, 0) ||
+		usage.WriteBytesPerSecond < 0 {
+		t.Fatalf("admin pong reported invalid disk write throughput: %+v", usage)
 	}
 }
 
@@ -311,6 +335,9 @@ func TestCovxDashboardWSPongWithDebugLogging(t *testing.T) {
 	}
 	if pong.ServerDisk != nil {
 		t.Fatalf("ordinary dashboard pong exposed server disk usage: %+v", pong.ServerDisk)
+	}
+	if pong.ServerDiskIO != nil {
+		t.Fatalf("ordinary dashboard pong exposed server disk I/O: %+v", pong.ServerDiskIO)
 	}
 	if pong.ServerCPU != nil {
 		t.Fatalf("ordinary dashboard pong exposed server CPU utilization: %+v", pong.ServerCPU)

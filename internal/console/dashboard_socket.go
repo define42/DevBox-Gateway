@@ -34,17 +34,19 @@ type dashboardServerMessage struct {
 	Data         *dashboard.DataResponse `json:"data,omitempty"`
 	ServerMemory *dashboard.ServerMemory `json:"serverMemory,omitempty"`
 	ServerDisk   *dashboard.ServerDisk   `json:"serverDisk,omitempty"`
+	ServerDiskIO *dashboard.ServerDiskIO `json:"serverDiskIO,omitempty"`
 	ServerCPU    *dashboard.ServerCPU    `json:"serverCPU,omitempty"`
 	Error        string                  `json:"error,omitempty"`
 }
 
 type dashboardView struct {
-	username         string
-	isAdmin          bool
-	allVMs           bool
-	readServerMemory func() (dashboard.ServerMemory, error)
-	readServerDisk   func() (dashboard.ServerDisk, error)
-	sampleServerCPU  func() (*dashboard.ServerCPU, error)
+	username           string
+	isAdmin            bool
+	allVMs             bool
+	readServerMemory   func() (dashboard.ServerMemory, error)
+	readServerDisk     func() (dashboard.ServerDisk, error)
+	sampleServerDiskIO func() (*dashboard.ServerDiskIO, error)
+	sampleServerCPU    func() (*dashboard.ServerCPU, error)
 }
 
 // HandleDashboardWS serves the dashboard's shared control websocket. Typed
@@ -102,9 +104,13 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 			allVMs:   adminView,
 		}
 		if adminView {
+			storagePath := config.VirtStoragePoolPath(settings)
 			view.readServerMemory = dashboard.ReadServerMemory
 			view.readServerDisk = func() (dashboard.ServerDisk, error) {
-				return dashboard.ReadServerDisk(config.VirtStoragePoolPath(settings))
+				return dashboard.ReadServerDisk(storagePath)
+			}
+			if sampler, sampleErr := dashboard.NewServerDiskIOSamplerForPath(storagePath); sampleErr == nil {
+				view.sampleServerDiskIO = sampler.Sample
 			}
 			view.sampleServerCPU = dashboard.NewServerCPUSampler().Sample
 		}
@@ -185,6 +191,11 @@ func dashboardPong(view dashboardView, id *float64) dashboardServerMessage {
 	if view.readServerDisk != nil {
 		if disk, err := view.readServerDisk(); err == nil {
 			response.ServerDisk = &disk
+		}
+	}
+	if view.sampleServerDiskIO != nil {
+		if diskIO, err := view.sampleServerDiskIO(); err == nil {
+			response.ServerDiskIO = diskIO
 		}
 	}
 	if view.sampleServerCPU != nil {

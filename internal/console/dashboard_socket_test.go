@@ -137,24 +137,106 @@ func TestDashboardPongIncludesServerCPUOnlyForAdminView(t *testing.T) {
 	}
 }
 
+func TestDashboardPongIncludesServerDiskIOOnlyForAdminView(t *testing.T) {
+	t.Parallel()
+
+	wantDiskIO := dashboard.ServerDiskIO{
+		UsagePercent:        42.5,
+		ReadBytesPerSecond:  12 * 1024 * 1024,
+		WriteBytesPerSecond: 3 * 1024 * 1024,
+	}
+	tests := []struct {
+		name            string
+		allVMs          bool
+		sample          *dashboard.ServerDiskIO
+		sampleErr       error
+		wantDiskIO      *dashboard.ServerDiskIO
+		wantSampleCalls int
+	}{
+		{
+			name:            "admin view",
+			allVMs:          true,
+			sample:          &wantDiskIO,
+			wantDiskIO:      &wantDiskIO,
+			wantSampleCalls: 1,
+		},
+		{name: "ordinary dashboard", sample: &wantDiskIO},
+		{name: "admin baseline", allVMs: true, wantSampleCalls: 1},
+		{
+			name:            "admin sample failure",
+			allVMs:          true,
+			sample:          &wantDiskIO,
+			sampleErr:       errors.New("disk I/O unavailable"),
+			wantSampleCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := 123.456
+			sampleCalls := 0
+			view := dashboardView{
+				allVMs: tt.allVMs,
+				sampleServerDiskIO: func() (*dashboard.ServerDiskIO, error) {
+					sampleCalls++
+					return tt.sample, tt.sampleErr
+				},
+			}
+
+			got := dashboardPong(view, &probe)
+			assertDashboardPong(t, got, probe, nil, nil)
+			assertOptionalServerUsage(t, "disk I/O", got.ServerDiskIO, tt.wantDiskIO)
+			if sampleCalls != tt.wantSampleCalls {
+				t.Fatalf("dashboardPong() sampled disk I/O %d times, want %d", sampleCalls, tt.wantSampleCalls)
+			}
+		})
+	}
+}
+
 func TestDashboardPongKeepsOtherUsageWhenServerCPUFails(t *testing.T) {
 	t.Parallel()
 
 	wantMemory := dashboard.ServerMemory{UsedBytes: 1, TotalBytes: 2}
 	wantDisk := dashboard.ServerDisk{UsedBytes: 3, TotalBytes: 4}
+	wantDiskIO := dashboard.ServerDiskIO{UsagePercent: 25, ReadBytesPerSecond: 5, WriteBytesPerSecond: 6}
 	view := dashboardView{
-		allVMs:           true,
-		readServerMemory: func() (dashboard.ServerMemory, error) { return wantMemory, nil },
-		readServerDisk:   func() (dashboard.ServerDisk, error) { return wantDisk, nil },
-		sampleServerCPU:  func() (*dashboard.ServerCPU, error) { return nil, errors.New("CPU unavailable") },
+		allVMs:             true,
+		readServerMemory:   func() (dashboard.ServerMemory, error) { return wantMemory, nil },
+		readServerDisk:     func() (dashboard.ServerDisk, error) { return wantDisk, nil },
+		sampleServerDiskIO: func() (*dashboard.ServerDiskIO, error) { return &wantDiskIO, nil },
+		sampleServerCPU:    func() (*dashboard.ServerCPU, error) { return nil, errors.New("CPU unavailable") },
 	}
 
 	probe := 123.456
 	got := dashboardPong(view, &probe)
 	assertDashboardPong(t, got, probe, &wantMemory, &wantDisk)
+	assertOptionalServerUsage(t, "disk I/O", got.ServerDiskIO, &wantDiskIO)
 	if got.ServerCPU != nil {
 		t.Fatalf("dashboardPong() CPU = %+v, want nil", got.ServerCPU)
 	}
+}
+
+func TestDashboardPongKeepsOtherUsageWhenServerDiskIOFails(t *testing.T) {
+	t.Parallel()
+
+	wantMemory := dashboard.ServerMemory{UsedBytes: 1, TotalBytes: 2}
+	wantDisk := dashboard.ServerDisk{UsedBytes: 3, TotalBytes: 4}
+	wantCPU := dashboard.ServerCPU{UsagePercent: 50}
+	view := dashboardView{
+		allVMs:             true,
+		readServerMemory:   func() (dashboard.ServerMemory, error) { return wantMemory, nil },
+		readServerDisk:     func() (dashboard.ServerDisk, error) { return wantDisk, nil },
+		sampleServerDiskIO: func() (*dashboard.ServerDiskIO, error) { return nil, errors.New("disk I/O unavailable") },
+		sampleServerCPU:    func() (*dashboard.ServerCPU, error) { return &wantCPU, nil },
+	}
+
+	probe := 123.456
+	got := dashboardPong(view, &probe)
+	assertDashboardPong(t, got, probe, &wantMemory, &wantDisk)
+	if got.ServerDiskIO != nil {
+		t.Fatalf("dashboardPong() disk I/O = %+v, want nil", got.ServerDiskIO)
+	}
+	assertOptionalServerUsage(t, "CPU", got.ServerCPU, &wantCPU)
 }
 
 func assertDashboardPong(

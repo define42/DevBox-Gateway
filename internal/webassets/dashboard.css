@@ -6,6 +6,7 @@
 .jitter-indicator,
 .server-memory-indicator,
 .server-disk-indicator,
+.server-disk-io-indicator,
 .server-cpu-indicator {
   min-width: 7.5rem;
   justify-content: center;
@@ -15,7 +16,8 @@
 }
 
 .server-memory-indicator,
-.server-disk-indicator {
+.server-disk-indicator,
+.server-disk-io-indicator {
   min-width: min(21rem, 100%);
   max-width: 100%;
   white-space: normal;

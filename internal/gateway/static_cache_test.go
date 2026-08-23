@@ -126,18 +126,33 @@ func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
 		t.Fatalf("expected %d, got %d", http.StatusOK, rec.Code)
 	}
 	body := rec.Body.String()
-	for description, fragment := range map[string]string{
+	for description, fragment := range dashboardAdminInventoryFragments() {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected dashboard JavaScript to include %s", description)
+		}
+	}
+	if strings.Contains(body, `actionAreaEl.hidden = adminView`) {
+		t.Fatal("administrator lifecycle action feedback must remain visible")
+	}
+}
+
+func dashboardAdminInventoryFragments() map[string]string {
+	return map[string]string{
 		"conditional admin navigation": `id="admin-view-link" href="/api/admin" hidden`,
 		"admin data endpoint":          `"/api/admin/data"`,
 		"admin websocket endpoint":     `"/api/admin/ws"`,
 		"admin memory badge":           `id="server-memory-indicator" class="badge rounded-pill text-bg-secondary server-memory-indicator"`,
 		"admin disk badge":             `id="server-disk-indicator" class="badge rounded-pill text-bg-secondary server-disk-indicator"`,
+		"admin disk I/O badge":         `id="server-disk-io-indicator" class="badge rounded-pill text-bg-secondary server-disk-io-indicator"`,
+		"disk I/O neutral placeholder": `Disk I/O: &ndash;&ndash;</span>`,
 		"admin CPU badge":              `id="server-cpu-indicator" class="badge rounded-pill text-bg-secondary server-cpu-indicator"`,
 		"admin memory visibility":      `serverMemoryIndicatorEl.hidden = !adminView`,
 		"admin disk visibility":        `serverDiskIndicatorEl.hidden = !adminView`,
+		"admin disk I/O visibility":    `serverDiskIOIndicatorEl.hidden = !adminView`,
 		"admin CPU visibility":         `serverCPUIndicatorEl.hidden = !adminView`,
 		"live admin memory sample":     `renderServerMemory(message.serverMemory)`,
 		"live admin disk sample":       `renderServerDisk(message.serverDisk)`,
+		"live admin disk I/O sample":   `renderServerDiskIO(message.serverDiskIO)`,
 		"live admin CPU sample":        `renderServerCPU(message.serverCPU)`,
 		"server usage percentage":      `Math.round(usagePercent)`,
 		"yellow usage boundary":        `const SERVER_USAGE_YELLOW_MIN_PERCENT = 60`,
@@ -149,6 +164,8 @@ func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
 		"server capacity details":      ` · ${formatServerCapacityGB(usedBytes)} used / ${formatServerCapacityGB(totalBytes)} total`,
 		"memory shared renderer":       `renderServerUsage(serverMemoryIndicatorEl, "bi-memory", "Memory", memory)`,
 		"disk shared renderer":         `renderServerUsage(serverDiskIndicatorEl, "bi-device-hdd", "Disk", disk)`,
+		"disk I/O shared renderer":     `renderServerUsagePercent(serverDiskIOIndicatorEl, "bi-arrow-down-up", "Disk I/O", null)`,
+		"disk I/O throughput details":  ` · R ${formatBytesPerSecond(readBytesPerSecond)} · W ${formatBytesPerSecond(writeBytesPerSecond)}`,
 		"CPU shared renderer":          `renderServerUsagePercent(serverCPUIndicatorEl, "bi-cpu", "CPU", usagePercent)`,
 		"owner grouping":               `new Map()`,
 		"unowned VM group":             `"Unowned"`,
@@ -164,13 +181,6 @@ func TestDashboardJavaScriptSupportsAdminLifecycleInventory(t *testing.T) {
 		"QCOW2 upload requirement":     `QCOW2 content required; filenames may end in .img, .qcow2, or .raw.`,
 		"available storage API field":  `availableStorageBytes`,
 		"exact delete confirmation":    `Type the base image name "${name}" to confirm deletion:`,
-	} {
-		if !strings.Contains(body, fragment) {
-			t.Fatalf("expected dashboard JavaScript to include %s", description)
-		}
-	}
-	if strings.Contains(body, `actionAreaEl.hidden = adminView`) {
-		t.Fatal("administrator lifecycle action feedback must remain visible")
 	}
 }
 
