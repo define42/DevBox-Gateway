@@ -56,6 +56,7 @@ func Run(ctx context.Context) int {
 type gatewayRuntime struct {
 	listener       net.Listener
 	frontTLS       *cert.TLSManager
+	profiler       *pprofRuntime
 	sessionManager *session.Manager
 	auditSink      io.Closer
 
@@ -89,6 +90,7 @@ func (g *gatewayRuntime) close() error {
 	return errors.Join(
 		g.closeListener(),
 		g.drainConnections(),
+		g.closeProfiler(),
 		g.closeFrontTLS(),
 		g.closeAuditSink(),
 	)
@@ -133,6 +135,13 @@ func (g *gatewayRuntime) closeFrontTLS() error {
 		return nil
 	}
 	return g.frontTLS.Close()
+}
+
+func (g *gatewayRuntime) closeProfiler() error {
+	if g.profiler == nil {
+		return nil
+	}
+	return g.profiler.Close()
 }
 
 func (g *gatewayRuntime) closeAuditSink() error {
@@ -209,10 +218,18 @@ func startGatewayRuntime(
 		return nil, err
 	}
 
+	profiler, err := startPprofServer(settings)
+	if err != nil {
+		_ = ln.Close()
+		_ = frontTLS.Close()
+		return nil, fmt.Errorf("pprof setup: %w", err)
+	}
+
 	done := make(chan struct{})
 	runtime := &gatewayRuntime{
 		listener:       ln,
 		frontTLS:       frontTLS,
+		profiler:       profiler,
 		sessionManager: sessionManager,
 		auditSink:      auditSink,
 		done:           done,

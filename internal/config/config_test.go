@@ -30,6 +30,9 @@ func TestNewSettingsDefaults(t *testing.T) {
 	if got := s.Duration(TIMEOUT); got != 10*time.Second {
 		t.Fatalf("expected default TIMEOUT=10s, got %v", got)
 	}
+	if got := s.String(PPROF_LISTEN_ADDR); got != "" {
+		t.Fatalf("expected default PPROF_LISTEN_ADDR to be empty, got %q", got)
+	}
 	if got := s.Int(LOGIN_RATE_LIMIT_MAX_ATTEMPTS); got != 5 {
 		t.Fatalf("expected default LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5, got %d", got)
 	}
@@ -47,6 +50,15 @@ func TestNewSettingsDefaults(t *testing.T) {
 	}
 	if got := s.Int(VDI_AUTO_SHUTDOWN_HOURS); got != DefaultVDIAutoShutdownHours {
 		t.Fatalf("expected default VDI_AUTO_SHUTDOWN_HOURS=%d, got %d", DefaultVDIAutoShutdownHours, got)
+	}
+}
+
+func TestNewSettingsPprofListenAddressFromEnvironment(t *testing.T) {
+	t.Setenv(PPROF_LISTEN_ADDR, " 127.0.0.1:6060 ")
+
+	s := NewSettings(false)
+	if got := s.String(PPROF_LISTEN_ADDR); got != "127.0.0.1:6060" {
+		t.Fatalf("expected trimmed PPROF_LISTEN_ADDR, got %q", got)
 	}
 }
 

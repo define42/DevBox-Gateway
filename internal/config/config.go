@@ -125,6 +125,7 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetInt(VDI_AUTO_SHUTDOWN_HOURS, "Shut down a running VDI after this many hours without use; a VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard. The guest is first asked to power off (ACPI) and is force-stopped if still running a few minutes later. Values <=0 disable auto-shutdown", DefaultVDIAutoShutdownHours)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
+	s.SetString(PPROF_LISTEN_ADDR, "Optional separate loopback-only listen address for Go runtime profiles (for example 127.0.0.1:6060); empty disables pprof", "")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously open front connections (RDP + HTTPS); connections beyond the cap are accepted and immediately closed (fail fast, logged) so clients see an error instead of hanging, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", DefaultMaxConcurrentConnections)
 	s.SetInt(MAX_CONNECTIONS_PER_USER, "Maximum number of concurrently open authenticated long-lived connections (dashboard/serial/VNC websockets and proxied RDP sessions) per user; connections beyond the cap are closed immediately so one scripted user cannot exhaust the shared front-connection budget. Values <=0 disable the cap", DefaultMaxConnectionsPerUser)
 	s.SetInt(MAX_CONNECTIONS_PER_SOURCE, "Maximum number of simultaneously open front connections per source address (per IPv4 address, per /64 prefix for IPv6), enforced before authentication and the TLS handshake; connections beyond the cap are accepted and immediately closed (fail fast, logged) so one source cannot exhaust the shared MAX_CONCURRENT_CONNECTIONS budget. Raise it when many users share one NAT or proxy address. Values <=0 disable the cap", DefaultMaxConnectionsPerSource)
@@ -509,6 +510,7 @@ const (
 	LOGIN_RATE_LIMIT_WINDOW          = "LOGIN_RATE_LIMIT_WINDOW"
 	LOGIN_RATE_LIMIT_LOCKOUT         = "LOGIN_RATE_LIMIT_LOCKOUT"
 	LISTEN_ADDR                      = "LISTEN_ADDR"
+	PPROF_LISTEN_ADDR                = "PPROF_LISTEN_ADDR"
 	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
 	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
 	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
