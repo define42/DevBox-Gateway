@@ -52,7 +52,7 @@ func TestSeedISOCreate(t *testing.T) {
 	})
 }
 
-func TestCreateUbuntuSeedISOToPool(t *testing.T) {
+func TestCreateSeedISOToPool(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	rootDir := t.TempDir()
 	settings := config.NewSettings(false)
@@ -73,13 +73,13 @@ func TestCreateUbuntuSeedISOToPool(t *testing.T) {
 		_ = pool.Free()
 	}()
 
-	const volumeName = "ubuntu-seed.iso"
+	const volumeName = "seed.iso"
 	t.Cleanup(func() {
 		_ = RemoveVolumes(conn, poolName, volumeName)
 	})
 
-	if err := CreateUbuntuSeedISOToPool(conn, poolName, volumeName, "alice", "$6$hash", "alice-devbox"); err != nil {
-		t.Fatalf("CreateUbuntuSeedISOToPool: %v", err)
+	if err := CreateSeedISOToPool(conn, poolName, volumeName, "alice", "$6$hash", "alice-devbox"); err != nil {
+		t.Fatalf("CreateSeedISOToPool: %v", err)
 	}
 
 	vol, err := pool.LookupStorageVolByName(volumeName)

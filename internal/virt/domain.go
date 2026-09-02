@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const ubuntuDomainXML = `<domain type='kvm'>
+const domainXMLTemplate = `<domain type='kvm'>
   <name>%s</name>
   <memory unit='MiB'>%d</memory>
   <currentMemory unit='MiB'>%d</currentMemory>
@@ -85,15 +85,15 @@ const ubuntuDomainXML = `<domain type='kvm'>
   </devices>
 </domain>`
 
-// UbuntuDomain returns the libvirt domain XML for a standard Ubuntu VM. The VNC
+// DomainXML returns the libvirt domain XML for a standard VDI. The VNC
 // socket and serial console are both libvirt-managed (no gateway-chosen paths):
 // libvirt allocates and SELinux-labels the VNC socket under its per-domain
 // runtime dir, and the serial console is a PTY. The gateway reaches both only
 // through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
 // Every interpolated value is XML-escaped so a name can never alter the document.
-func UbuntuDomain(name, seedISO, storagePoolName string, vcpu int, memoryMiB int) string {
+func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int) string {
 	return fmt.Sprintf(
-		ubuntuDomainXML,
+		domainXMLTemplate,
 		xmlValue(name), memoryMiB, memoryMiB, vcpu,
 		xmlValue(storagePoolName), xmlValue(name),
 		xmlValue(storagePoolName), xmlValue(seedISO),

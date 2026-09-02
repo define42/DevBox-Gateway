@@ -73,7 +73,7 @@ func GracefulShutdownVM(name string) error {
 		return nil
 	}
 	// ACPI is requested explicitly: gateway VMs carry no qemu-guest-agent
-	// channel (see ubuntu.go), so pinning the method keeps the behavior
+	// channel (see domain.go), so pinning the method keeps the behavior
 	// independent of libvirt's default-mode heuristics.
 	if err := dom.ShutdownFlags(libvirt.DOMAIN_SHUTDOWN_ACPI_POWER_BTN); err != nil {
 		return fmt.Errorf("graceful shutdown domain %s: %w", name, err)

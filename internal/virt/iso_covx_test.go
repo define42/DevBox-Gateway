@@ -7,24 +7,24 @@ import (
 	"time"
 )
 
-func TestVbtcovCreateUbuntuSeedISOToPoolSeedFailure(t *testing.T) {
+func TestVbtcovCreateSeedISOToPoolSeedFailure(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	missing := filepath.Join(t.TempDir(), "cvbt-missing-tmp")
 	t.Setenv("TMPDIR", missing)
 
 	// The seed ISO build fails before any pool interaction.
-	err := CreateUbuntuSeedISOToPool(conn, "cvbt-unused-pool", "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
-	vbtcovRequireErrContains(t, err, "create iso writer", "CreateUbuntuSeedISOToPool with broken TMPDIR")
+	err := CreateSeedISOToPool(conn, "cvbt-unused-pool", "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
+	vbtcovRequireErrContains(t, err, "create iso writer", "CreateSeedISOToPool with broken TMPDIR")
 }
 
-func TestVbtcovCreateUbuntuSeedISOToPoolMissingPool(t *testing.T) {
+func TestVbtcovCreateSeedISOToPoolMissingPool(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 
-	err := CreateUbuntuSeedISOToPool(conn, uniquePoolName("cvbt-nopool"), "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
-	vbtcovRequireErrContains(t, err, "not found", "CreateUbuntuSeedISOToPool into missing pool")
+	err := CreateSeedISOToPool(conn, uniquePoolName("cvbt-nopool"), "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
+	vbtcovRequireErrContains(t, err, "not found", "CreateSeedISOToPool into missing pool")
 }
 
-func TestVbtcovCreateUbuntuSeedISOToPoolDuplicateVolume(t *testing.T) {
+func TestVbtcovCreateSeedISOToPoolDuplicateVolume(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	pool, poolName, _ := vbtcovEnsureTestPool(t, conn, "cvbt-seedvol-pool")
 
@@ -37,9 +37,9 @@ func TestVbtcovCreateUbuntuSeedISOToPoolDuplicateVolume(t *testing.T) {
 	}
 	_ = vol.Free()
 
-	err = CreateUbuntuSeedISOToPool(conn, poolName, volumeName, "cvbtguest", "$6$hash", "cvbt-host")
+	err = CreateSeedISOToPool(conn, poolName, volumeName, "cvbtguest", "$6$hash", "cvbt-host")
 	if err == nil {
-		t.Fatal("expected CreateUbuntuSeedISOToPool to fail on duplicate volume name")
+		t.Fatal("expected CreateSeedISOToPool to fail on duplicate volume name")
 	}
 }
 

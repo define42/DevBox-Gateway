@@ -242,8 +242,8 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	if err := CopyAndResizeVolume(conn, poolName, vmName, sourceImage, 2*1024*1024); err != nil {
 		t.Fatalf("CopyAndResizeVolume disk: %v", err)
 	}
-	if err := CreateUbuntuSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName); err != nil {
-		t.Fatalf("CreateUbuntuSeedISOToPool: %v", err)
+	if err := CreateSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName); err != nil {
+		t.Fatalf("CreateSeedISOToPool: %v", err)
 	}
 
 	// VNC socket and serial PTY are both libvirt-managed; the gateway prepares no

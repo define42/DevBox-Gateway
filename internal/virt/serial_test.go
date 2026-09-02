@@ -41,8 +41,8 @@ func TestSerialConsoleInterruptCloseRaceSafe(_ *testing.T) {
 	wg.Wait()
 }
 
-func TestUbuntuDomainUsesManagedSerialPTY(t *testing.T) {
-	xml := UbuntuDomain("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
+func TestDomainXMLUsesManagedSerialPTY(t *testing.T) {
+	xml := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
 
 	// The serial console is a libvirt-managed PTY (read via OpenConsole); the
 	// domain XML must not pin a gateway-chosen unix socket path.

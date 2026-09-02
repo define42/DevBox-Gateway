@@ -305,7 +305,7 @@ func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec
 	); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
-	if err := storage.CreateUbuntuSeedISOToPoolWithSettings(
+	if err := storage.CreateSeedISOToPoolWithSettings(
 		settings,
 		conn,
 		spec.poolName,

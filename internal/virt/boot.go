@@ -79,7 +79,7 @@ func StartVM(cfg VMStartConfig) (err error) {
 
 	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
 	// owns no console sockets.
-	dom, err := conn.DomainDefineXML(UbuntuDomain(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB))
+	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB))
 	if err != nil {
 		return err
 	}

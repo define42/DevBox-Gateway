@@ -75,8 +75,8 @@ func CopyAndResizeVolume(
 	)
 }
 
-// CreateUbuntuSeedISOToPool builds a cloud-init seed ISO and uploads it to the storage pool.
-func CreateUbuntuSeedISOToPool(
+// CreateSeedISOToPool builds a cloud-init seed ISO and uploads it to the storage pool.
+func CreateSeedISOToPool(
 	conn *libvirt.Connect,
 	storagePoolName string,
 	volumeName string,
@@ -84,7 +84,7 @@ func CreateUbuntuSeedISOToPool(
 	cloudInitPasswordHash string,
 	hostname string,
 ) error {
-	return storage.CreateUbuntuSeedISOToPool(
+	return storage.CreateSeedISOToPool(
 		conn,
 		storagePoolName,
 		volumeName,

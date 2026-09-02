@@ -8,7 +8,7 @@ import (
 
 // minLibvirtVersion is the lowest libvirt daemon version the gateway supports.
 // It is 6.2.0, the first release that honors <port isolated='yes'/> on a virtual
-// network interface (see internal/virt/ubuntu.go). Without it, booted VDIs would
+// network interface (see internal/virt/domain.go). Without it, booted VDIs would
 // silently share an L2 bridge with no guest-to-guest isolation, so we refuse to
 // start rather than provision VMs that are not isolated.
 //

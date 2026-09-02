@@ -9,7 +9,7 @@ import (
 )
 
 // defaultNetworkName is the libvirt NAT network every VDI attaches to (see the
-// <source network='default'/> entry in the domain XML in ubuntu.go).
+// <source network='default'/> entry in the domain XML in domain.go).
 const defaultNetworkName = "default"
 
 // ensureDefaultNetwork makes sure the libvirt 'default' NAT network exists, is

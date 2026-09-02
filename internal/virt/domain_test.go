@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// TestUbuntuDomainEscapesValues proves that an unsafe value reaching UbuntuDomain
+// TestDomainXMLEscapesValues proves that an unsafe value reaching DomainXML
 // cannot break out of its element/attribute and inject extra domain XML. This is
 // defense-in-depth: login usernames are validated upstream, but the sink must be
 // safe on its own.
-func TestUbuntuDomainEscapesValues(t *testing.T) {
+func TestDomainXMLEscapesValues(t *testing.T) {
 	const malicious = `evil</name><devices><disk device='disk'/></devices><name>x`
 
-	xmlDoc := UbuntuDomain(malicious, "seed.iso", "pool", 2, 2048)
+	xmlDoc := DomainXML(malicious, "seed.iso", "pool", 2, 2048)
 
 	if strings.Contains(xmlDoc, "</name><devices><disk") {
 		t.Fatalf("injected XML must not appear unescaped:\n%s", xmlDoc)

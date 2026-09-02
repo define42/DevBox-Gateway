@@ -11,8 +11,8 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-// CreateUbuntuSeedISOToPool builds a cloud-init seed ISO and uploads it to the storage pool.
-func CreateUbuntuSeedISOToPool(
+// CreateSeedISOToPool builds a cloud-init seed ISO and uploads it to the storage pool.
+func CreateSeedISOToPool(
 	conn *libvirt.Connect,
 	storagePoolName string,
 	volumeName string,
@@ -20,11 +20,11 @@ func CreateUbuntuSeedISOToPool(
 	cloudInitPasswordHash string,
 	hostname string,
 ) error {
-	return CreateUbuntuSeedISOToPoolWithSettings(nil, conn, storagePoolName, volumeName, username, cloudInitPasswordHash, hostname)
+	return CreateSeedISOToPoolWithSettings(nil, conn, storagePoolName, volumeName, username, cloudInitPasswordHash, hostname)
 }
 
-// CreateUbuntuSeedISOToPoolWithSettings builds and uploads a seed ISO using explicit settings.
-func CreateUbuntuSeedISOToPoolWithSettings(
+// CreateSeedISOToPoolWithSettings builds and uploads a seed ISO using explicit settings.
+func CreateSeedISOToPoolWithSettings(
 	settings *config.Settings,
 	conn *libvirt.Connect,
 	storagePoolName string,
@@ -33,7 +33,7 @@ func CreateUbuntuSeedISOToPoolWithSettings(
 	cloudInitPasswordHash string,
 	hostname string,
 ) error {
-	userData, metaData, networkConfig := ubuntuSeedData(username, cloudInitPasswordHash, hostname)
+	userData, metaData, networkConfig := cloudInitSeedData(username, cloudInitPasswordHash, hostname)
 	seedISOData, err := cloudinit.CreateSeedISO(userData, metaData, networkConfig)
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func CreateUbuntuSeedISOToPoolWithSettings(
 	return ApplyVolumePermissions(settings, vol)
 }
 
-func ubuntuSeedData(username, cloudInitPasswordHash, hostname string) (*cloudinit.UserData, *cloudinit.MetaData, *cloudinit.NetworkConfig) {
+func cloudInitSeedData(username, cloudInitPasswordHash, hostname string) (*cloudinit.UserData, *cloudinit.MetaData, *cloudinit.NetworkConfig) {
 	userData := &cloudinit.UserData{
 		Output: &cloudinit.Output{
 			All: "| tee -a /var/log/cloud-init-output.log",
