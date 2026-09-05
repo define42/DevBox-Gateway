@@ -15,7 +15,7 @@ require (
 	github.com/kdomanski/iso9660 v0.4.0
 	github.com/mholt/acmez v1.2.0
 	github.com/olekukonko/tablewriter v1.1.4
-	github.com/shirou/gopsutil/v4 v4.26.7
+	github.com/shirou/gopsutil/v4 v4.26.8
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/tomatome/grdp v0.1.0
 	github.com/tredoe/osutil v1.5.0
