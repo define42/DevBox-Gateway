@@ -67,6 +67,11 @@ var registerSessionTypesOnce sync.Once //nolint:gochecknoglobals // package-leve
 type Manager struct {
 	*scs.SessionManager
 
+	// sessionsMu serializes RDP grant updates with session deletion and token
+	// renewal. Store methods lock individually, so a read-modify-write needs
+	// this additional lock to avoid recreating a token revoked between calls.
+	sessionsMu sync.Mutex
+
 	connectionsMu      sync.Mutex
 	nextConnectionID   uint64
 	userConnections    map[string]map[uint64]func()
@@ -148,6 +153,9 @@ func CanonicalClientIP(remoteAddr string) (string, bool) {
 // in-memory store so VDI creation can seed the guest account with the user's
 // login password (see PasswordHashFromContext).
 func (m *Manager) CreateSession(ctx context.Context, u *identity.User, clientIP, loginPasswordHash string) error {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
 	if err := m.RenewToken(ctx); err != nil {
 		return err
 	}
@@ -282,10 +290,10 @@ func (m *Manager) UserHasActiveSessionFromIP(username, clientIP string) bool {
 // click. Consumption happens at authorization time, so even a connection that
 // later fails (e.g. the backend is unreachable) spends the grant.
 //
-// Consumption is best-effort under concurrency: the store commits each session
-// under its own lock, but the check-and-delete is not globally atomic, so two
-// simultaneous connections could in a rare race both be admitted. The VM's own
-// RDP login still applies in every case.
+// Candidate tokens are enumerated without holding sessionsMu, then each session
+// is reloaded and updated under the same lock used by revocation. An enumeration
+// taken before logout can therefore never restore a revoked session, and
+// concurrent RDP consumers cannot spend the same stored grant twice.
 func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool {
 	username = strings.TrimSpace(username)
 	vmName = strings.TrimSpace(vmName)
@@ -307,9 +315,8 @@ func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool
 		return false
 	}
 
-	now := time.Now()
-	for token, raw := range sessions {
-		if m.consumeStoredGrant(token, raw, username, canonicalIP, vmName, now) {
+	for token := range sessions {
+		if m.consumeStoredGrant(token, username, canonicalIP, vmName) {
 			return true
 		}
 	}
@@ -319,7 +326,16 @@ func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool
 // consumeStoredGrant removes and persists an unexpired RDP connect grant for
 // (username, canonicalIP, vmName) held by the stored session at token, returning
 // true when it consumed one. It is the per-session step of ConsumeRDPConnectGrant.
-func (m *Manager) consumeStoredGrant(token string, raw []byte, username, canonicalIP, vmName string, now time.Time) bool {
+func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string) bool {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
+	// All returns a snapshot that may already have been revoked or consumed.
+	// Reload under the mutation lock and keep it until the update is committed.
+	raw, found, err := m.Store.Find(token)
+	if err != nil || !found {
+		return false
+	}
 	deadline, values, err := m.Codec.Decode(raw)
 	if err != nil {
 		return false
@@ -332,17 +348,18 @@ func (m *Manager) consumeStoredGrant(token string, raw []byte, username, canonic
 		return false
 	}
 	expiry, ok := sess.RDPConnectGrants[vmName]
-	if !ok || !now.Before(expiry) {
+	if !ok || !time.Now().Before(expiry) {
 		return false
 	}
 
 	// Consume the grant: drop it and persist, so it authorizes one connection.
 	delete(sess.RDPConnectGrants, vmName)
 	values[sessionKey] = sess
-	if encoded, encErr := m.Codec.Encode(deadline, values); encErr == nil {
-		_ = m.Store.Commit(token, encoded, deadline)
+	encoded, err := m.Codec.Encode(deadline, values)
+	if err != nil {
+		return false
 	}
-	return true
+	return m.Store.Commit(token, encoded, deadline) == nil
 }
 
 // allSessions decodes every stored (non-expired) session. It is a read-only
@@ -374,6 +391,9 @@ func (m *Manager) allSessions() []sessionData {
 // DestroySession removes the current browser session and expires its cookie in
 // the response handled by LoadAndSave.
 func (m *Manager) DestroySession(ctx context.Context) error {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
 	return m.Destroy(ctx)
 }
 
@@ -385,6 +405,9 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 	if username == "" {
 		return nil
 	}
+
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
 
 	store, ok := m.Store.(scs.IterableStore)
 	if !ok {
@@ -550,7 +573,7 @@ func (m *Manager) EnforceClientIP(next http.Handler) http.Handler {
 			if !ipOK || canonicalIP != sess.ClientIP {
 				log.Printf("session client IP changed for user %s (bound=%s now=%s): forcing re-login",
 					strconv.Quote(sess.User.Name), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
-				if err := m.Destroy(r.Context()); err != nil {
+				if err := m.DestroySession(r.Context()); err != nil {
 					log.Printf("destroy roamed session for user %q failed: %v", sess.User.Name, err)
 				}
 			}

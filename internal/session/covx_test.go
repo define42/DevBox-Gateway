@@ -132,7 +132,10 @@ func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
 	m := New()
 	now := time.Now()
 
-	if m.consumeStoredGrant("tok", []byte("not-a-gob-session"), "alice", "192.0.2.1", "vm1", now) {
+	if err := m.Store.Commit("tok", []byte("not-a-gob-session"), now.Add(time.Hour)); err != nil {
+		t.Fatalf("commit invalid session: %v", err)
+	}
+	if m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1") {
 		t.Fatal("expected undecodable session data to be rejected")
 	}
 
@@ -143,7 +146,10 @@ func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode userless session: %v", err)
 	}
-	if m.consumeStoredGrant("tok", userless, "alice", "192.0.2.1", "vm1", now) {
+	if err := m.Store.Commit("tok", userless, deadline); err != nil {
+		t.Fatalf("commit userless session: %v", err)
+	}
+	if m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1") {
 		t.Fatal("expected a session without a user to be rejected")
 	}
 }
