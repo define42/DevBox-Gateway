@@ -1038,12 +1038,15 @@ func validateVMName(name string) (string, error) {
 }
 
 // validateGuestUsername validates the optional guest login name provisioned
-// inside the VM. An empty value falls back to the owning user's name, matching
-// the previous behavior where the guest account always mirrored the login user.
+// inside the VM. An empty value falls back to the owning user's name; the
+// selected value is always checked against the guest account rules.
 func validateGuestUsername(raw, fallback string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return fallback, nil
+		raw = strings.TrimSpace(fallback)
+	}
+	if raw == "" {
+		return "", fmt.Errorf("username is required")
 	}
 	if len(raw) > maxGuestUsernameLength {
 		return "", fmt.Errorf("username must be %d characters or fewer", maxGuestUsernameLength)

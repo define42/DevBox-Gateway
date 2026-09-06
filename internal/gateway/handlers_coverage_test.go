@@ -360,28 +360,39 @@ func TestValidateVMName(t *testing.T) {
 func TestValidateGuestUsername(t *testing.T) {
 	const fallback = "alice"
 	tests := []struct {
-		name    string
-		input   string
-		want    string
-		wantErr bool
+		name     string
+		input    string
+		fallback string
+		want     string
+		wantErr  bool
 	}{
-		{"empty falls back to owner", "", fallback, false},
-		{"whitespace falls back to owner", "   ", fallback, false},
-		{"trimmed override", "  bob  ", "bob", false},
-		{"valid simple", "bob", "bob", false},
-		{"valid with digits and hyphen", "dev-user1", "dev-user1", false},
-		{"valid leading underscore", "_svc", "_svc", false},
-		{"leading digit", "1bob", "", true},
-		{"leading hyphen", "-bob", "", true},
-		{"uppercase", "Bob", "", true},
-		{"space inside", "bo b", "", true},
-		{"special char", "bob$", "", true},
-		{"too long", strings.Repeat("a", 33), "", true},
-		{"max length", strings.Repeat("a", 32), strings.Repeat("a", 32), false},
+		{"empty falls back to owner", "", fallback, fallback, false},
+		{"whitespace falls back to owner", "   ", fallback, fallback, false},
+		{"trimmed fallback", "", "  alice  ", "alice", false},
+		{"empty fallback", "", "", "", true},
+		{"whitespace fallback", " \t", " \t", "", true},
+		{"fallback too long", "", strings.Repeat("a", 33), "", true},
+		{"fallback max length", "", strings.Repeat("a", 32), strings.Repeat("a", 32), false},
+		{"fallback email", "", "alice@example.com", "", true},
+		{"fallback uppercase", "", "Alice", "", true},
+		{"fallback leading digit", "", "1alice", "", true},
+		{"override invalid fallback", "bob", "alice@example.com", "bob", false},
+		{"override long fallback", "bob", strings.Repeat("a", 33), "bob", false},
+		{"trimmed override", "  bob  ", fallback, "bob", false},
+		{"valid simple", "bob", fallback, "bob", false},
+		{"valid with digits and hyphen", "dev-user1", fallback, "dev-user1", false},
+		{"valid leading underscore", "_svc", fallback, "_svc", false},
+		{"leading digit", "1bob", fallback, "", true},
+		{"leading hyphen", "-bob", fallback, "", true},
+		{"uppercase", "Bob", fallback, "", true},
+		{"space inside", "bo b", fallback, "", true},
+		{"special char", "bob$", fallback, "", true},
+		{"too long", strings.Repeat("a", 33), fallback, "", true},
+		{"max length", strings.Repeat("a", 32), fallback, strings.Repeat("a", 32), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := validateGuestUsername(tc.input, fallback)
+			got, err := validateGuestUsername(tc.input, tc.fallback)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error for %q", tc.input)
