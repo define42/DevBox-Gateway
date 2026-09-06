@@ -158,9 +158,9 @@ func (s *Inventory) VMs(user string) []VMInfo {
 }
 
 // NotifyVMDataChanged wakes the worker's subscribers so they take a fresh
-// user-filtered snapshot. The touch points call it (via MarkVMUsed) because a
-// last-used update changes what VMs returns without changing the underlying
-// sweep snapshot, so setVMs' own change detection would never fire for it.
+// user-filtered dashboard snapshot. Callers use it for changes such as last-used
+// timestamps and base-image availability that do not change the underlying
+// sweep snapshot, so setVMs' own change detection would never fire for them.
 func (s *Inventory) NotifyVMDataChanged() {
 	s.mu.Lock()
 	s.notifySubscribersLocked()

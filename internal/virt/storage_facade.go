@@ -43,14 +43,29 @@ func EnsureBaseImagesAvailable(settings *config.Settings) error {
 	return storage.EnsureBaseImagesAvailable(settings)
 }
 
-// StoreBaseImage streams a base image into the configured library without overwriting.
+// StoreBaseImage streams a base image into the configured library without
+// overwriting and notifies dashboard subscribers after a successful upload.
 func StoreBaseImage(settings *config.Settings, name string, src io.Reader, maxBytes int64) (int64, error) {
-	return storage.StoreBaseImage(settings, name, src, maxBytes)
+	written, err := storage.StoreBaseImage(settings, name, src, maxBytes)
+	if err != nil {
+		return written, err
+	}
+	if worker := peekInventory(); worker != nil {
+		worker.NotifyVMDataChanged()
+	}
+	return written, nil
 }
 
-// DeleteBaseImage removes a regular file from the configured base-image library.
+// DeleteBaseImage removes a regular file from the configured base-image library
+// and notifies dashboard subscribers after a successful deletion.
 func DeleteBaseImage(settings *config.Settings, name string) error {
-	return storage.DeleteBaseImage(settings, name)
+	if err := storage.DeleteBaseImage(settings, name); err != nil {
+		return err
+	}
+	if worker := peekInventory(); worker != nil {
+		worker.NotifyVMDataChanged()
+	}
+	return nil
 }
 
 // RemoveVolumes deletes the named volumes from the given storage pool.
