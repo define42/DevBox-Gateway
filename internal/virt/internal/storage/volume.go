@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,7 +26,9 @@ func ReportProgress(report DiskCopyProgressFunc, copiedBytes, totalBytes int64) 
 	report(copiedBytes, totalBytes)
 }
 
-// RemoveVolumes deletes the named volumes from the given storage pool.
+// RemoveVolumes attempts to delete every named volume from the storage pool.
+// Missing volumes are ignored; other lookup and deletion failures are returned
+// together so a failed disk cleanup cannot prevent cleanup of the seed ISO.
 func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ...string) error {
 	pool, err := conn.LookupStoragePoolByName(storagePoolName)
 	if err != nil {
@@ -37,20 +40,25 @@ func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ..
 		}
 	}()
 
+	var errs []error
 	for _, volumeName := range volumeNames {
 		vol, err := pool.LookupStorageVolByName(volumeName)
 		if err != nil {
+			if !errors.Is(err, libvirt.ERR_NO_STORAGE_VOL) {
+				errs = append(errs, fmt.Errorf("lookup volume %s: %w", volumeName, err))
+			}
 			continue
 		}
 		deleteErr := vol.Delete(0)
 		_ = vol.Free()
 		if deleteErr != nil {
-			return fmt.Errorf("delete volume %s: %w", volumeName, deleteErr)
+			errs = append(errs, fmt.Errorf("delete volume %s: %w", volumeName, deleteErr))
+			continue
 		}
 		log.Printf("Deleted volume %s", volumeName)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // CopyAndResizeVolume creates a qcow2 volume from the source image and resizes it when needed.

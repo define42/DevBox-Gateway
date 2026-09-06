@@ -218,8 +218,9 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, repor
 // provisionAndStartVM runs the locked phase of a VM creation: the caller must
 // hold vmNameLocks.Lock(spec.vmName) for the whole call. It checks the name is
 // free, reserves the owner's quota slot, clears leftover artifacts, provisions
-// the disk and seed volumes, and starts the domain.
-func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+// the disk and seed volumes, and starts the domain. Failures roll back the
+// domain and storage before releasing the quota reservation or the name lock.
+func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) (err error) {
 	if err := ensureVMNameAvailable(conn, spec.vmName); err != nil {
 		return err
 	}
@@ -234,6 +235,16 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec 
 	if err := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); err != nil {
 		return err
 	}
+	// Only arm rollback after the name checks and initial cleanup succeed, so
+	// refusing an existing VM cannot remove its storage. Reset removes a partial
+	// domain before its volumes; if domain removal fails, its disks stay intact.
+	defer func() {
+		if err != nil {
+			if cleanupErr := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("rollback failed vm %s: %w", spec.vmName, cleanupErr))
+			}
+		}
+	}()
 	if err := provisionBootVolumes(conn, settings, spec, report); err != nil {
 		return err
 	}
