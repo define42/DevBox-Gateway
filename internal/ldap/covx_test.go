@@ -39,7 +39,7 @@ func TestDialLDAPStartTLSFailure(t *testing.T) {
 	t.Setenv(config.LDAP_SKIP_TLS_VERIFY, "true")
 	settings := config.NewSettings(false)
 
-	conn, err := dialLDAP(settings)
+	conn, err := dialLDAP(t.Context(), settings)
 	if err == nil {
 		_ = conn.Close()
 		t.Fatal("expected StartTLS against a non-LDAP server to fail")
@@ -59,7 +59,7 @@ func TestAuthenticateAccessDialFailure(t *testing.T) {
 	t.Setenv(config.LDAP_STARTTLS, "false")
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("covxuser", "covxpassword", settings)
+	user, err := AuthenticateAccess(t.Context(), "covxuser", "covxpassword", settings)
 	if user != nil {
 		t.Fatalf("expected no user on dial failure, got %#v", user)
 	}

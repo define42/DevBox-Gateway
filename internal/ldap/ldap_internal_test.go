@@ -17,7 +17,7 @@ func TestAuthenticateAccessRejectsEmptyPassword(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("johndoe", "", settings)
+	user, err := AuthenticateAccess(t.Context(), "johndoe", "", settings)
 	if user != nil {
 		t.Fatalf("expected no user for empty password, got %#v", user)
 	}
@@ -33,7 +33,7 @@ func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "")
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("", "nonempty-password", settings)
+	user, err := AuthenticateAccess(t.Context(), "", "nonempty-password", settings)
 	if user != nil {
 		t.Fatalf("expected no user for empty identifier, got %#v", user)
 	}

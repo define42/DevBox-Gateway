@@ -2,10 +2,11 @@
 package ldap
 
 import (
-	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -33,8 +34,29 @@ func Configured(settings *config.Settings) bool {
 	return strings.TrimSpace(settings.Get(config.LDAP_URL)) != ""
 }
 
-// AuthenticateAccess authenticates a user against LDAP and returns the gateway user model.
-func AuthenticateAccess(username, password string, settings *config.Settings) (*identity.User, error) {
+// AuthenticateAccess authenticates a user against LDAP and returns the gateway
+// user model. The request context and LDAP_AUTH_TIMEOUT bound the entire attempt,
+// including connection setup, TLS, bind, and search.
+func AuthenticateAccess(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error) {
+	timeout := settings.Duration(config.LDAP_AUTH_TIMEOUT)
+	if timeout <= 0 {
+		timeout = config.DefaultLDAPAuthTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	user, err := authenticateAccess(ctx, username, password, settings)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("ldap authentication: %w", ctx.Err())
+	}
+	// The socket deadline can fire before the context timer is scheduled.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return nil, fmt.Errorf("ldap authentication: %w", context.DeadlineExceeded)
+	}
+	return user, err
+}
+
+func authenticateAccess(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error) {
 	// Reject empty passwords before dialing or binding so an empty-password
 	// anonymous bind can never authenticate a user. See ErrEmptyPassword.
 	if password == "" {
@@ -46,7 +68,7 @@ func AuthenticateAccess(username, password string, settings *config.Settings) (*
 		return nil, ErrEmptyIdentifier
 	}
 
-	conn, err := dialLDAP(settings)
+	conn, err := dialLDAP(ctx, settings)
 	if err != nil {
 		return nil, err
 	}
@@ -194,27 +216,4 @@ func loginIdentifier(username string, settings *config.Settings) string {
 	}
 
 	return mail
-}
-
-func dialLDAP(settings *config.Settings) (*ldap.Conn, error) {
-	ldapURL := settings.Get(config.LDAP_URL)
-	insecureSkipVerify := settings.IsTrue(config.LDAP_SKIP_TLS_VERIFY)
-	startTLS := settings.IsTrue(config.LDAP_STARTTLS)
-
-	// #nosec G402 -- InsecureSkipVerify is an explicit operator opt-in via LDAP_SKIP_TLS_VERIFY (default off).
-	tlsConfig := &tls.Config{InsecureSkipVerify: insecureSkipVerify, MinVersion: tls.VersionTLS12}
-
-	conn, err := ldap.DialURL(ldapURL, ldap.DialWithTLSConfig(tlsConfig))
-	if err != nil {
-		return nil, err
-	}
-
-	if startTLS && strings.HasPrefix(ldapURL, "ldap://") {
-		if err := conn.StartTLS(tlsConfig); err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-	}
-
-	return conn, nil
 }

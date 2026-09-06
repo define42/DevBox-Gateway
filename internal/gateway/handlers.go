@@ -84,7 +84,7 @@ func validateLoginUsername(username string) (string, error) {
 	return vmname.ValidateUsername(username)
 }
 
-type loginAuthenticator func(username, password string, settings *config.Settings) (*identity.User, error)
+type loginAuthenticator func(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error)
 
 func handleLoginPost(sessionManager *session.Manager, settings *config.Settings, loginLimiter *loginRateLimiter) http.HandlerFunc {
 	return handleLoginPostWithAuthenticator(sessionManager, settings, loginLimiter, ldap.AuthenticateAccess)
@@ -136,7 +136,7 @@ func handleLoginPostWithAuthenticator(
 			return
 		}
 
-		user, err := authenticate(username, password, settings)
+		user, err := authenticate(r.Context(), username, password, settings)
 		if err != nil {
 			log.Printf("auth failed for %s: %v", strconv.Quote(username), err)
 			auditLoginFailure(r, username)

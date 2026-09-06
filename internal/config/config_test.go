@@ -62,6 +62,26 @@ func TestNewSettingsPprofListenAddressFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLDAPAuthTimeoutSetting(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "default", value: "", want: DefaultLDAPAuthTimeout},
+		{name: "override", value: "250ms", want: 250 * time.Millisecond},
+		{name: "invalid", value: "invalid", want: DefaultLDAPAuthTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(LDAP_AUTH_TIMEOUT, tc.value)
+			settings := NewSettings(false)
+			if got := settings.Duration(LDAP_AUTH_TIMEOUT); got != tc.want {
+				t.Errorf("LDAP_AUTH_TIMEOUT = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewSettingsAuditLogFileFromEnvironment(t *testing.T) {
 	t.Setenv(AUDIT_LOG_FILE, " /srv/splunk/devbox-audit.jsonl ")
 

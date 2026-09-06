@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -141,7 +142,7 @@ func newTestLoginRouter(t *testing.T, settings *config.Settings) http.Handler {
 		sessionManager,
 		settings,
 		newLoginRateLimiter(settings),
-		func(username, password string, _ *config.Settings) (*identity.User, error) {
+		func(_ context.Context, username, password string, _ *config.Settings) (*identity.User, error) {
 			if password != "secret" {
 				return nil, errors.New("invalid test credentials")
 			}

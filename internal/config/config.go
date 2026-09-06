@@ -50,6 +50,9 @@ type Settings struct {
 }
 
 const (
+	// DefaultLDAPAuthTimeout bounds an entire LDAP authentication attempt. Used
+	// when LDAP_AUTH_TIMEOUT is unset or non-positive.
+	DefaultLDAPAuthTimeout = 10 * time.Second
 	// DefaultDataRootDir is the default root directory for gateway-managed data.
 	// It lives under /var/lib/libvirt so VM disk images and sockets sit in a tree
 	// libvirt/QEMU can use under SELinux (svirt) without relabeling a custom path
@@ -171,6 +174,7 @@ func NewSettings(printSettings bool) *Settings {
 
 func (s *Settings) setAuthDefaults() {
 	s.SetString(LDAP_URL, "LDAP server url", "ldaps://ldap:389")
+	s.SetDuration(LDAP_AUTH_TIMEOUT, "Timeout for the complete LDAP authentication attempt; <=0 uses the 10s default", DefaultLDAPAuthTimeout)
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
 	s.SetString(LDAP_REQUIRED_GROUPS, "List of groups (bare names or full DNs, DNs must be ';'-delimited, bare names may use ',' too); when non-empty, LDAP login also requires the user's memberOf attribute to contain at least one listed group", "")
@@ -499,6 +503,7 @@ const (
 	FRONT_DOMAIN                     = "FRONT_DOMAIN"
 	KEY_FILE                         = "KEY_FILE"
 	LDAP_URL                         = "LDAP_URL"
+	LDAP_AUTH_TIMEOUT                = "LDAP_AUTH_TIMEOUT"
 	LDAP_BASE_DN                     = "LDAP_BASE_DN"
 	LDAP_USER_FILTER                 = "LDAP_USER_FILTER"
 	LDAP_REQUIRED_GROUPS             = "LDAP_REQUIRED_GROUPS"

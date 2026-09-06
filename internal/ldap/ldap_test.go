@@ -18,7 +18,7 @@ func TestDialLDAPInvalidURL(t *testing.T) {
 	t.Setenv(config.LDAP_URL, "://bad-url")
 	settings := config.NewSettings(false)
 
-	if _, err := dialLDAP(settings); err == nil {
+	if _, err := dialLDAP(t.Context(), settings); err == nil {
 		t.Fatal("expected invalid LDAP URL to fail")
 	}
 }
@@ -33,7 +33,7 @@ func TestDialLDAPWithGlauth(t *testing.T) {
 	applyLDAPSettings(t, ldapURL)
 	settings := config.NewSettings(false)
 
-	conn, err := dialLDAP(settings)
+	conn, err := dialLDAP(t.Context(), settings)
 	if err != nil {
 		t.Fatalf("dialLDAP(): %v", err)
 	}
@@ -50,7 +50,7 @@ func TestAuthenticateAccessWithUserDomainSuffix(t *testing.T) {
 	applyLDAPSettings(t, ldapURL)
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("johndoe", "dogood", settings)
+	user, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAuthenticateAccessWithExplicitEmail(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "")
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("johndoe@example.com", "dogood", settings)
+	user, err := AuthenticateAccess(t.Context(), "johndoe@example.com", "dogood", settings)
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
@@ -93,7 +93,7 @@ func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "team10_r")
 	settings := config.NewSettings(false)
 
-	admin, err := AuthenticateAccess("administrator", "dogood", settings)
+	admin, err := AuthenticateAccess(t.Context(), "administrator", "dogood", settings)
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(administrator): %v", err)
 	}
@@ -101,7 +101,7 @@ func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 		t.Fatalf("expected administrator to be an administrator, got %#v", admin)
 	}
 
-	regular, err := AuthenticateAccess("johndoe", "dogood", settings)
+	regular, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(johndoe): %v", err)
 	}
@@ -113,7 +113,7 @@ func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 	// required-group gate must still reject this otherwise-admin user.
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
 	restrictedSettings := config.NewSettings(false)
-	denied, err := AuthenticateAccess("administrator", "dogood", restrictedSettings)
+	denied, err := AuthenticateAccess(t.Context(), "administrator", "dogood", restrictedSettings)
 	if err == nil || denied != nil {
 		t.Fatalf("expected required-group denial before administrator access, got user=%#v err=%v", denied, err)
 	}
@@ -130,7 +130,7 @@ func TestAuthenticateAccessRejectsUnexpectedDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "@wrong.test")
 	settings := config.NewSettings(false)
 
-	_, err := AuthenticateAccess("johndoe", "dogood", settings)
+	_, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err == nil {
 		t.Fatal("expected authentication to fail")
 	}
@@ -150,7 +150,7 @@ func TestAuthenticateAccessUserNotFoundAfterBind(t *testing.T) {
 	t.Setenv(config.LDAP_USER_FILTER, "(&(mail=%s)(cn=does-not-exist))")
 	settings := config.NewSettings(false)
 
-	_, err := AuthenticateAccess("johndoe", "dogood", settings)
+	_, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err == nil {
 		t.Fatal("expected search with no entries to fail")
 	}
@@ -170,7 +170,7 @@ func TestAuthenticateAccessRequiredGroupMember(t *testing.T) {
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "some-other-group, team10_r")
 	settings := config.NewSettings(false)
 
-	user, err := AuthenticateAccess("johndoe", "dogood", settings)
+	user, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err != nil {
 		t.Fatalf("AuthenticateAccess(): %v", err)
 	}
@@ -190,7 +190,7 @@ func TestAuthenticateAccessRequiredGroupNotMember(t *testing.T) {
 	t.Setenv(config.LDAP_REQUIRED_GROUPS, "svcaccts")
 	settings := config.NewSettings(false)
 
-	_, err := AuthenticateAccess("johndoe", "dogood", settings)
+	_, err := AuthenticateAccess(t.Context(), "johndoe", "dogood", settings)
 	if err == nil {
 		t.Fatal("expected authentication to fail for user outside required groups")
 	}
