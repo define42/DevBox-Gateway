@@ -43,10 +43,10 @@ const (
 	forbiddenOrigin   = "Forbidden request origin."
 	loginLocked       = "Too many login attempts. Try again later."
 	maxFormBodyBytes  = 1 << 20
-	// maxVMNameLength and maxLoginUsernameLength mirror the canonical limits in
-	// the vmname package, which is the single source of truth for VDI naming.
+	// Name limits mirror the canonical limits in the vmname package, which is
+	// the single source of truth for VDI naming.
 	maxVMNameLength   = vmname.MaxHostnameLength
-	maxVMNameFieldLen = vmname.MaxUsernameLength + len(vmname.Separator) + vmname.MaxHostnameLength
+	maxVMNameFieldLen = vmname.MaxVMNameLength
 	// maxGuestUsernameLength matches the conventional Linux useradd limit.
 	maxGuestUsernameLength = 32
 	maxLoginUsernameLength = vmname.MaxUsernameLength

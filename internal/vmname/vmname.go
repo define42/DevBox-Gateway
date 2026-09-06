@@ -42,6 +42,10 @@ const (
 	// MaxHostnameLength bounds the user-chosen hostname, which is a single DNS
 	// label (RFC 1035 limits a label to 63 octets).
 	MaxHostnameLength = 63
+
+	// MaxVMNameLength bounds the complete composed VM name in bytes, including
+	// the owning username, separator, and hostname.
+	MaxVMNameLength = MaxUsernameLength + len(Separator) + MaxHostnameLength
 )
 
 // ValidateUsername normalizes and constrains the owning user's login name. It

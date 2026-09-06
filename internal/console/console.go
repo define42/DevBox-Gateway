@@ -15,6 +15,7 @@ import (
 	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"github.com/gorilla/websocket"
 )
@@ -171,7 +172,7 @@ func parseDashboardVMPathParam(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("vm name is required")
 	}
-	if len(name) > 128 {
+	if len(name) > vmname.MaxVMNameLength {
 		return "", fmt.Errorf("vm name is too long")
 	}
 	return name, nil

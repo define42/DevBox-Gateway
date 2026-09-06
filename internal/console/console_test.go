@@ -9,6 +9,7 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
+	"github.com/define42/devbox-gateway/internal/vmname"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,6 +55,18 @@ func TestDashboardVNCRouteRejectsUnauthorizedRequests(t *testing.T) {
 }
 
 func TestParseDashboardVMPathParam(t *testing.T) {
+	longName, err := vmname.Compose(strings.Repeat("u", 65), strings.Repeat("h", vmname.MaxHostnameLength))
+	if err != nil {
+		t.Fatalf("compose 129-byte VM name: %v", err)
+	}
+	maxName, err := vmname.Compose(
+		strings.Repeat("u", vmname.MaxUsernameLength),
+		strings.Repeat("h", vmname.MaxHostnameLength),
+	)
+	if err != nil {
+		t.Fatalf("compose maximum-length VM name: %v", err)
+	}
+
 	tests := []struct {
 		name    string
 		input   string
@@ -62,21 +75,19 @@ func TestParseDashboardVMPathParam(t *testing.T) {
 	}{
 		{name: "valid", input: "alice-devbox", want: "alice-devbox"},
 		{name: "trimmed", input: "  alice-devbox  ", want: "alice-devbox"},
+		{name: "129-byte composed name", input: longName, want: longName},
+		{name: "maximum composed name", input: maxName, want: maxName},
+		{name: "trimmed maximum composed name", input: " \t" + maxName + "\r\n", want: maxName},
 		{name: "empty", input: "", wantErr: true},
-		{name: "too long", input: strings.Repeat("a", 129), wantErr: true},
+		{name: "only whitespace", input: " \t\r\n", wantErr: true},
+		{name: "too long", input: maxName + "a", wantErr: true},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseDashboardVMPathParam(tc.input)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.input)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parse error = %v, wantErr %t", err, tc.wantErr)
 			}
 			if got != tc.want {
 				t.Fatalf("expected %q, got %q", tc.want, got)
