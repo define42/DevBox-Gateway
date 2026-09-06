@@ -30,7 +30,7 @@ func TestGatewayRuntimeCloseWaitsForDisconnectAudit(t *testing.T) {
 	transportClosed := make(chan struct{})
 	handlerDone := make(chan struct{})
 
-	unregister, ok := sessionManager.RegisterUserConnection("alice", func() {
+	unregister, ok := sessionManager.RegisterUserConnection(testConnectionAuthorization(t, sessionManager, "alice"), func() {
 		close(transportClosed)
 	})
 	if !ok {

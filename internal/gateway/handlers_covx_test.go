@@ -486,7 +486,7 @@ func TestHcovLogoutLogsStoreFailuresAndClosesConnections(t *testing.T) {
 	cookie := issueSessionCookie(t, sessionManager, "hcovlogout")
 	auditOutput := captureStructuredLogs(t)
 	closed := 0
-	sessionManager.RegisterUserConnection("hcovlogout", func() { closed++ })
+	sessionManager.RegisterUserConnection(testConnectionAuthorization(t, sessionManager, "hcovlogout"), func() { closed++ })
 
 	crossOrigin := httptest.NewRecorder()
 	forged := httptest.NewRequest(http.MethodPost, "/logout", nil)

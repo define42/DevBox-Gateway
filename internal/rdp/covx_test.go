@@ -437,7 +437,11 @@ func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 	covxDefineOwnedDomain(t, name)
 
 	stopBackend := startTLSServingBackend(t, backendHost, func(tlsConn *tls.Conn) {
-		_, _ = readTPKT(tlsConn) // block until revocation closes the proxy
+		if _, err := tlsConn.Write([]byte("ready")); err != nil {
+			t.Errorf("send proxy readiness: %v", err)
+			return
+		}
+		_, _ = io.Copy(io.Discard, tlsConn)
 	})
 	defer stopBackend()
 
@@ -448,16 +452,20 @@ func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185")
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
-	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
-	// Wait for the proxy to register the connection, then revoke it: the
-	// registered close callback must terminate Handle.
-	deadline := time.Now().Add(5 * time.Second)
-	for sessionManager.CloseUserConnections("alice") == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("RDP connection was never registered for revocation")
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Receiving backend data proves the registered proxy has started forwarding.
+	ready := make([]byte, len("ready"))
+	if err := tlsClient.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set proxy readiness deadline: %v", err)
+	}
+	if _, err := io.ReadFull(tlsClient, ready); err != nil {
+		t.Fatalf("read proxy readiness: %v", err)
+	}
+	if string(ready) != "ready" {
+		t.Fatalf("unexpected proxy readiness: %q", ready)
+	}
+	if closed := sessionManager.CloseUserConnections("alice"); closed != 1 {
+		t.Fatalf("closed %d registered RDP proxies, want 1", closed)
 	}
 	waitDone(t, done)
 }

@@ -72,12 +72,16 @@ type Manager struct {
 	// this additional lock to avoid recreating a token revoked between calls.
 	sessionsMu sync.Mutex
 
-	connectionsMu      sync.Mutex
-	nextConnectionID   uint64
-	userConnections    map[string]map[uint64]func()
-	connectionsClosing bool
-	activeConnections  int
-	connectionsDrained chan struct{}
+	connectionsMu sync.Mutex
+	// connectionGenerations changes only on logout, including when no live
+	// connection has registered yet. Keep generations across subsequent logins
+	// so an older setup attempt can never become valid again.
+	connectionGenerations map[string]uint64
+	nextConnectionID      uint64
+	userConnections       map[string]map[uint64]func()
+	connectionsClosing    bool
+	activeConnections     int
+	connectionsDrained    chan struct{}
 	// userConnectionLimit caps concurrently registered connections per user;
 	// values <=0 disable the cap. Set once at boot via SetUserConnectionLimit.
 	userConnectionLimit int
@@ -295,38 +299,49 @@ func (m *Manager) UserHasActiveSessionFromIP(username, clientIP string) bool {
 // taken before logout can therefore never restore a revoked session, and
 // concurrent RDP consumers cannot spend the same stored grant twice.
 func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool {
+	_, ok := m.AuthorizeRDPConnection(username, clientIP, vmName)
+	return ok
+}
+
+// AuthorizeRDPConnection consumes a single-use Connect grant and returns the
+// authorization required to register the resulting connection after setup.
+func (m *Manager) AuthorizeRDPConnection(username, clientIP, vmName string) (ConnectionAuthorization, bool) {
 	username = strings.TrimSpace(username)
 	vmName = strings.TrimSpace(vmName)
 	if username == "" || vmName == "" {
-		return false
+		return ConnectionAuthorization{}, false
 	}
 
 	canonicalIP, ok := CanonicalClientIP(clientIP)
 	if !ok {
-		return false
+		return ConnectionAuthorization{}, false
 	}
+	// Capture before consuming the stored grant: logout during either grant
+	// validation or backend setup must make registration reject this ticket.
+	authorization := m.connectionAuthorization(username)
 
 	store, ok := m.Store.(scs.IterableStore)
 	if !ok {
-		return false
+		return ConnectionAuthorization{}, false
 	}
 	sessions, err := store.All()
 	if err != nil {
-		return false
+		return ConnectionAuthorization{}, false
 	}
 
 	for token := range sessions {
-		if m.consumeStoredGrant(token, username, canonicalIP, vmName) {
-			return true
+		if deadline, consumed := m.consumeStoredGrant(token, username, canonicalIP, vmName); consumed {
+			authorization.deadline = deadline
+			return authorization, true
 		}
 	}
-	return false
+	return ConnectionAuthorization{}, false
 }
 
 // consumeStoredGrant removes and persists an unexpired RDP connect grant for
 // (username, canonicalIP, vmName) held by the stored session at token, returning
-// true when it consumed one. It is the per-session step of ConsumeRDPConnectGrant.
-func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string) bool {
+// its session deadline when it consumed one.
+func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string) (time.Time, bool) {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
 
@@ -334,22 +349,22 @@ func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string
 	// Reload under the mutation lock and keep it until the update is committed.
 	raw, found, err := m.Store.Find(token)
 	if err != nil || !found {
-		return false
+		return time.Time{}, false
 	}
 	deadline, values, err := m.Codec.Decode(raw)
-	if err != nil {
-		return false
+	if err != nil || !time.Now().Before(deadline) {
+		return time.Time{}, false
 	}
 	sess, ok := values[sessionKey].(sessionData)
 	if !ok || sess.User == nil {
-		return false
+		return time.Time{}, false
 	}
 	if sess.User.Name != username || sess.ClientIP != canonicalIP {
-		return false
+		return time.Time{}, false
 	}
 	expiry, ok := sess.RDPConnectGrants[vmName]
 	if !ok || !time.Now().Before(expiry) {
-		return false
+		return time.Time{}, false
 	}
 
 	// Consume the grant: drop it and persist, so it authorizes one connection.
@@ -357,9 +372,9 @@ func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string
 	values[sessionKey] = sess
 	encoded, err := m.Codec.Encode(deadline, values)
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
-	return m.Store.Commit(token, encoded, deadline) == nil
+	return deadline, m.Store.Commit(token, encoded, deadline) == nil
 }
 
 // allSessions decodes every stored (non-expired) session. It is a read-only
@@ -435,23 +450,24 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 	return firstErr
 }
 
-// RegisterUserConnection records a live, long-running connection for username
+// RegisterUserConnection records a live, long-running authorized connection
 // and returns an idempotent unregister function. closeFn is called by
 // CloseUserConnections when the user logs out everywhere and by
 // CloseAllConnections during gateway shutdown. When registration is refused,
 // ok is false, the returned unregister is a no-op, and the caller must close
 // the connection. Refusal happens at the per-user limit and once terminal
-// shutdown begins.
-func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unregister func(), ok bool) {
-	username = strings.TrimSpace(username)
-	if username == "" || closeFn == nil {
-		return func() {}, true
+// shutdown begins, or when logout revoked the authorization during setup.
+func (m *Manager) RegisterUserConnection(authorization ConnectionAuthorization, closeFn func()) (unregister func(), ok bool) {
+	username := authorization.username
+	if authorization.manager != m || strings.TrimSpace(username) == "" || closeFn == nil {
+		return func() {}, false
 	}
 
 	m.connectionsMu.Lock()
 	defer m.connectionsMu.Unlock()
 
-	if m.connectionsClosing {
+	if m.connectionsClosing || m.connectionGenerations[username] != authorization.generation ||
+		!time.Now().Before(authorization.deadline) {
 		return func() {}, false
 	}
 	if m.userConnectionLimit > 0 && len(m.userConnections[username]) >= m.userConnectionLimit {
@@ -490,8 +506,9 @@ func (m *Manager) RegisterUserConnection(username string, closeFn func()) (unreg
 	}, true
 }
 
-// CloseUserConnections closes and unregisters every tracked live connection for
-// username. Close functions are called after releasing the registry lock.
+// CloseUserConnections invalidates pending authorizations and closes every
+// tracked live connection for username. Close functions run after releasing the
+// registry lock, and handlers remain responsible for calling unregister.
 func (m *Manager) CloseUserConnections(username string) int {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -499,6 +516,10 @@ func (m *Manager) CloseUserConnections(username string) int {
 	}
 
 	m.connectionsMu.Lock()
+	if m.connectionGenerations == nil {
+		m.connectionGenerations = make(map[string]uint64)
+	}
+	m.connectionGenerations[username]++
 	connections := m.userConnections[username]
 	closeFns := make([]func(), 0, len(connections))
 	for _, closeFn := range connections {

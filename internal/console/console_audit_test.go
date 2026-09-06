@@ -166,7 +166,7 @@ func testConsoleConnectionAuditLifecycle(t *testing.T, test consoleAuditCase) {
 		t.Error("connect audit record unexpectedly includes duration_ms")
 	}
 
-	covxRevokeUserConnections(t, manager, username)
+	covxRevokeUserConnections(t, manager, username, conn)
 	covxAwaitWebsocketClosed(t, conn)
 	records = awaitConsoleAuditRecords(t, output, 2)
 	if len(records) != 2 {

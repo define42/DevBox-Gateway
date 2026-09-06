@@ -8,6 +8,11 @@ import (
 
 // StartExistingVM starts an existing domain when it is currently shut off.
 func StartExistingVM(name string) error {
+	// Removal must finish stopping and undefining the domain before a start
+	// can look it up, or it could restart a VM whose volumes are being deleted.
+	unlockName := vmNameLocks.Lock(name)
+	defer unlockName()
+
 	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)
@@ -114,6 +119,11 @@ func ShutdownVM(name string) error {
 
 // RestartVM reboots a running domain or starts it when it is shut off.
 func RestartVM(name string) error {
+	// A restart can start a stopped domain, so it needs the same exclusion
+	// against provisioning and removal as StartExistingVM.
+	unlockName := vmNameLocks.Lock(name)
+	defer unlockName()
+
 	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)

@@ -217,7 +217,7 @@ func TestCovxConsoleAndVNCOnRunningVM(t *testing.T) {
 		conn := covxDialWebsocket(t, server, "/api/dashboard/vnc/"+dom.name+"/ws", cookie)
 		// Revoking the user's connections runs the handler's registered close
 		// callback, which tears the bridge down server-side.
-		covxRevokeUserConnections(t, manager, covxTestUsername)
+		covxRevokeUserConnections(t, manager, covxTestUsername, conn)
 		covxAwaitWebsocketClosed(t, conn)
 	})
 }
@@ -256,7 +256,7 @@ func TestCovxDashboardConsoleWSEndToEnd(t *testing.T) {
 
 	// Revoking the user's connections runs the handler's registered close
 	// callback (websocket close + console interrupt), ending the bridge.
-	covxRevokeUserConnections(t, manager, covxTestUsername)
+	covxRevokeUserConnections(t, manager, covxTestUsername, conn)
 	covxAwaitWebsocketClosed(t, conn)
 }
 

@@ -67,7 +67,7 @@ func HandleAdminDashboardWS(sessionManager *session.Manager, settings *config.Se
 
 func handleDashboardWS(sessionManager *session.Manager, settings *config.Settings, adminView bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := sessionManager.UserFromContext(r.Context())
+		user, authorization, ok := authorizeDashboardConnection(r.Context(), sessionManager)
 		if !ok {
 			log.Printf("reject dashboard websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
@@ -89,11 +89,11 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 			log.Printf("upgrade dashboard websocket failed: %v", err)
 			return
 		}
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(authorization, func() {
 			_ = ws.Close()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("dashboard", user.Name, ws)
+			rejectDashboardConnection("dashboard", user.Name, ws)
 			return
 		}
 		defer unregisterConnection()

@@ -153,17 +153,33 @@ func covxDialWebsocket(t *testing.T, server *httptest.Server, path string, cooki
 	return conn
 }
 
-// covxRevokeUserConnections closes the user's registered websocket connections,
-// polling until the handler under test has registered one.
-func covxRevokeUserConnections(t *testing.T, manager *session.Manager, username string) {
+// covxRevokeUserConnections waits for a transport pong before revocation. The
+// handler only reads control frames after registering its connection, so this
+// cannot revoke authorization while the handler is still setting up.
+func covxRevokeUserConnections(t *testing.T, manager *session.Manager, username string, conn *websocket.Conn) {
 	t.Helper()
 
-	deadline := time.Now().Add(websocketTestTimeout)
-	for manager.CloseUserConnections(username) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("websocket connection was never registered for revocation")
+	closed := 0
+	conn.SetPongHandler(func(payload string) error {
+		if payload == "revocation-ready" && closed == 0 {
+			closed = manager.CloseUserConnections(username)
 		}
-		time.Sleep(10 * time.Millisecond)
+		return nil
+	})
+	deadline := time.Now().Add(websocketTestTimeout)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		t.Fatalf("set revocation readiness deadline: %v", err)
+	}
+	if err := conn.WriteControl(websocket.PingMessage, []byte("revocation-ready"), deadline); err != nil {
+		t.Fatalf("write revocation readiness ping: %v", err)
+	}
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			break
+		}
+	}
+	if closed == 0 {
+		t.Fatal("websocket connection was never ready for revocation")
 	}
 }
 
@@ -355,7 +371,7 @@ func TestCovxDashboardWSClosedOnUserRevocation(t *testing.T) {
 
 	// Closing the user's tracked connections runs the handler's registered
 	// close callback, which shuts the websocket down server-side.
-	covxRevokeUserConnections(t, manager, covxTestUsername)
+	covxRevokeUserConnections(t, manager, covxTestUsername, conn)
 	covxAwaitWebsocketClosed(t, conn)
 }
 

@@ -349,9 +349,9 @@ func TestCloseUserConnectionsClosesOnlyMatchingUser(t *testing.T) {
 	aliceClosed := 0
 	bobClosed := 0
 
-	m.RegisterUserConnection("alice", func() { aliceClosed++ })
-	m.RegisterUserConnection("alice", func() { aliceClosed++ })
-	m.RegisterUserConnection("bob", func() { bobClosed++ })
+	m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { aliceClosed++ })
+	m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { aliceClosed++ })
+	m.RegisterUserConnection(m.connectionAuthorization("bob"), func() { bobClosed++ })
 
 	if got := m.CloseUserConnections("alice"); got != 2 {
 		t.Fatalf("expected to close 2 alice connections, got %d", got)
@@ -376,7 +376,7 @@ func TestCloseUserConnectionsClosesOnlyMatchingUser(t *testing.T) {
 func TestCloseAllConnectionsClosesAndWaitsForUnregister(t *testing.T) {
 	m := New()
 	closeCalled := make(chan struct{})
-	unregister, ok := m.RegisterUserConnection("alice", func() {
+	unregister, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {
 		close(closeCalled)
 	})
 	if !ok {
@@ -419,14 +419,14 @@ func TestCloseAllConnectionsClosesAndWaitsForUnregister(t *testing.T) {
 		t.Fatal("shutdown did not finish after unregister")
 	}
 
-	if _, accepted := m.RegisterUserConnection("bob", func() {}); accepted {
+	if _, accepted := m.RegisterUserConnection(m.connectionAuthorization("bob"), func() {}); accepted {
 		t.Fatal("connection registration succeeded after terminal shutdown began")
 	}
 }
 
 func TestCloseAllConnectionsWaitsAfterUserLogoutClose(t *testing.T) {
 	m := New()
-	unregisterAlice, ok := m.RegisterUserConnection("alice", func() {})
+	unregisterAlice, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {})
 	if !ok {
 		t.Fatal("expected initial connection registration to succeed")
 	}
@@ -435,7 +435,7 @@ func TestCloseAllConnectionsWaitsAfterUserLogoutClose(t *testing.T) {
 	}
 	shutdownStarted := make(chan struct{})
 	var unregisterBob func()
-	unregisterBob, ok = m.RegisterUserConnection("bob", func() {
+	unregisterBob, ok = m.RegisterUserConnection(m.connectionAuthorization("bob"), func() {
 		close(shutdownStarted)
 		unregisterBob()
 	})
@@ -475,7 +475,7 @@ func TestCloseAllConnectionsWaitsAfterUserLogoutClose(t *testing.T) {
 func TestCloseAllConnectionsHonorsCanceledContext(t *testing.T) {
 	m := New()
 	closeCalled := make(chan struct{})
-	unregister, ok := m.RegisterUserConnection("alice", func() {
+	unregister, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {
 		close(closeCalled)
 	})
 	if !ok {
@@ -505,7 +505,7 @@ func TestCloseAllConnectionsContextBoundsBlockingClose(t *testing.T) {
 	m := New()
 	blockingCloseStarted := make(chan struct{})
 	releaseBlockingClose := make(chan struct{})
-	unregisterBlocked, ok := m.RegisterUserConnection("alice", func() {
+	unregisterBlocked, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {
 		close(blockingCloseStarted)
 		<-releaseBlockingClose
 	})
@@ -519,7 +519,7 @@ func TestCloseAllConnectionsContextBoundsBlockingClose(t *testing.T) {
 
 	secondCloseCalled := make(chan struct{})
 	var unregisterSecond func()
-	unregisterSecond, ok = m.RegisterUserConnection("bob", func() {
+	unregisterSecond, ok = m.RegisterUserConnection(m.connectionAuthorization("bob"), func() {
 		close(secondCloseCalled)
 		unregisterSecond()
 	})
@@ -556,7 +556,7 @@ func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
 	m := New()
 	closed := 0
 
-	unregister, _ := m.RegisterUserConnection("alice", func() { closed++ })
+	unregister, _ := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { closed++ })
 	unregister()
 	unregister()
 
@@ -567,9 +567,9 @@ func TestRegisterUserConnectionUnregisterIsIdempotent(t *testing.T) {
 		t.Fatalf("expected close function not to run after unregister, got %d", closed)
 	}
 
-	noOpUnregister, _ := m.RegisterUserConnection("   ", func() { closed++ })
+	noOpUnregister, _ := m.RegisterUserConnection(m.connectionAuthorization("   "), func() { closed++ })
 	noOpUnregister()
-	nilCloseUnregister, _ := m.RegisterUserConnection("alice", nil)
+	nilCloseUnregister, _ := m.RegisterUserConnection(m.connectionAuthorization("alice"), nil)
 	nilCloseUnregister()
 	if got := m.CloseUserConnections("   "); got != 0 {
 		t.Fatalf("expected blank username close to be a no-op, got %d", got)
@@ -1034,15 +1034,15 @@ func TestRegisterUserConnectionEnforcesPerUserLimit(t *testing.T) {
 	m.SetUserConnectionLimit(2)
 
 	closed := 0
-	if _, ok := m.RegisterUserConnection("alice", func() { closed++ }); !ok {
+	if _, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { closed++ }); !ok {
 		t.Fatal("first registration should be allowed")
 	}
-	unregisterSecond, ok := m.RegisterUserConnection("alice", func() { closed++ })
+	unregisterSecond, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { closed++ })
 	if !ok {
 		t.Fatal("second registration should be allowed")
 	}
 
-	rejectedUnregister, ok := m.RegisterUserConnection("alice", func() { closed++ })
+	rejectedUnregister, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { closed++ })
 	if ok {
 		t.Fatal("third registration should be refused at limit 2")
 	}
@@ -1051,13 +1051,13 @@ func TestRegisterUserConnectionEnforcesPerUserLimit(t *testing.T) {
 	rejectedUnregister()
 
 	// Other users are unaffected by alice being at her limit.
-	if _, ok := m.RegisterUserConnection("bob", func() {}); !ok {
+	if _, ok := m.RegisterUserConnection(m.connectionAuthorization("bob"), func() {}); !ok {
 		t.Fatal("another user's registration should be allowed")
 	}
 
 	// Freeing a slot lets alice register again.
 	unregisterSecond()
-	if _, ok := m.RegisterUserConnection("alice", func() { closed++ }); !ok {
+	if _, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() { closed++ }); !ok {
 		t.Fatal("registration should be allowed again after unregister")
 	}
 
@@ -1076,7 +1076,7 @@ func TestRegisterUserConnectionLimitDisabledByDefault(t *testing.T) {
 	m := New()
 
 	for i := 0; i < 100; i++ {
-		if _, ok := m.RegisterUserConnection("alice", func() {}); !ok {
+		if _, ok := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {}); !ok {
 			t.Fatalf("registration %d refused while the cap is disabled", i)
 		}
 	}

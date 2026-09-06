@@ -26,7 +26,7 @@ const serialReadLimit = 1 << 20 // 1 MiB
 // HandleDashboardConsoleWS serves the serial console websocket endpoint.
 func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := sessionManager.UserFromContext(r.Context())
+		user, authorization, ok := authorizeDashboardConnection(r.Context(), sessionManager)
 		if !ok {
 			log.Printf("reject serial console websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
@@ -74,12 +74,12 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			return
 		}
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(authorization, func() {
 			_ = ws.Close()
 			_ = console.Interrupt()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("serial", user.Name, ws)
+			rejectDashboardConnection("serial", user.Name, ws)
 			_ = console.Close()
 			return
 		}

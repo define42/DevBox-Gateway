@@ -92,7 +92,7 @@ func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Man
 	if !ok {
 		return
 	}
-	owner, ok := authorizeRDPAccess(raw.RemoteAddr(), sessionManager, clientConn.sni, clientConn.hostname)
+	authorization, ok := authorizeRDPAccess(raw.RemoteAddr(), sessionManager, clientConn.sni, clientConn.hostname)
 	if !ok {
 		_ = clientConn.tlsConn.Close()
 		return
@@ -109,18 +109,18 @@ func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Man
 		_ = clientConn.tlsConn.Close()
 		return
 	}
-	unregisterConnection, allowed := sessionManager.RegisterUserConnection(owner, func() {
+	unregisterConnection, allowed := sessionManager.RegisterUserConnection(authorization, func() {
 		abortRDPProxy(clientConn.tlsConn, backendTLS)
 	})
 	if !allowed {
-		log.Printf("reject RDP session for user %q from %s: per-user connection limit reached", owner, raw.RemoteAddr())
+		log.Printf("reject RDP session for user %q from %s: authorization expired or revoked, or connection limit reached", authorization.Username(), raw.RemoteAddr())
 		_ = clientConn.tlsConn.Close()
 		_ = backendTLS.Close()
 		return
 	}
 	defer unregisterConnection()
 
-	defer auditRDPConnection(raw.RemoteAddr(), owner, clientConn.hostname)()
+	defer auditRDPConnection(raw.RemoteAddr(), authorization.Username(), clientConn.hostname)()
 
 	_ = clientConn.tlsConn.SetDeadline(time.Time{})
 	_ = backendTLS.SetDeadline(time.Time{})
@@ -468,34 +468,35 @@ func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.Settings
 	return hostname, true
 }
 
-func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sni, hostname string) (string, bool) {
+func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sni, hostname string) (session.ConnectionAuthorization, bool) {
 	if sessionManager == nil {
 		log.Printf("rdp denied SNI=%q vm=%q remote=%s: session manager unavailable", sni, hostname, remoteAddr)
-		return "", false
+		return session.ConnectionAuthorization{}, false
 	}
 
 	owner, hasOwner, err := virt.VMOwner(hostname)
 	if err != nil {
 		log.Printf("resolve owner for VM %s: %v", hostname, err)
-		return "", false
+		return session.ConnectionAuthorization{}, false
 	}
 	if !hasOwner {
 		log.Printf("rdp denied SNI=%q vm=%q remote=%s: missing VM owner", sni, hostname, remoteAddr)
-		return "", false
+		return session.ConnectionAuthorization{}, false
 	}
 
 	clientIP, ok := session.CanonicalClientIP(remoteAddr.String())
 	if !ok {
 		log.Printf("rdp denied SNI=%q vm=%q remote=%s: invalid client IP", sni, hostname, remoteAddr)
-		return "", false
+		return session.ConnectionAuthorization{}, false
 	}
-	if !sessionManager.ConsumeRDPConnectGrant(owner, clientIP, hostname) {
+	authorization, ok := sessionManager.AuthorizeRDPConnection(owner, clientIP, hostname)
+	if !ok {
 		log.Printf("rdp denied SNI=%q vm=%q owner=%q client_ip=%q remote=%s: no unused Connect authorization (owner must click Connect in the dashboard for each connection)", sni, hostname, owner, clientIP, remoteAddr)
-		return "", false
+		return session.ConnectionAuthorization{}, false
 	}
 
 	debugf("authorized owner=%q client_ip=%q vm=%q", owner, clientIP, hostname)
-	return owner, true
+	return authorization, true
 }
 
 func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool) {

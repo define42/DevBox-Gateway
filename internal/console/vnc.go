@@ -26,7 +26,7 @@ const vncReadLimit = 1 << 20 // 1 MiB
 // HandleDashboardVNCWS serves the VNC websocket endpoint.
 func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := sessionManager.UserFromContext(r.Context())
+		user, authorization, ok := authorizeDashboardConnection(r.Context(), sessionManager)
 		if !ok {
 			log.Printf("reject VNC websocket from %s: no authenticated session", strconv.Quote(r.RemoteAddr))
 			http.Error(w, "Login required.", http.StatusUnauthorized)
@@ -71,12 +71,12 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			return
 		}
 		debugf("vnc: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
-		unregisterConnection, ok := sessionManager.RegisterUserConnection(user.Name, func() {
+		unregisterConnection, ok := sessionManager.RegisterUserConnection(authorization, func() {
 			_ = ws.Close()
 			_ = vncConn.Close()
 		})
 		if !ok {
-			rejectOverUserConnectionLimit("vnc", user.Name, ws)
+			rejectDashboardConnection("vnc", user.Name, ws)
 			_ = vncConn.Close()
 			return
 		}

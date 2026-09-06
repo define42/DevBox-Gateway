@@ -741,7 +741,7 @@ func TestLogoutRejectsMissingSameOriginHeader(t *testing.T) {
 	router := NewHandler(sm, settings)
 	cookie := issueSessionCookie(t, sm, "alice")
 	closed := 0
-	sm.RegisterUserConnection("alice", func() { closed++ })
+	sm.RegisterUserConnection(testConnectionAuthorization(t, sm, "alice"), func() { closed++ })
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
@@ -768,9 +768,9 @@ func TestLogoutRedirects(t *testing.T) {
 	issueSessionCookieFromIP(t, sm, "bob", "192.0.2.12:12345")
 	aliceClosed := 0
 	bobClosed := 0
-	sm.RegisterUserConnection("alice", func() { aliceClosed++ })
-	sm.RegisterUserConnection("alice", func() { aliceClosed++ })
-	sm.RegisterUserConnection("bob", func() { bobClosed++ })
+	sm.RegisterUserConnection(testConnectionAuthorization(t, sm, "alice"), func() { aliceClosed++ })
+	sm.RegisterUserConnection(testConnectionAuthorization(t, sm, "alice"), func() { aliceClosed++ })
+	sm.RegisterUserConnection(testConnectionAuthorization(t, sm, "bob"), func() { bobClosed++ })
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)

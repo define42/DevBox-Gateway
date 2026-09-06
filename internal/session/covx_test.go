@@ -135,7 +135,7 @@ func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
 	if err := m.Store.Commit("tok", []byte("not-a-gob-session"), now.Add(time.Hour)); err != nil {
 		t.Fatalf("commit invalid session: %v", err)
 	}
-	if m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1") {
+	if _, consumed := m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1"); consumed {
 		t.Fatal("expected undecodable session data to be rejected")
 	}
 
@@ -149,7 +149,7 @@ func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
 	if err := m.Store.Commit("tok", userless, deadline); err != nil {
 		t.Fatalf("commit userless session: %v", err)
 	}
-	if m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1") {
+	if _, consumed := m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1"); consumed {
 		t.Fatal("expected a session without a user to be rejected")
 	}
 }
@@ -207,7 +207,7 @@ func TestCovxGrantRDPConnectPrunesExpiredGrants(t *testing.T) {
 func TestCovxRegisterUserConnectionInitializesNilMap(t *testing.T) {
 	m := &Manager{}
 
-	unregister, _ := m.RegisterUserConnection("alice", func() {})
+	unregister, _ := m.RegisterUserConnection(m.connectionAuthorization("alice"), func() {})
 	if m.userConnections == nil {
 		t.Fatal("expected the connection registry map to be initialized lazily")
 	}

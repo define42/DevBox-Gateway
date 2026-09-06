@@ -299,7 +299,8 @@ func TestBridgeDashboardSocketClosesOnUserRevocation(t *testing.T) {
 	}()
 
 	sessionManager := session.New()
-	unregister, _ := sessionManager.RegisterUserConnection("alice", func() {
+	authorization := covxConnectionAuthorization(t, sessionManager, "alice")
+	unregister, _ := sessionManager.RegisterUserConnection(authorization, func() {
 		_ = serverWS.Close()
 		_ = backendConn.Close()
 	})

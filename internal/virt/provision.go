@@ -17,7 +17,7 @@ import (
 // Creation never destroys an existing VM, so the user must delete it first.
 var ErrVMAlreadyExists = errors.New("virt: vm with this name already exists")
 
-// vmNameLocks serializes create and remove operations per VDI name. BootNewVM
+// vmNameLocks serializes create, remove, start, and restart per VDI name. BootNewVM
 // checks the name is free (ensureVMNameAvailable) and only defines the domain
 // much later (StartVM); between those two steps it destroys any
 // leftover artifacts and writes a fresh disk and cloud-init seed (guest user +
@@ -26,12 +26,14 @@ var ErrVMAlreadyExists = errors.New("virt: vm with this name already exists")
 // that region, each clobbering the other's disk and seed — so a domain could
 // end up booting one request's disk with another request's credentials. RemoveVM
 // takes the same lock so a delete cannot interleave with a create of the same
-// name. It is held as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
+// name. StartExistingVM and RestartVM also take it so a stopped domain cannot
+// be restarted between removal's destruction and volume deletion. It is held
+// as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
 // vmCreationMu strictly inside this region, so the lock order is always
 // vmNameLocks then vmCreationMu, and a goroutine never holds two VDI-name locks
 // at once — so neither lock can deadlock. This is process-wide because the
 // gateway is the single writer of libvirt state.
-var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM create/remove
+var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM create/remove/start/restart
 
 // ensureVMNameAvailable refuses creation when a domain with the same name already
 // exists, so a boot can never destroy or overwrite an existing VM (the user must

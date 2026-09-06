@@ -44,6 +44,18 @@ const (
 	wsPingPeriod = (wsPongWait * 9) / 10
 )
 
+func authorizeDashboardConnection(
+	ctx context.Context,
+	manager *session.Manager,
+) (*identity.User, session.ConnectionAuthorization, bool) {
+	authorization, ok := manager.AuthorizeConnection(ctx)
+	if !ok {
+		return nil, authorization, false
+	}
+	user, ok := manager.UserFromContext(ctx)
+	return user, authorization, ok
+}
+
 func auditConsoleConnection(ctx context.Context, user *identity.User, remoteAddr, name, protocol string) func() {
 	clientIP, _ := session.CanonicalClientIP(remoteAddr)
 	connectedAt := time.Now()
@@ -101,16 +113,13 @@ func pingWebsocketUntil(ws *websocket.Conn, done <-chan struct{}) {
 	}
 }
 
-// rejectOverUserConnectionLimit closes a just-upgraded websocket whose user
-// already holds the maximum number of registered live connections
-// (MAX_CONNECTIONS_PER_USER), telling the browser why via a policy-violation
-// close frame. Refusing here bounds how much of the gateway-wide
-// front-connection budget one authenticated user can occupy.
-func rejectOverUserConnectionLimit(kind, username string, ws *websocket.Conn) {
-	log.Printf("reject %s websocket for user %q: per-user connection limit reached", kind, username)
+// rejectDashboardConnection closes a just-upgraded websocket whose authorization
+// expired, whose user reached the connection limit, or whose gateway is stopping.
+func rejectDashboardConnection(kind, username string, ws *websocket.Conn) {
+	log.Printf("reject %s websocket for user %q: connection registration refused", kind, username)
 	deadline := time.Now().Add(wsWriteWait)
 	_ = ws.WriteControl(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Too many open connections for this user."), deadline)
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "Connection authorization expired or connection limit reached. Please reconnect."), deadline)
 	_ = ws.Close()
 }
 
