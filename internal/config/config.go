@@ -117,7 +117,7 @@ func NewSettings(printSettings bool) *Settings {
 	s := &Settings{m: make(map[string]*Setting)}
 
 	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
-	s.SetString(AUDIT_LOG_FILE, "Append-only JSON Lines file for security audit events; one JSON object is written per line", DefaultAuditLogFile)
+	s.setAuditDefaults()
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
 
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable QCOW2 base VDI images named .img/.qcow2/.raw; must contain at least one valid image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
@@ -170,6 +170,14 @@ func NewSettings(printSettings bool) *Settings {
 	}
 
 	return s
+}
+
+func (s *Settings) setAuditDefaults() {
+	s.SetString(AUDIT_LOG_FILE, "Append-only JSON Lines file for security audit events; one JSON object is written per line", DefaultAuditLogFile)
+	s.SetString(SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL that also receives every audit event, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Empty disables HEC forwarding (AUDIT_LOG_FILE is always written)", "")
+	s.SetSecretString(SPLUNK_HEC_TOKEN, "Splunk HEC token; required when SPLUNK_HEC_ENDPOINT is set", "")
+	s.SetString(SPLUNK_HEC_INDEX, "Splunk index for forwarded audit events; empty uses the HEC token's default index", "")
+	s.SetBool(SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SPLUNK_HEC_ENDPOINT", false)
 }
 
 func (s *Settings) setAuthDefaults() {
@@ -521,6 +529,10 @@ const (
 	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
 	MAX_CONNECTIONS_PER_SOURCE       = "MAX_CONNECTIONS_PER_SOURCE"
 	SNI_HASH_SECRET                  = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
+	SPLUNK_HEC_ENDPOINT              = "SPLUNK_HEC_ENDPOINT"
+	SPLUNK_HEC_INDEX                 = "SPLUNK_HEC_INDEX"
+	SPLUNK_HEC_SKIP_TLS_VERIFY       = "SPLUNK_HEC_SKIP_TLS_VERIFY"
+	SPLUNK_HEC_TOKEN                 = "SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
 	VDI_AUTO_SHUTDOWN_HOURS          = "VDI_AUTO_SHUTDOWN_HOURS"
 	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"
 	BASE_IMAGE_DIR                   = "BASE_IMAGE_DIR"

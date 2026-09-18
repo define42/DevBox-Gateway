@@ -1,0 +1,22 @@
+# Post-setup tasks for the splunk/splunk container (docker-compose.yml runs
+# them via SPLUNK_ANSIBLE_POST_TASKS once Splunk is up). They create the index
+# the gateway forwards audit events to (SPLUNK_HEC_INDEX).
+#
+# The index is created through the REST API rather than the image's
+# "splunk.conf" default.yml setting: in splunk/splunk 10.4 that setting leaves a
+# splunk-owned 0660 bookkeeping file that the next container start cannot read,
+# so every restart after the first fails provisioning.
+- name: Create the devbox_audit index
+  uri:
+    url: "https://127.0.0.1:{{ splunk.svc_port }}/services/data/indexes"
+    method: POST
+    user: "{{ splunk.admin_user }}"
+    password: "{{ splunk.password }}"
+    force_basic_auth: yes
+    validate_certs: no
+    body_format: form-urlencoded
+    body:
+      name: devbox_audit
+    # 409: the index already exists from an earlier start.
+    status_code: [201, 409]
+  no_log: true

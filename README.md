@@ -35,6 +35,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
   - [Audit logs and Splunk](#audit-logs-and-splunk)
+    - [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
   - [Libvirt and VM storage](#libvirt-and-vm-storage)
@@ -125,6 +126,20 @@ This stops any previous stack, rebuilds the images, and starts:
 - `gateway` — the Go binary, listening on `https://localhost` (port `443`).
 - `ldap` — a `glauth/glauth` LDAP server pre-populated from
   `testldap/default-config.cfg` for local development.
+- `splunk` — a `splunk/splunk` Splunk Enterprise instance that receives every
+  audit event from the gateway over HEC (see
+  [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)). Starting it accepts
+  the [Splunk General Terms](https://www.splunk.com/en_us/legal/splunk-general-terms.html).
+
+The first Splunk start takes a few minutes; the gateway queues and retries
+audit events until HEC is reachable. Then open Splunk Web at
+`http://localhost:8000` (user `admin`, password `devbox-splunk`) and search
+`index=devbox_audit`. The admin password and the shared HEC token are
+development-only defaults; override them with `SPLUNK_PASSWORD` and
+`SPLUNK_HEC_TOKEN` in the environment or a `.env` file. The
+`devbox_audit` index is created by `testsplunk/create_index.yml`, and Splunk's
+configuration and indexed data persist in the `splunk-etc` and `splunk-var`
+Docker volumes.
 
 To stop everything: `docker compose stop`.
 
@@ -345,6 +360,10 @@ file**, which keeps container and development overrides working.
 | `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Domain served by the dashboard and used as the suffix for VM SNI routing labels.                  |
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
 | `AUDIT_LOG_FILE`          | `/var/log/devbox-gateway/audit.jsonl`                                                                            | Append-only audit destination. Every event is one complete JSON object followed by a newline, suitable for Splunk file monitoring. The Docker Compose setup overrides this to `/data/logs/audit.jsonl`. |
+| `SPLUNK_HEC_ENDPOINT`     | _(empty)_                                                                                                        | Splunk HTTP Event Collector URL that also receives every audit event, e.g. `https://splunk.example.com:8088`. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. See [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
+| `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
+| `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
+| `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
@@ -402,6 +421,44 @@ sudo setfacl -m u:splunk:r /var/log/devbox-gateway/audit.jsonl
 
 Ordinary process diagnostics remain available through `journalctl` (or Docker
 logs); `AUDIT_LOG_FILE` is the dedicated security-event stream.
+
+#### Forwarding to Splunk HEC
+
+As an alternative to a Universal Forwarder, the gateway can send every audit
+event directly to a Splunk HTTP Event Collector. Set the endpoint and token
+(and optionally the index):
+
+```ini
+SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
+SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
+SPLUNK_HEC_INDEX=devbox_audit
+```
+
+- `AUDIT_LOG_FILE` is still written; HEC is an additional destination, so the
+  local file remains the complete record if Splunk is unreachable.
+- Each event arrives on the JSON event endpoint with `source=devbox-gateway`,
+  `sourcetype=devbox-gateway:audit`, the gateway's hostname as `host`, and the
+  same JSON object that is written to the file as the event body. The token
+  must be allowed to write to `SPLUNK_HEC_INDEX`, and must have indexer
+  acknowledgement disabled (otherwise Splunk rejects every request with
+  "Data channel is missing").
+- Delivery happens in the background and never slows down or fails a user
+  action. Events are batched, and network errors, `5xx`, `429`, `401`, and
+  `403` responses are retried with backoff (up to 30s between attempts). Other
+  `4xx` responses drop that batch. Up to 10,000 events are held in memory while
+  the collector is unavailable; beyond that, new events are dropped. Drops and
+  failures are reported in the process log (`journalctl` / Docker logs).
+- On shutdown the gateway waits up to 5s for queued events to be delivered.
+- The gateway refuses to start when `SPLUNK_HEC_ENDPOINT` is set without
+  `SPLUNK_HEC_TOKEN`, or when a token or index is set without an endpoint.
+- Splunk's default HEC certificate is self-signed. Prefer installing the CA
+  that signed it into the host (or container) trust store; set
+  `SPLUNK_HEC_SKIP_TLS_VERIFY=true` only as a stopgap. A plain `http://`
+  endpoint is accepted but sends the token unencrypted and logs a warning.
+
+A search such as `index=devbox_audit sourcetype="devbox-gateway:audit"
+action=user.login result=failure` then works without any additional props
+configuration: Splunk extracts the JSON fields at search time.
 
 ### TLS certificates
 
@@ -633,14 +690,16 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
+├── testsplunk/      Post-setup task creating the local Splunk's audit index.
 └── Dockerfile, docker-compose.yml, Makefile, tsconfig.json
 ```
 
 ## Security notes
 
-- Do **not** commit real certificates, private keys, or production LDAP
-  endpoints. The files under `testldap/` are intended for local development
-  only.
+- Do **not** commit real certificates, private keys, production LDAP
+  endpoints, or real Splunk HEC tokens. The files under `testldap/` and
+  `testsplunk/`, and the Splunk credentials in `docker-compose.yml`, are
+  intended for local development only.
 - Backend TLS verification is disabled by design (VMs typically use self-signed
   certs). Treat the network between the gateway and its VMs as trusted.
 - RDP access is gated by an explicit, single-use authorization rather than a

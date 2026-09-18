@@ -5,14 +5,19 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/session"
 	"github.com/define42/devbox-gateway/internal/virt"
@@ -111,6 +116,98 @@ func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 	}
 }
 
+func TestMcovBootGatewayForwardsAuditEventsToSplunkHEC(t *testing.T) {
+	mcovBootEnv(t)
+	collector := newMcovHECCollector(t)
+	t.Setenv(config.SPLUNK_HEC_ENDPOINT, collector.server.URL)
+	t.Setenv(config.SPLUNK_HEC_TOKEN, "mcov-hec-token")
+	t.Setenv(config.SPLUNK_HEC_INDEX, "mcov_audit")
+	t.Setenv(config.SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
+	// A closed local port makes the LDAP bind, and so the login, fail fast.
+	t.Setenv(config.LDAP_URL, "ldap://127.0.0.1:1")
+
+	gateway, err := bootGateway()
+	if err != nil {
+		t.Fatalf("bootGateway: %v", err)
+	}
+	defer func() { _ = gateway.Close() }()
+
+	mcovPostFailedLogin(t, gateway.listener.Addr().String())
+	// Closing the gateway flushes queued HEC events before it returns.
+	if err := gateway.Close(); err != nil {
+		t.Fatalf("close gateway runtime: %v", err)
+	}
+
+	bodies, auths := collector.snapshot()
+	for _, want := range []string{`"action":"user.login"`, `"result":"failure"`, `"index":"mcov_audit"`, `"sourcetype":"devbox-gateway:audit"`} {
+		if !strings.Contains(bodies, want) {
+			t.Errorf("collector bodies missing %s: %s", want, bodies)
+		}
+	}
+	for _, auth := range auths {
+		if auth != "Splunk mcov-hec-token" {
+			t.Errorf("Authorization = %q, want the configured HEC token", auth)
+		}
+	}
+}
+
+// mcovHECCollector is a fake Splunk HEC that records every request.
+type mcovHECCollector struct {
+	mu     sync.Mutex
+	bodies []string
+	auths  []string
+	server *httptest.Server
+}
+
+func newMcovHECCollector(t *testing.T) *mcovHECCollector {
+	t.Helper()
+	collector := &mcovHECCollector{}
+	collector.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		collector.mu.Lock()
+		collector.bodies = append(collector.bodies, string(body))
+		collector.auths = append(collector.auths, r.Header.Get("Authorization"))
+		collector.mu.Unlock()
+		_, _ = io.WriteString(w, `{"text":"Success","code":0}`)
+	}))
+	t.Cleanup(collector.server.Close)
+	return collector
+}
+
+func (c *mcovHECCollector) snapshot() (string, []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.Join(c.bodies, "\n"), append([]string(nil), c.auths...)
+}
+
+// mcovPostFailedLogin submits a same-origin login with bad credentials, which
+// the real request path audits as a failed user.login.
+func mcovPostFailedLogin(t *testing.T, addr string) {
+	t.Helper()
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "mcov.gateway.test"}, // #nosec G402 -- test client for the gateway's self-signed certificate
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	form := url.Values{"username": {"hec-probe"}, "password": {"wrong"}}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://mcov.gateway.test/login", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatalf("build login request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://mcov.gateway.test")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("post login: %v", err)
+	}
+	_ = response.Body.Close()
+}
+
 // mcovAssertGatewayAcceptsTLS proves the booted gateway's accept loop dispatches
 // connections: a completed TLS handshake requires the per-connection handler to
 // be running on the server side.
@@ -202,6 +299,52 @@ func TestMcovBootGatewayAuditLogError(t *testing.T) {
 	_, err := bootGateway()
 	if err == nil || !strings.Contains(err.Error(), "configure audit log") {
 		t.Fatalf("expected audit log setup error, got %v", err)
+	}
+}
+
+func TestMcovBootGatewayRejectsPartialSplunkHEC(t *testing.T) {
+	// A HEC token without an endpoint means forwarding was intended but would
+	// never happen; boot must fail instead of silently not forwarding.
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv(config.SPLUNK_HEC_ENDPOINT, "")
+	t.Setenv(config.SPLUNK_HEC_TOKEN, "hec-token")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), config.SPLUNK_HEC_ENDPOINT) {
+		t.Fatalf("expected SPLUNK_HEC_ENDPOINT validation error, got %v", err)
+	}
+}
+
+func TestMcovBootGatewaySplunkHECEndpointError(t *testing.T) {
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
+	t.Setenv(config.SPLUNK_HEC_ENDPOINT, "splunk.example.test:8088")
+	t.Setenv(config.SPLUNK_HEC_TOKEN, "hec-token")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), "configure audit log") {
+		t.Fatalf("expected audit log setup error for an endpoint without a scheme, got %v", err)
+	}
+}
+
+func TestMcovAuditOptionsMapsSettings(t *testing.T) {
+	t.Setenv(config.AUDIT_LOG_FILE, "/srv/audit/devbox.jsonl")
+	t.Setenv(config.SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
+	t.Setenv(config.SPLUNK_HEC_TOKEN, "hec-token")
+	t.Setenv(config.SPLUNK_HEC_INDEX, "devbox_audit")
+	t.Setenv(config.SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
+
+	want := audit.Options{
+		FilePath: "/srv/audit/devbox.jsonl",
+		HEC: audit.HECConfig{
+			Endpoint:           "https://splunk.example.test:8088",
+			Token:              "hec-token",
+			Index:              "devbox_audit",
+			InsecureSkipVerify: true,
+		},
+	}
+	if got := auditOptions(config.NewSettings(false)); got != want {
+		t.Fatalf("auditOptions() = %+v, want %+v", got, want)
 	}
 }
 

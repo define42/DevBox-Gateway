@@ -7,6 +7,9 @@ services:
       # in this environment (IPv6-only resolution fails), breaking the build.
       network: host
     restart: always
+    # A stable hostname becomes the Splunk "host" of forwarded audit events;
+    # without it every recreated container reports a new container ID.
+    hostname: devbox-gateway
       #    privileged: true
     environment:
       # Pin the data root to the bind-mounted /data; the binary's built-in
@@ -16,6 +19,13 @@ services:
       # Keep the JSON Lines audit stream on the host-mounted /data volume so a
       # Splunk agent can tail it outside the container.
       - AUDIT_LOG_FILE=/data/logs/audit.jsonl
+      # Also forward every audit event to the bundled Splunk over HEC. The
+      # token must match the splunk service's SPLUNK_HEC_TOKEN.
+      - SPLUNK_HEC_ENDPOINT=https://splunk:8088
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
+      - SPLUNK_HEC_INDEX=devbox_audit
+      # The bundled Splunk serves HEC with its default self-signed certificate.
+      - SPLUNK_HEC_SKIP_TLS_VERIFY=true
       - LDAP_SKIP_TLS_VERIFY=true
       - VDI_AUTO_SHUTDOWN_HOURS=2
       - LDAP_REQUIRED_GROUPS=team10_r
@@ -42,6 +52,41 @@ services:
       - ./testldap/cert.pem:/app/config/cert.pem
     networks:
       app-net:
+
+  # Local Splunk Enterprise receiving the gateway's audit events over HEC
+  # (https://splunk:8088 inside app-net). Splunk Web: http://localhost:8000,
+  # user admin, password SPLUNK_PASSWORD. The first start takes a few minutes;
+  # the gateway queues and retries audit events until HEC is up.
+  splunk:
+    image: splunk/splunk:10.4
+    container_name: splunk
+    restart: always
+    # splunkd needs longer than compose's default 10s to shut down cleanly;
+    # without this `docker compose stop` (run first by `make run`) kills it.
+    stop_grace_period: 2m
+    environment:
+      # Starting this container accepts the Splunk General Terms:
+      # https://www.splunk.com/en_us/legal/splunk-general-terms.html
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com
+      # Development-only credentials; override both via the environment or .env.
+      - SPLUNK_PASSWORD=${SPLUNK_PASSWORD:-devbox-splunk}
+      - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
+      # Creates the devbox_audit index once Splunk is up.
+      - SPLUNK_ANSIBLE_POST_TASKS=file:///tmp/defaults/create_index.yml
+    ports:
+      - "8000:8000"      # Splunk Web
+    volumes:
+      - ./testsplunk/create_index.yml:/tmp/defaults/create_index.yml:ro
+      - splunk-etc:/opt/splunk/etc
+      - splunk-var:/opt/splunk/var
+    networks:
+      app-net:
+
+volumes:
+  splunk-etc:
+  splunk-var:
+
 networks:
   virbr0-net:
     driver: macvlan

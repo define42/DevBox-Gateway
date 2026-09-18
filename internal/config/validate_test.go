@@ -91,3 +91,45 @@ func TestValidateRemovedSSHTunnelModeRejectsEnabled(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateSplunkHEC(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		token    string
+		index    string
+		wantErr  string
+	}{
+		{name: "disabled"},
+		{name: "endpoint and token", endpoint: "https://splunk.example.test:8088", token: "token"},
+		{name: "endpoint token and index", endpoint: "https://splunk.example.test:8088", token: "token", index: "devbox"},
+		{name: "endpoint without token", endpoint: "https://splunk.example.test:8088", token: "  ", wantErr: SPLUNK_HEC_TOKEN},
+		{name: "token without endpoint", token: "token", wantErr: SPLUNK_HEC_ENDPOINT},
+		{name: "index without endpoint", index: "devbox", wantErr: SPLUNK_HEC_ENDPOINT},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(SPLUNK_HEC_ENDPOINT, test.endpoint)
+			t.Setenv(SPLUNK_HEC_TOKEN, test.token)
+			t.Setenv(SPLUNK_HEC_INDEX, test.index)
+
+			err := ValidateSplunkHEC(NewSettings(false))
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateSplunkHEC() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("ValidateSplunkHEC() error = %v, want it to name %s", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateSplunkHECRejectsNilSettings(t *testing.T) {
+	if err := ValidateSplunkHEC(nil); err == nil {
+		t.Fatal("expected nil settings to be rejected")
+	}
+}

@@ -137,7 +137,7 @@ func TestLogDoesNotReadSensitiveContextValues(t *testing.T) {
 	}
 }
 
-func TestConfigureJSONFileAppendsOneJSONRecordPerLine(t *testing.T) {
+func TestConfigureAppendsOneJSONRecordPerLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "private", "audit.jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("create test audit directory: %v", err)
@@ -146,7 +146,7 @@ func TestConfigureJSONFileAppendsOneJSONRecordPerLine(t *testing.T) {
 		t.Fatalf("seed audit file: %v", err)
 	}
 
-	closer, err := ConfigureJSONFile(path)
+	closer, err := Configure(Options{FilePath: path})
 	if err != nil {
 		t.Fatalf("configure audit file: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestConfigureJSONFileAppendsOneJSONRecordPerLine(t *testing.T) {
 	}
 }
 
-func TestConfigureJSONFilePreservesOperationalLogAndRestoresLogging(t *testing.T) {
+func TestConfigurePreservesOperationalLogAndRestoresLogging(t *testing.T) {
 	previousLogger := slog.Default()
 	previousLogWriter := log.Writer()
 	t.Cleanup(func() {
@@ -212,7 +212,7 @@ func TestConfigureJSONFilePreservesOperationalLogAndRestoresLogging(t *testing.T
 	log.SetOutput(&operationalLog)
 
 	path := filepath.Join(t.TempDir(), "audit", "events.jsonl")
-	closer, err := ConfigureJSONFile(path)
+	closer, err := Configure(Options{FilePath: path})
 	if err != nil {
 		t.Fatalf("configure audit file: %v", err)
 	}
@@ -253,13 +253,13 @@ func TestConfigureJSONFilePreservesOperationalLogAndRestoresLogging(t *testing.T
 	assertPathMode(t, path, 0o640)
 }
 
-func TestConfigureJSONFileRejectsEmptyPath(t *testing.T) {
-	closer, err := ConfigureJSONFile(" \t ")
+func TestConfigureRejectsEmptyPath(t *testing.T) {
+	closer, err := Configure(Options{FilePath: " \t "})
 	if err == nil {
 		if closer != nil {
 			_ = closer.Close()
 		}
-		t.Fatal("ConfigureJSONFile() error = nil, want non-nil")
+		t.Fatal("Configure() error = nil, want non-nil")
 	}
 }
 

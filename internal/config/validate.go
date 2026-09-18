@@ -38,6 +38,26 @@ func ValidateFrontDomain(settings *Settings) error {
 	return nil
 }
 
+// ValidateSplunkHEC rejects a partial Splunk HEC configuration. Forwarding is
+// enabled by SPLUNK_HEC_ENDPOINT, which then requires SPLUNK_HEC_TOKEN; a token
+// or index without an endpoint means forwarding was intended but would
+// silently never happen, so the boot fails instead of dropping audit events.
+func ValidateSplunkHEC(settings *Settings) error {
+	if settings == nil {
+		return fmt.Errorf("settings is nil")
+	}
+	endpointSet := strings.TrimSpace(settings.Get(SPLUNK_HEC_ENDPOINT)) != ""
+	tokenSet := strings.TrimSpace(settings.Get(SPLUNK_HEC_TOKEN)) != ""
+	indexSet := strings.TrimSpace(settings.Get(SPLUNK_HEC_INDEX)) != ""
+	switch {
+	case endpointSet && !tokenSet:
+		return fmt.Errorf("%s is set but %s is empty; splunk hec forwarding requires a token", SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN)
+	case !endpointSet && (tokenSet || indexSet):
+		return fmt.Errorf("%s or %s is set but %s is empty; set the endpoint to forward audit events to splunk hec, or remove the other SPLUNK_HEC_* settings", SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, SPLUNK_HEC_ENDPOINT)
+	}
+	return nil
+}
+
 // removedSSHTunnelEnableKey is the boot switch of the removed SSH reverse-tunnel
 // mode. It is no longer a registered setting; it is recognized only to refuse
 // booting a configuration that still expects the tunnel.

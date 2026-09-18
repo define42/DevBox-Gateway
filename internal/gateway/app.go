@@ -166,7 +166,7 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 		return nil, err
 	}
 
-	auditSink, err := audit.ConfigureJSONFile(settings.Get(config.AUDIT_LOG_FILE))
+	auditSink, err := audit.Configure(auditOptions(settings))
 	if err != nil {
 		return nil, fmt.Errorf("configure audit log: %w", err)
 	}
@@ -252,6 +252,20 @@ func startGatewayRuntime(
 	return runtime, nil
 }
 
+// auditOptions maps the audit settings onto the audit sink configuration;
+// ValidateSplunkHEC has already rejected partial HEC settings at boot.
+func auditOptions(settings *config.Settings) audit.Options {
+	return audit.Options{
+		FilePath: settings.Get(config.AUDIT_LOG_FILE),
+		HEC: audit.HECConfig{
+			Endpoint:           settings.Get(config.SPLUNK_HEC_ENDPOINT),
+			Token:              settings.Get(config.SPLUNK_HEC_TOKEN),
+			Index:              settings.Get(config.SPLUNK_HEC_INDEX),
+			InsecureSkipVerify: settings.Bool(config.SPLUNK_HEC_SKIP_TLS_VERIFY),
+		},
+	}
+}
+
 func configureConnectionDebugLogging(settings *config.Settings) {
 	// Verbose per-connection console diagnostics, off unless DEBUG_CONNECTIONS.
 	debugConns := settings.Bool(config.DEBUG_CONNECTIONS)
@@ -287,6 +301,9 @@ func loadBootSettings() (*config.Settings, error) {
 	// dashboard still issues .rdp files. Refuse to boot in that broken state
 	// rather than fail silently at connect time.
 	if err := config.ValidateFrontDomain(settings); err != nil {
+		return nil, err
+	}
+	if err := config.ValidateSplunkHEC(settings); err != nil {
 		return nil, err
 	}
 	return settings, nil

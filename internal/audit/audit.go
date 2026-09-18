@@ -3,6 +3,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -69,26 +70,49 @@ type Event struct {
 	Duration      time.Duration
 }
 
-// configuredJSONFile owns an audit file and the process logging state that was
-// active before ConfigureJSONFile installed the audit logger.
-type configuredJSONFile struct {
+// Options selects where audit records are written.
+type Options struct {
+	// FilePath is the append-only JSON Lines audit file. It is required and
+	// remains the durable record even when HEC forwarding is enabled.
+	FilePath string
+	// HEC additionally forwards every record to a Splunk HTTP Event Collector
+	// when its Endpoint is set.
+	HEC HECConfig
+}
+
+// configuredSink owns the audit destinations and the process logging state
+// that was active before Configure installed the audit logger.
+type configuredSink struct {
 	file              *os.File
+	forwarder         *hecForwarder
 	previousLogger    *slog.Logger
 	previousLogWriter io.Writer
 	once              sync.Once
 	closeErr          error
 }
 
-// ConfigureJSONFile directs audit records to path as newline-delimited JSON.
+// Configure directs audit records to options.FilePath as newline-delimited
+// JSON and, when options.HEC.Endpoint is set, also to a Splunk HEC.
 //
 // The file is opened in append mode and created with mode 0640 when absent.
-// Missing parent directories are created with mode 0750. Ordinary log package
-// output continues to use its existing destination. The returned closer must
-// remain open while audit records can be emitted; closing it restores the
-// previous slog logger and standard log destination before closing the file.
-func ConfigureJSONFile(path string) (io.Closer, error) {
+// Missing parent directories are created with mode 0750. HEC delivery happens
+// in the background and never blocks or fails audit logging. Ordinary log
+// package output continues to use its existing destination. The returned
+// closer must remain open while audit records can be emitted; closing it
+// restores the previous slog logger and standard log destination, flushes
+// queued HEC events, and closes the file.
+func Configure(options Options) (io.Closer, error) {
+	path := options.FilePath
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("configure audit JSON file: path is empty")
+	}
+
+	var forwarder *hecForwarder
+	if strings.TrimSpace(options.HEC.Endpoint) != "" {
+		var err error
+		if forwarder, err = newHECForwarder(options.HEC); err != nil {
+			return nil, fmt.Errorf("configure splunk hec forwarding: %w", err)
+		}
 	}
 
 	directory := filepath.Dir(path)
@@ -101,28 +125,40 @@ func ConfigureJSONFile(path string) (io.Closer, error) {
 		return nil, fmt.Errorf("open audit log file %q: %w", path, err)
 	}
 
+	handler := slog.Handler(slog.NewJSONHandler(file, nil))
+	if forwarder != nil {
+		forwarder.start()
+		handler = slog.NewMultiHandler(handler, slog.NewJSONHandler(forwarder, nil))
+	}
+
 	previousLogger := slog.Default()
 	previousLogWriter := log.Writer()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(file, nil)))
+	slog.SetDefault(slog.New(handler))
 	// slog.SetDefault also routes the standard log package through slog. Keep
 	// operational log.Printf output on the destination selected by the caller.
 	log.SetOutput(previousLogWriter)
 
-	return &configuredJSONFile{
+	return &configuredSink{
 		file:              file,
+		forwarder:         forwarder,
 		previousLogger:    previousLogger,
 		previousLogWriter: previousLogWriter,
 	}, nil
 }
 
-// Close restores the previous process logging state and closes the audit file.
-func (file *configuredJSONFile) Close() error {
-	file.once.Do(func() {
-		slog.SetDefault(file.previousLogger)
-		log.SetOutput(file.previousLogWriter)
-		file.closeErr = file.file.Close()
+// Close restores the previous process logging state, flushes queued HEC
+// events, and closes the audit file.
+func (sink *configuredSink) Close() error {
+	sink.once.Do(func() {
+		slog.SetDefault(sink.previousLogger)
+		log.SetOutput(sink.previousLogWriter)
+		var forwarderErr error
+		if sink.forwarder != nil {
+			forwarderErr = sink.forwarder.Close()
+		}
+		sink.closeErr = errors.Join(forwarderErr, sink.file.Close())
 	})
-	return file.closeErr
+	return sink.closeErr
 }
 
 // Log emits event as one structured Info record through the default slog logger.
