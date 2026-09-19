@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/define42/devbox-gateway/internal/splunkhec"
 )
 
 // hecRequest is one request received by a fake collector.
@@ -127,8 +129,8 @@ func eventUsers(requests []hecRequest) []string {
 
 func assertHECRequestHeaders(t *testing.T, request hecRequest, token string) {
 	t.Helper()
-	if request.path != hecEventPath {
-		t.Errorf("request path = %q, want %q", request.path, hecEventPath)
+	if request.path != splunkhec.EventPath {
+		t.Errorf("request path = %q, want %q", request.path, splunkhec.EventPath)
 	}
 	if want := "Splunk " + token; request.authorization != want {
 		t.Errorf("Authorization = %q, want %q", request.authorization, want)
@@ -147,43 +149,6 @@ func assertFields(t *testing.T, label string, got, want map[string]any) {
 	}
 }
 
-func TestHECEventURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		endpoint string
-		want     string
-		wantErr  bool
-	}{
-		{name: "host only gets event path", endpoint: "https://splunk.example.test:8088", want: "https://splunk.example.test:8088/services/collector/event"},
-		{name: "root path gets event path", endpoint: " https://splunk.example.test:8088/ ", want: "https://splunk.example.test:8088/services/collector/event"},
-		{name: "explicit path is kept", endpoint: "https://splunk.example.test/services/collector/event/1.0", want: "https://splunk.example.test/services/collector/event/1.0"},
-		{name: "query is kept", endpoint: "https://splunk.example.test:8088?channel=abc", want: "https://splunk.example.test:8088/services/collector/event?channel=abc"},
-		{name: "plain http is allowed", endpoint: "HTTP://splunk.example.test:8088", want: "http://splunk.example.test:8088/services/collector/event"},
-		{name: "other scheme", endpoint: "ftp://splunk.example.test", wantErr: true},
-		{name: "missing scheme", endpoint: "splunk.example.test:8088", wantErr: true},
-		{name: "missing host", endpoint: "https:///services/collector", wantErr: true},
-		{name: "unparsable", endpoint: "https://splunk example.test", wantErr: true},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := hecEventURL(test.endpoint)
-			if test.wantErr {
-				if err == nil {
-					t.Fatalf("hecEventURL(%q) = %v, want error", test.endpoint, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("hecEventURL(%q) error = %v", test.endpoint, err)
-			}
-			if got.String() != test.want {
-				t.Fatalf("hecEventURL(%q) = %q, want %q", test.endpoint, got, test.want)
-			}
-		})
-	}
-}
-
 func TestNewHECForwarderRejectsInvalidConfig(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -198,28 +163,6 @@ func TestNewHECForwarderRejectsInvalidConfig(t *testing.T) {
 				t.Fatal("newHECForwarder() error = nil, want non-nil")
 			}
 		})
-	}
-}
-
-func TestHECRetryableStatus(t *testing.T) {
-	tests := []struct {
-		status int
-		want   bool
-	}{
-		{status: http.StatusBadRequest, want: false},
-		{status: http.StatusUnauthorized, want: true},
-		{status: http.StatusForbidden, want: true},
-		{status: http.StatusNotFound, want: false},
-		{status: http.StatusRequestTimeout, want: true},
-		{status: http.StatusRequestEntityTooLarge, want: false},
-		{status: http.StatusTooManyRequests, want: true},
-		{status: http.StatusInternalServerError, want: true},
-		{status: http.StatusServiceUnavailable, want: true},
-	}
-	for _, test := range tests {
-		if got := hecRetryableStatus(test.status); got != test.want {
-			t.Errorf("hecRetryableStatus(%d) = %t, want %t", test.status, got, test.want)
-		}
 	}
 }
 

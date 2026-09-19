@@ -21,7 +21,6 @@ func stageTree(t *testing.T) string {
 		"packaging/systemd/sauronhost.service",
 		"packaging/systemd/sauronagent.sysusers.conf",
 		"packaging/systemd/sauronagent.tmpfiles.conf",
-		"examples/sauronagent.yaml",
 		"examples/sauronhost.yaml",
 		"examples/qemu-vsock.md",
 		"docs/protocol.md",

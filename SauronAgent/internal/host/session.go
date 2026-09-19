@@ -69,14 +69,13 @@ type session struct {
 }
 
 // newSession prepares a session for an admitted connection.
-func (s *Server) newSession(conn net.Conn, p peer) *session {
+func (s *Server) newSession(conn net.Conn, p peer, src output.Source) *session {
 	id := fmt.Sprintf("%s-%06d", p.bucket(), s.seq.Add(1))
 	interval := s.cfg.Limits.AckInterval
 	if interval < 1 {
 		// Zero means acknowledge every event.
 		interval = 1
 	}
-	src := s.enrich.source(p)
 	return &session{
 		srv:          s,
 		conn:         protocol.NewConn(conn, s.maxPayload),

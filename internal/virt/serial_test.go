@@ -42,7 +42,7 @@ func TestSerialConsoleInterruptCloseRaceSafe(_ *testing.T) {
 }
 
 func TestDomainXMLUsesManagedSerialPTY(t *testing.T) {
-	xml := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096)
+	xml := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096, false)
 
 	// The serial console is a libvirt-managed PTY (read via OpenConsole); the
 	// domain XML must not pin a gateway-chosen unix socket path.

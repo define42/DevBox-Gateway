@@ -89,11 +89,13 @@ func hostPart(addr string) string {
 type enricher struct {
 	hostName     string
 	vms          map[uint32]config.VMMapping
+	resolve      func(cid uint32) (config.VMMapping, bool)
 	allowUnknown bool
 }
 
-// newEnricher indexes the configured CID-to-VM mapping.
-func newEnricher(cfg config.Host) *enricher {
+// newEnricher indexes the configured CID-to-VM mapping. resolve, when not nil,
+// is Options.Resolve and is consulted before that mapping.
+func newEnricher(cfg config.Host, resolve func(cid uint32) (config.VMMapping, bool)) *enricher {
 	vms := make(map[uint32]config.VMMapping, len(cfg.VMs))
 	for _, vm := range cfg.VMs {
 		vms[vm.CID] = vm
@@ -101,28 +103,36 @@ func newEnricher(cfg config.Host) *enricher {
 	return &enricher{
 		hostName:     cfg.Host.Name,
 		vms:          vms,
+		resolve:      resolve,
 		allowUnknown: cfg.Limits.AllowUnknownCIDs,
 	}
 }
 
-// authorized reports whether a peer may connect at all.
+// lookup returns the trusted mapping for a hypervisor-assigned CID: the live
+// resolver's answer first, because it describes the VMs actually running now,
+// then the configured vms list.
+func (e *enricher) lookup(cid uint32) (config.VMMapping, bool) {
+	if e.resolve != nil {
+		if vm, ok := e.resolve(cid); ok {
+			return vm, true
+		}
+	}
+	vm, ok := e.vms[cid]
+	return vm, ok
+}
+
+// authorized reports whether a peer whose source has been resolved may
+// connect at all.
 //
 // An unmapped CID is accepted when limits.allow_unknown_cids is set, because an
 // unexpected VM connecting to the collector is something an analyst must see
 // rather than something to drop. When it is not set the connection is refused
 // and counted, which is a deliberate choice to have no record of that guest at
-// all.
-func (e *enricher) authorized(p peer) bool {
-	if !p.vsock {
-		// No hypervisor-backed identity. Such a peer is treated exactly like an
-		// unmapped CID: it cannot be attributed to a VM, so it is only accepted
-		// where unknown guests are accepted.
-		return e.allowUnknown
-	}
-	if _, ok := e.vms[p.cid]; ok {
-		return true
-	}
-	return e.allowUnknown
+// all. A peer with no hypervisor-backed identity is never Known, so it is
+// treated exactly like an unmapped CID: it cannot be attributed to a VM, and is
+// only accepted where unknown guests are accepted.
+func (e *enricher) authorized(src output.Source) bool {
+	return src.Known || e.allowUnknown
 }
 
 // source builds the trusted half of an event's provenance.
@@ -144,7 +154,7 @@ func (e *enricher) source(p peer) output.Source {
 		return src
 	}
 
-	vm, ok := e.vms[p.cid]
+	vm, ok := e.lookup(p.cid)
 	if !ok {
 		src.VM = fmt.Sprintf("unknown-cid-%d", p.cid)
 		src.Known = false

@@ -16,7 +16,9 @@ import (
 	"github.com/define42/devbox-gateway/internal/config"
 	consolepkg "github.com/define42/devbox-gateway/internal/console"
 	"github.com/define42/devbox-gateway/internal/rdp"
+	"github.com/define42/devbox-gateway/internal/sauron"
 	"github.com/define42/devbox-gateway/internal/session"
+	"github.com/define42/devbox-gateway/internal/splunkhec"
 	"github.com/define42/devbox-gateway/internal/virt"
 )
 
@@ -59,6 +61,9 @@ type gatewayRuntime struct {
 	profiler       *pprofRuntime
 	sessionManager *session.Manager
 	auditSink      io.Closer
+	// sauron is the SauronAgent guest event collector; nil when SAURON_ENABLE
+	// is off.
+	sauron io.Closer
 
 	// stopAutoShutdown stops the VDI auto-shutdown worker; nil when the
 	// feature is disabled or the worker was never started.
@@ -90,10 +95,21 @@ func (g *gatewayRuntime) close() error {
 	return errors.Join(
 		g.closeListener(),
 		g.drainConnections(),
+		g.closeSauron(),
 		g.closeProfiler(),
 		g.closeFrontTLS(),
 		g.closeAuditSink(),
 	)
+}
+
+func (g *gatewayRuntime) closeSauron() error {
+	if g.sauron == nil {
+		return nil
+	}
+	if err := g.sauron.Close(); err != nil {
+		return fmt.Errorf("close sauron collector: %w", err)
+	}
+	return nil
 }
 
 func (g *gatewayRuntime) closeListener() error {
@@ -193,12 +209,61 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 		return nil, fmt.Errorf("failed to resolve sni hash secret: %w", err)
 	}
 
-	runtime, err := startGatewayRuntime(settings, vmInventory, sessionManager, auditSink)
+	// Started before the front listener so a collector that cannot listen
+	// fails the boot with nothing else to unwind.
+	collector, err := startSauronCollector(settings)
 	if err != nil {
 		return nil, err
 	}
+
+	runtime, err := startGatewayRuntime(settings, vmInventory, sessionManager, auditSink)
+	if err != nil {
+		if collector != nil {
+			err = errors.Join(err, collector.Close())
+		}
+		return nil, err
+	}
+	if collector != nil {
+		runtime.sauron = collector
+	}
 	keepAuditSink = true
 	return runtime, nil
+}
+
+// startSauronCollector starts the SauronAgent guest event collector when
+// SAURON_ENABLE is set; ValidateSauron has already checked its settings.
+func startSauronCollector(settings *config.Settings) (*sauron.Collector, error) {
+	if !config.SauronEnabled(settings) {
+		return nil, nil
+	}
+	collector, err := sauron.Start(sauronOptions(settings))
+	if err != nil {
+		return nil, fmt.Errorf("start sauron collector: %w", err)
+	}
+	return collector, nil
+}
+
+func sauronOptions(settings *config.Settings) sauron.Options {
+	return sauron.Options{
+		Port:         config.SauronVSockPort(settings),
+		EventLogFile: settings.Get(config.SAURON_EVENT_LOG_FILE),
+		HEC: splunkhec.Config{
+			Endpoint:           settings.Get(config.SAURON_SPLUNK_HEC_ENDPOINT),
+			Token:              settings.Get(config.SAURON_SPLUNK_HEC_TOKEN),
+			Index:              settings.Get(config.SAURON_SPLUNK_HEC_INDEX),
+			InsecureSkipVerify: settings.Bool(config.SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY),
+		},
+		SpoolDir:      config.SauronSpoolDir(settings),
+		SpoolMaxBytes: config.SauronSpoolMaxBytes(settings),
+		Resolve:       resolveSauronGuest,
+	}
+}
+
+// resolveSauronGuest attributes a SauronAgent connection to the running VM
+// libvirt assigned its vsock CID to.
+func resolveSauronGuest(cid uint32) (sauron.VM, bool, error) {
+	guest, ok, err := virt.LookupVSockGuest(cid)
+	return sauron.VM{Name: guest.Name, UUID: guest.UUID, Owner: guest.Owner}, ok, err
 }
 
 func startGatewayRuntime(
@@ -304,6 +369,9 @@ func loadBootSettings() (*config.Settings, error) {
 		return nil, err
 	}
 	if err := config.ValidateSplunkHEC(settings); err != nil {
+		return nil, err
+	}
+	if err := config.ValidateSauron(settings); err != nil {
 		return nil, err
 	}
 	return settings, nil

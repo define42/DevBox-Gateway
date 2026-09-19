@@ -29,7 +29,16 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
+# No configuration file: the built-in defaults dial the host (CID 2) on port
+# 9000 and spool to /var/lib/sauronagent/spool, which is what a guest needs.
+# To change a setting, write only the keys that change to a file (every key is
+# listed in examples/sauronagent.yaml) and point the agent at it with a drop-in
+# from `systemctl edit sauronagent`:
+#
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
+ExecStart=/usr/bin/sauronagent
 
 Restart=always
 RestartSec=5s

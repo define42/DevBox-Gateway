@@ -157,6 +157,13 @@ type harness struct {
 
 func newHarness(t *testing.T, tweak func(*config.Host)) *harness {
 	t.Helper()
+	return newHarnessWithOptions(t, tweak, nil)
+}
+
+// newHarnessWithOptions is newHarness with a hook to adjust the server Options,
+// for the settings the configuration file cannot express, such as Resolve.
+func newHarnessWithOptions(t *testing.T, tweak func(*config.Host), tweakOptions func(*Options)) *harness {
+	t.Helper()
 
 	cfg := config.DefaultHost()
 	cfg.Host.Name = "hypervisor-test"
@@ -192,7 +199,7 @@ func newHarness(t *testing.T, tweak func(*config.Host)) *harness {
 		cids:     make(map[net.Conn]uint32),
 	}
 
-	srv, err := New(Options{
+	opts := Options{
 		Config:   cfg,
 		Sink:     h.sink,
 		Metrics:  h.counters,
@@ -204,7 +211,11 @@ func newHarness(t *testing.T, tweak func(*config.Host)) *harness {
 			default:
 			}
 		},
-	})
+	}
+	if tweakOptions != nil {
+		tweakOptions(&opts)
+	}
+	srv, err := New(opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

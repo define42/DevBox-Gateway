@@ -678,3 +678,95 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 		t.Fatal("expected SPLUNK_HEC_TOKEN to be registered as a secret")
 	}
 }
+
+func TestNewSettingsSauron(t *testing.T) {
+	s := NewSettings(false)
+	if SauronEnabled(s) {
+		t.Fatal("expected SauronAgent collection to be disabled by default")
+	}
+	if got := SauronVSockPort(s); got != DefaultSauronVSockPort {
+		t.Fatalf("expected default SAURON_VSOCK_PORT %d, got %d", DefaultSauronVSockPort, got)
+	}
+	if got := s.String(SAURON_EVENT_LOG_FILE); got != DefaultSauronEventLogFile {
+		t.Fatalf("expected default SAURON_EVENT_LOG_FILE %q, got %q", DefaultSauronEventLogFile, got)
+	}
+	for _, key := range []string{SAURON_SPLUNK_HEC_ENDPOINT, SAURON_SPLUNK_HEC_TOKEN, SAURON_SPLUNK_HEC_INDEX} {
+		if got := s.String(key); got != "" {
+			t.Fatalf("expected default %s to be empty, got %q", key, got)
+		}
+	}
+
+	t.Setenv(SAURON_ENABLE, "true")
+	t.Setenv(SAURON_VSOCK_PORT, " 9100 ")
+	t.Setenv(SAURON_SPLUNK_HEC_ENDPOINT, " https://splunk.example.test:8088 ")
+	t.Setenv(SAURON_SPLUNK_HEC_TOKEN, " 11111111-2222-3333-4444-555555555555 ")
+	t.Setenv(SAURON_SPLUNK_HEC_INDEX, " sauron ")
+	t.Setenv(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
+
+	s = NewSettings(false)
+	if !SauronEnabled(s) {
+		t.Fatal("expected SAURON_ENABLE=true from environment")
+	}
+	if got := SauronVSockPort(s); got != 9100 {
+		t.Fatalf("expected SAURON_VSOCK_PORT 9100, got %d", got)
+	}
+	for key, want := range map[string]string{
+		SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088",
+		SAURON_SPLUNK_HEC_TOKEN:    "11111111-2222-3333-4444-555555555555",
+		SAURON_SPLUNK_HEC_INDEX:    "sauron",
+	} {
+		if got := s.String(key); got != want {
+			t.Fatalf("expected trimmed %s %q, got %q", key, want, got)
+		}
+	}
+	if !s.Bool(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY) {
+		t.Fatal("expected SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=true from environment")
+	}
+	if !s.m[SAURON_SPLUNK_HEC_TOKEN].Secret {
+		t.Fatal("expected SAURON_SPLUNK_HEC_TOKEN to be registered as a secret")
+	}
+}
+
+func TestSauronSpoolSettings(t *testing.T) {
+	t.Setenv(DATA_ROOT_DIR, "/srv/devbox")
+	s := NewSettings(false)
+	if got := SauronSpoolDir(s); got != "/srv/devbox/sauron-spool" {
+		t.Errorf("default SauronSpoolDir = %q, want it under DATA_ROOT_DIR", got)
+	}
+	if got := SauronSpoolMaxBytes(s); got != int64(DefaultSauronSpoolMaxMiB)<<20 {
+		t.Errorf("default SauronSpoolMaxBytes = %d, want %d MiB", got, DefaultSauronSpoolMaxMiB)
+	}
+
+	t.Setenv(SAURON_SPOOL_DIR, " /var/spool/sauron/ ")
+	t.Setenv(SAURON_SPOOL_MAX_MIB, "512")
+	s = NewSettings(false)
+	if got := SauronSpoolDir(s); got != "/var/spool/sauron" {
+		t.Errorf("SauronSpoolDir = %q, want the cleaned SAURON_SPOOL_DIR", got)
+	}
+	if got := SauronSpoolMaxBytes(s); got != 512<<20 {
+		t.Errorf("SauronSpoolMaxBytes = %d, want 512 MiB", got)
+	}
+
+	t.Setenv(SAURON_SPOOL_MAX_MIB, "0")
+	if got := SauronSpoolMaxBytes(NewSettings(false)); got != int64(DefaultSauronSpoolMaxMiB)<<20 {
+		t.Errorf("SauronSpoolMaxBytes with 0 = %d, want the default", got)
+	}
+	if got := SauronSpoolMaxBytes(nil); got != int64(DefaultSauronSpoolMaxMiB)<<20 {
+		t.Errorf("SauronSpoolMaxBytes(nil) = %d, want the default", got)
+	}
+}
+
+func TestSauronVSockPortFallsBackWhenOutOfRange(t *testing.T) {
+	for _, port := range []string{"0", "-1", "4294967295"} {
+		t.Setenv(SAURON_VSOCK_PORT, port)
+		if got := SauronVSockPort(NewSettings(false)); got != DefaultSauronVSockPort {
+			t.Errorf("SauronVSockPort(%s) = %d, want the default %d", port, got, DefaultSauronVSockPort)
+		}
+	}
+	if got := SauronVSockPort(nil); got != DefaultSauronVSockPort {
+		t.Errorf("SauronVSockPort(nil) = %d, want the default %d", got, DefaultSauronVSockPort)
+	}
+	if SauronEnabled(nil) {
+		t.Error("SauronEnabled(nil) = true, want false")
+	}
+}

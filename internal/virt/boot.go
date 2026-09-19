@@ -59,6 +59,9 @@ type VMStartConfig struct {
 	StoragePoolName string
 	VCPU            int
 	MemoryMiB       int
+	// VSock gives the domain the virtio-vsock device SauronAgent reports
+	// through.
+	VSock bool
 
 	// Gateway metadata attached to the new domain; each field is optional and
 	// skipped when blank.
@@ -79,7 +82,7 @@ func StartVM(cfg VMStartConfig) (err error) {
 
 	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
 	// owns no console sockets.
-	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB))
+	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB, cfg.VSock))
 	if err != nil {
 		return err
 	}

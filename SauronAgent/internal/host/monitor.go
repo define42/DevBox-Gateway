@@ -70,7 +70,7 @@ func newMonitor(cfg config.Host, rep *reporter, counters *metrics.Host, log *slo
 		ticker:   realTicker,
 		vms:      make(map[uint32]*vmHealth),
 	}
-	enrich := newEnricher(cfg)
+	enrich := newEnricher(cfg, nil)
 	for _, vm := range cfg.VMs {
 		if !vm.Expected {
 			continue

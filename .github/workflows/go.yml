@@ -93,11 +93,11 @@ jobs:
           fail_ci_if_error: true
 
       # -------------------------------
-      # SauronAgent vet & test. SauronAgent/ is its own Go module and requires a
-      # newer Go than the gateway, so its steps run with GOTOOLCHAIN=auto: the go
-      # command fetches exactly the toolchain SauronAgent/go.mod asks for
-      # (checksum-verified via the Go module proxy) without changing the Go that
-      # builds the gateway.
+      # SauronAgent vet & test. SauronAgent/ is its own Go module (the gateway
+      # embeds its collector package through a replace directive), so its steps
+      # run with GOTOOLCHAIN=auto: the go command fetches exactly the toolchain
+      # SauronAgent/go.mod asks for (checksum-verified via the Go module proxy)
+      # should it ever need a newer Go than the one set up above.
       # -------------------------------
       - name: Vet and test SauronAgent
         run: GOTOOLCHAIN=auto make -C SauronAgent lint test

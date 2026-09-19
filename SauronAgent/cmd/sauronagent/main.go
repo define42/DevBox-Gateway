@@ -4,15 +4,17 @@
 //
 // Usage:
 //
+//	sauronagent
 //	sauronagent -config /etc/sauronagent/sauronagent.yaml
-//	sauronagent -check-config -config /etc/sauronagent/sauronagent.yaml
+//	sauronagent -check-config [-config file]
 //	sauronagent -version
 //
-// The flag set is deliberately this small. Everything that changes what the
-// agent collects, keeps or sends lives in the configuration file, where it is
-// reviewable, version controlled and exactly what -check-config validated. A
-// fleet whose agents are each tuned by a different ExecStart= line is a fleet
-// whose audit coverage nobody can state.
+// With no -config the agent runs on its built-in defaults, which is how the
+// shipped unit starts it. The flag set is deliberately this small. Everything
+// that changes what the agent collects, keeps or sends lives in the defaults or
+// in the one configuration file, where it is reviewable, version controlled and
+// exactly what -check-config validated. A fleet whose agents are each tuned by
+// a different ExecStart= line is a fleet whose audit coverage nobody can state.
 package main
 
 import (
@@ -111,12 +113,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
-	if *configPath == "" {
-		// Not fatal -- the defaults are a working configuration -- but an
-		// agent running on settings nobody wrote down should say so.
-		fmt.Fprintf(stderr, "%s: no -config given; running on the built-in defaults\n", progName)
-	}
-
 	logger, closer, err := logging.New(cfg.Logging)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", progName, err)
@@ -132,7 +128,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// Logged before anything is opened, so that a guest whose agent fails to
 	// start still says in the journal which guest it is and where it was
 	// trying to send.
-	logStartup(logger, cfg, id)
+	logStartup(logger, *configPath, cfg, id)
 
 	// New opens the netlink socket and the spool, so a missing CAP_AUDIT_READ
 	// or an unwritable state directory fails here, while an operator is
@@ -193,13 +189,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// usage prints the command line. It names the configuration file the shipped
-// unit uses, because that is the path an operator actually needs.
+// usage prints the command line. It says that the shipped unit passes no
+// -config, because an operator looking for the file it reads needs to know
+// there is none until they add one.
 func usage(w io.Writer, flags *flag.FlagSet) {
 	fmt.Fprintf(w, "usage: %s [-config file] [-check-config] [-version]\n", progName)
 	fmt.Fprintf(w, "\nSauronAgent forwards the guest's Linux audit stream to the hypervisor's\n")
-	fmt.Fprintf(w, "collector over AF_VSOCK. The shipped systemd unit runs:\n")
-	fmt.Fprintf(w, "\n  %s -config /etc/sauronagent/sauronagent.yaml\n\n", progName)
+	fmt.Fprintf(w, "collector over AF_VSOCK. The shipped systemd unit runs it without -config,\n")
+	fmt.Fprintf(w, "on the built-in defaults.\n\n")
 	flags.PrintDefaults()
 }
 
@@ -248,20 +245,22 @@ func spoolDescription(cfg config.Agent) string {
 		cfg.Spool.Path, cfg.Spool.MaxSize, cfg.Spool.SegmentSize, cfg.Spool.SyncOnWrite)
 }
 
-// logStartup records the guest's identity and a summary of the configuration.
+// logStartup records the guest's identity and a summary of the configuration,
+// including where that configuration came from.
 //
 // The identity is what ties a journal to a VM, and the boot id is what scopes
 // the sequence numbers the collector deduplicates on, so both belong in the
 // first line of every run. It is a summary and not a dump: -check-config
 // prints the configuration, and an agent that logs all of it at info level
 // only teaches operators to skim.
-func logStartup(log *slog.Logger, cfg config.Agent, id identity.Identity) {
+func logStartup(log *slog.Logger, configPath string, cfg config.Agent, id identity.Identity) {
 	attrs := []any{
 		"version", id.Version,
 		"hostname", id.Hostname,
 		"boot_id", id.BootID,
 		"machine_id", id.MachineID,
 		"kernel", id.Kernel,
+		"config", configDescription(configPath),
 		"transport", string(cfg.Transport.Kind),
 	}
 	if cfg.Transport.Kind == config.TransportTCP {

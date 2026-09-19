@@ -1,5 +1,5 @@
-ARG GO_VERSION=1.26
-ARG ALPINE_VERSION=3.22
+ARG GO_VERSION=1.27
+ARG ALPINE_VERSION=3.23
 
 FROM golang:${GO_VERSION}-alpine${ALPINE_VERSION} AS builder
 
@@ -18,15 +18,19 @@ ENV GOOS=linux \
     GOARCH=amd64
 
 
-# Copy module files first (better caching)
+# Copy module files first (better caching). go.mod replaces the SauronAgent
+# module with the ./SauronAgent tree, so its module files are needed as well.
 COPY go.mod go.sum  ./
+COPY SauronAgent/go.mod SauronAgent/go.sum SauronAgent/
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 
-# Copy source
+# Copy source; from SauronAgent only the packages the embedded collector needs.
 COPY cmd cmd
 COPY internal internal
+COPY SauronAgent/collector SauronAgent/collector
+COPY SauronAgent/internal SauronAgent/internal
 COPY ui ui
 COPY tsconfig.json ./
 

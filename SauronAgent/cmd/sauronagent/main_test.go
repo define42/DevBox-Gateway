@@ -19,8 +19,8 @@ import (
 
 // These tests drive run() in process. Spawning the built binary is the
 // end-to-end test's job; what matters here is the surface the packaging
-// depends on -- the three flags in ExecStart= and in the Makefile, a
-// configuration the agent does not understand stopping it before it starts,
+// depends on -- the three flags, the built-in defaults the shipped unit runs
+// on, a configuration the agent does not understand stopping it before it starts,
 // and the two signals doing two different things.
 //
 // Nothing here sleeps to synchronise: the shutdown test polls for a state with
@@ -325,9 +325,10 @@ logging:
 		t.Fatalf("reading the log: %v", err)
 	}
 	log := string(data)
-	// The startup line is what ties a journal to a guest, and the boot id is
-	// what scopes the sequence numbers the collector deduplicates on.
-	for _, want := range []string{"boot_id=", "target=", "sauronagent stopped"} {
+	// The startup line is what ties a journal to a guest, the boot id is what
+	// scopes the sequence numbers the collector deduplicates on, and the config
+	// is how an operator tells a drop-in's file from the built-in defaults.
+	for _, want := range []string{"boot_id=", "target=", "config=" + path, "sauronagent stopped"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log does not contain %q:\n%s", want, log)
 		}

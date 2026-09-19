@@ -1,13 +1,15 @@
-# SauronAgent -- guest agent configuration.
+# SauronAgent -- guest agent configuration reference.
 #
-# Install as /etc/sauronagent/sauronagent.yaml and start with
+# The agent needs no configuration file: the shipped unit runs it on the
+# built-in defaults. To change a setting, copy only the keys that change into a
+# file such as /etc/sauronagent/sauronagent.yaml and start the agent with
 #   sauronagent -config /etc/sauronagent/sauronagent.yaml
+# (packaging/systemd/sauronagent.service shows the drop-in that does this).
 #
 # Every value below is the built-in default, so this file is equivalent to an
-# empty one. Delete anything you do not want to pin: a setting left out follows
-# the default, a setting spelled wrong is a startup failure. The loader rejects
-# unknown keys on purpose -- a typo in "preserve_raw" must not quietly disable
-# forensic evidence.
+# empty one. A setting left out follows the default, a setting spelled wrong is
+# a startup failure. The loader rejects unknown keys on purpose -- a typo in
+# "preserve_raw" must not quietly disable forensic evidence.
 #
 # Sizes accept "8MiB", "256MB" or a plain byte count. Durations accept Go
 # duration strings ("2s", "1m30s") or a bare number of seconds.

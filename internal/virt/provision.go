@@ -116,6 +116,7 @@ type vmProvisionSpec struct {
 	poolPath      string
 	vcpu          int
 	memoryMiB     int
+	vsock         bool // add the SauronAgent virtio-vsock device
 }
 
 // startConfig returns the domain define-and-start step of the plan.
@@ -126,6 +127,7 @@ func (s vmProvisionSpec) startConfig() VMStartConfig {
 		StoragePoolName: s.poolName,
 		VCPU:            s.vcpu,
 		MemoryMiB:       s.memoryMiB,
+		VSock:           s.vsock,
 		Owner:           s.owner,
 		GuestUser:       s.guestUsername,
 		BaseImage:       s.baseImage,
@@ -162,6 +164,7 @@ func prepareVMCreation(req VMCreateRequest, settings *config.Settings) (vmProvis
 
 	spec.vcpu = config.VMVCPUCount(settings)
 	spec.memoryMiB = config.VMMemoryMiB(settings)
+	spec.vsock = config.SauronEnabled(settings)
 
 	// Validate the selected base image against the library and resolve it to an
 	// absolute path (the single path-traversal guard) before anything is created.

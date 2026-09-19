@@ -77,6 +77,18 @@ type Options struct {
 	Listener transport.Listener
 	// OnInternalEvent receives host-generated events such as stream loss.
 	OnInternalEvent func(*output.Envelope)
+	// Resolve maps a hypervisor-assigned CID to the VM it belongs to at the
+	// moment a connection arrives. It lets a program whose VMs come and go --
+	// and whose CIDs the hypervisor hands out as they start -- supply the
+	// trusted mapping live instead of through the static vms list.
+	//
+	// It is consulted once per connection, only for VSOCK peers, and before
+	// the vms list; ok=false falls through to that list and then to
+	// limits.allow_unknown_cids. Whatever it returns is trusted exactly like a
+	// vms entry, so it must derive the answer from the hypervisor and never
+	// from anything the guest says. The expected flag of a resolved VM is
+	// ignored: stream monitoring covers the vms list only.
+	Resolve func(cid uint32) (config.VMMapping, bool)
 }
 
 // Server is the collector. It accepts guest connections on one listener and
@@ -168,7 +180,7 @@ func New(opts Options) (*Server, error) {
 		log:        logger,
 		listener:   listener,
 		maxPayload: effectiveMaxPayload(cfg),
-		enrich:     newEnricher(cfg),
+		enrich:     newEnricher(cfg, opts.Resolve),
 		dedup:      newDedup(cfg.Limits.DedupWindow, maxTrackedStreams(cfg)),
 		now:        time.Now,
 		peerCID:    transport.PeerCID,
@@ -271,16 +283,21 @@ func (s *Server) accept(ctx context.Context) error {
 // serve admits a connection and starts its session.
 func (s *Server) serve(ctx context.Context, conn net.Conn) {
 	p := s.peerOf(conn)
+	// The identity is resolved exactly once, before a byte is read, and every
+	// later decision about this connection -- admission, the rejection report,
+	// the source of each event -- uses this one answer. Resolving again could
+	// give a different one if the hypervisor reassigned the CID in between.
+	src := s.enrich.source(p)
 
-	release, reason, ok := s.admit(p)
+	release, reason, ok := s.admit(p, src)
 	if !ok {
-		s.reject(ctx, conn, p, reason)
+		s.reject(ctx, conn, p, src, reason)
 		return
 	}
 
 	s.metrics.ConnectionsAccepted.Add(1)
 	s.metrics.ConnectionsActive.Add(1)
-	sess := s.newSession(conn, p)
+	sess := s.newSession(conn, p, src)
 
 	s.sessions.Add(1)
 	go func() {
@@ -307,8 +324,8 @@ const (
 // that one guest reconnecting in a loop exhausts its own allowance and not the
 // collector's. A connection that is admitted returns a release function that
 // must be called exactly once when its session ends.
-func (s *Server) admit(p peer) (release func(), reason string, ok bool) {
-	if !s.enrich.authorized(p) {
+func (s *Server) admit(p peer, src output.Source) (release func(), reason string, ok bool) {
+	if !s.enrich.authorized(src) {
 		return nil, reasonUnauthorized, false
 	}
 
@@ -345,7 +362,7 @@ func (s *Server) admit(p peer) (release func(), reason string, ok bool) {
 // collector is not receiving. It is counted, logged with the CID and reported
 // as sauron.connection.rejected so that a guest being locked out is as visible
 // as one that goes quiet.
-func (s *Server) reject(ctx context.Context, conn net.Conn, p peer, reason string) {
+func (s *Server) reject(ctx context.Context, conn net.Conn, p peer, src output.Source, reason string) {
 	s.metrics.ConnectionsRejected.Add(1)
 
 	code := protocol.ErrCodeOverloaded
@@ -370,7 +387,7 @@ func (s *Server) reject(ctx context.Context, conn net.Conn, p peer, reason strin
 	}, s.writeTimeout())
 	_ = pc.Close()
 
-	s.report.publish(ctx, s.enrich.source(p), event.NewInternal(typeConnectionRejected,
+	s.report.publish(ctx, src, event.NewInternal(typeConnectionRejected,
 		event.SeverityWarning, map[string]any{
 			"reason":            reason,
 			"cid":               p.logCID(),

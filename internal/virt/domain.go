@@ -82,8 +82,21 @@ const domainXMLTemplate = `<domain type='kvm'>
     <rng model='virtio'>
       <backend model='random'>/dev/urandom</backend>
     </rng>
-  </devices>
+%s  </devices>
 </domain>`
+
+// vsockDeviceXML gives the guest a virtio-vsock device, the transport
+// SauronAgent uses to reach the gateway's collector without any guest
+// networking. auto='yes' has libvirt pick a CID that is unique among the
+// running domains each time the domain starts; the collector reads the
+// assigned CID back from the live XML (see LookupVSockGuest), so a guest's
+// identity is always the one the hypervisor gave it.
+const vsockDeviceXML = `
+    <!-- SauronAgent telemetry channel (host CID 2) -->
+    <vsock model='virtio'>
+      <cid auto='yes'/>
+    </vsock>
+`
 
 // DomainXML returns the libvirt domain XML for a standard VDI. The VNC
 // socket and serial console are both libvirt-managed (no gateway-chosen paths):
@@ -91,12 +104,18 @@ const domainXMLTemplate = `<domain type='kvm'>
 // runtime dir, and the serial console is a PTY. The gateway reaches both only
 // through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
 // Every interpolated value is XML-escaped so a name can never alter the document.
-func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int) string {
+// vsock adds the virtio-vsock device SauronAgent needs (see SAURON_ENABLE).
+func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int, vsock bool) string {
+	vsockDevice := ""
+	if vsock {
+		vsockDevice = vsockDeviceXML
+	}
 	return fmt.Sprintf(
 		domainXMLTemplate,
 		xmlValue(name), memoryMiB, memoryMiB, vcpu,
 		xmlValue(storagePoolName), xmlValue(name),
 		xmlValue(storagePoolName), xmlValue(seedISO),
+		vsockDevice,
 	)
 }
 

@@ -117,9 +117,10 @@ cover:
 clean:
 	rm -rf $(BINDIR) $(COVERPROFILE)
 
-# The example configurations are installed as .example files. Overwriting a
-# running deployment's configuration from a package upgrade could silently
-# re-enable something an operator turned off.
+# The agent runs on its built-in defaults and needs no configuration file. The
+# collector's example is installed as a .example file: overwriting a running
+# deployment's configuration from a package upgrade could silently re-enable
+# something an operator turned off.
 install: build
 	install -D -m 0755 $(BINDIR)/sauronagent $(DESTDIR)$(PREFIX)/bin/sauronagent
 	install -D -m 0755 $(BINDIR)/sauronhost $(DESTDIR)$(PREFIX)/bin/sauronhost
@@ -127,13 +128,11 @@ install: build
 	install -D -m 0644 packaging/systemd/sauronhost.service $(DESTDIR)$(UNITDIR)/sauronhost.service
 	install -D -m 0644 packaging/systemd/sauronagent.sysusers.conf $(DESTDIR)$(SYSUSERSDIR)/sauronagent.conf
 	install -D -m 0644 packaging/systemd/sauronagent.tmpfiles.conf $(DESTDIR)$(TMPFILESDIR)/sauronagent.conf
-	install -D -m 0644 examples/sauronagent.yaml $(DESTDIR)$(SYSCONFDIR)/sauronagent/sauronagent.yaml.example
 	install -D -m 0644 examples/sauronhost.yaml $(DESTDIR)$(SYSCONFDIR)/sauronhost/sauronhost.yaml.example
 	install -d $(DESTDIR)$(DOCDIR)
 	install -m 0644 README.md docs/protocol.md docs/security.md docs/deployment.md examples/qemu-vsock.md $(DESTDIR)$(DOCDIR)/
 	@echo
 	@echo "Installed. On the guest:      systemd-sysusers && systemd-tmpfiles --create"
-	@echo "                              cp $(SYSCONFDIR)/sauronagent/sauronagent.yaml.example $(SYSCONFDIR)/sauronagent/sauronagent.yaml"
 	@echo "                              systemctl daemon-reload && systemctl enable --now sauronagent"
 	@echo "On the hypervisor:            cp $(SYSCONFDIR)/sauronhost/sauronhost.yaml.example $(SYSCONFDIR)/sauronhost/sauronhost.yaml"
 	@echo "                              edit the vms: CID map, then systemctl enable --now sauronhost"

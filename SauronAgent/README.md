@@ -134,14 +134,14 @@ to end.
 ```sh
 make install PREFIX=/usr                 # or install the package
 systemd-sysusers && systemd-tmpfiles --create
-cp /etc/sauronagent/sauronagent.yaml.example /etc/sauronagent/sauronagent.yaml
 systemctl daemon-reload
 systemctl enable --now sauronagent
 ```
 
-The defaults dial `CID 2` (`VMADDR_CID_HOST`) port 9000 and spool to
-`/var/lib/sauronagent/spool`, so a guest usually needs no configuration changes
-at all.
+The agent needs no configuration file. Its built-in defaults dial `CID 2`
+(`VMADDR_CID_HOST`) port 9000 and spool to `/var/lib/sauronagent/spool`, which
+is what a guest needs. To change a setting, see
+[docs/deployment.md](docs/deployment.md#changing-an-agent-setting).
 
 ## The normalized event
 

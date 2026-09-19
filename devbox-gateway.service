@@ -52,8 +52,10 @@ RestrictNamespaces=true
 LockPersonality=true
 SystemCallArchitectures=native
 # AF_UNIX: libvirt socket + serial/VNC sockets; AF_INET/AF_INET6: :443, LDAP,
-# backend RDP, ACME; AF_NETLINK: Go's interface/route lookups.
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# backend RDP, ACME; AF_NETLINK: Go's interface/route lookups; AF_VSOCK: the
+# SauronAgent collector's listener (SAURON_ENABLE), which guests reach over
+# their virtio-vsock device without any IP networking.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_VSOCK
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 

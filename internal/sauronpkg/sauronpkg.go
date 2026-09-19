@@ -2,9 +2,10 @@
 // the SauronAgent/ tree. One sauronagent package carries both the guest audit
 // agent and the hypervisor collector, laid out exactly as SauronAgent's own
 // `make install PREFIX=/usr` lays them out, so its documented quick start ("make
-// install ... or install the package") applies unchanged: install the package,
-// copy the .yaml.example of the component this machine runs, and enable that one
-// unit. The formats are written by the same pure-Go internal/rpm and
+// install ... or install the package") applies unchanged: install the package
+// and enable the unit of the component this machine runs. The agent runs on its
+// built-in defaults; the collector also needs its .yaml.example copied and
+// filled in. The formats are written by the same pure-Go internal/rpm and
 // internal/deb writers that build the DevBox Gateway packages.
 package sauronpkg
 
@@ -40,8 +41,8 @@ const (
 
 // Neither unit is preset or enabled on install: the package holds a guest agent
 // and a hypervisor collector, and only the operator knows which one this machine
-// should run (and neither has a configuration until it is copied from its
-// .example). The scriptlets therefore only create the service accounts and
+// should run (and the collector has no configuration until it is copied from
+// its .example). The scriptlets therefore only create the service accounts and
 // directories -- the sysusers/tmpfiles steps of the SauronAgent install guide --
 // reload systemd, restart whichever unit was already running on upgrade, and
 // stop both on final removal. Upgrades restart safely: unacknowledged agent
@@ -139,9 +140,10 @@ type file struct {
 }
 
 // manifest mirrors SauronAgent's `make install PREFIX=/usr`. The binary comes
-// first so the rpm writer stamps every file with its mtime. Example configs are
-// installed as .example files, never as the live configuration, exactly as make
-// install does; they are still marked as config files because they live in /etc.
+// first so the rpm writer stamps every file with its mtime. The agent needs no
+// configuration file. The collector's example config is installed as a .example
+// file, never as the live configuration, exactly as make install does; it is
+// still marked as a config file because it lives in /etc.
 func manifest(o Options, licenseDest string) []file {
 	binDir := o.BinDir
 	if binDir == "" {
@@ -156,7 +158,6 @@ func manifest(o Options, licenseDest string) []file {
 		{src("packaging/systemd/sauronhost.service"), unitDir + "/sauronhost.service", 0o644, plainFile},
 		{src("packaging/systemd/sauronagent.sysusers.conf"), sysusersConf, 0o644, plainFile},
 		{src("packaging/systemd/sauronagent.tmpfiles.conf"), tmpfilesConf, 0o644, plainFile},
-		{src("examples/sauronagent.yaml"), "/etc/sauronagent/sauronagent.yaml.example", 0o644, configFile},
 		{src("examples/sauronhost.yaml"), "/etc/sauronhost/sauronhost.yaml.example", 0o644, configFile},
 	}
 	for _, name := range []string{"README.md", "docs/protocol.md", "docs/security.md", "docs/deployment.md", "examples/qemu-vsock.md"} {

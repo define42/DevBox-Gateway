@@ -61,6 +61,15 @@ const (
 	// DefaultAuditLogFile is the default append-only JSON Lines audit log used
 	// by log collectors such as the Splunk Universal Forwarder.
 	DefaultAuditLogFile = "/var/log/devbox-gateway/audit.jsonl"
+	// DefaultSauronVSockPort is the AF_VSOCK port SauronAgent guests dial on
+	// the host by default. Override with SAURON_VSOCK_PORT.
+	DefaultSauronVSockPort = 9000
+	// DefaultSauronEventLogFile is the default JSON Lines file that receives
+	// every SauronAgent guest event. Override with SAURON_EVENT_LOG_FILE.
+	DefaultSauronEventLogFile = "/var/log/devbox-gateway/sauron.jsonl"
+	// DefaultSauronSpoolMaxMiB bounds the disk space guest events may take
+	// while they wait for Splunk HEC. Override with SAURON_SPOOL_MAX_MIB.
+	DefaultSauronSpoolMaxMiB = 10240
 	// DefaultVirtStoragePoolName is the default libvirt storage pool name.
 	DefaultVirtStoragePoolName = "desktop"
 	// DefaultVMDiskSizeGB is the default virtual disk capacity, in GiB, for newly
@@ -109,6 +118,7 @@ const (
 	imageDataSubdir     = "image"
 	baseImageDataSubdir = "baseimages"
 	serialDataSubdir    = "serial"
+	sauronSpoolSubdir   = "sauron-spool"
 	vncDataSubdir       = "vnc"
 )
 
@@ -118,6 +128,7 @@ func NewSettings(printSettings bool) *Settings {
 
 	s.SetString(DATA_ROOT_DIR, "Root directory for gateway-managed data", DefaultDataRootDir)
 	s.setAuditDefaults()
+	s.setSauronDefaults()
 	s.SetString(VIRT_STORAGE_POOL_NAME, "Libvirt storage pool name for VM volumes", DefaultVirtStoragePoolName)
 
 	s.SetString(BASE_IMAGE_DIR, "Directory of selectable QCOW2 base VDI images named .img/.qcow2/.raw; must contain at least one valid image at boot. Empty -> <DATA_ROOT_DIR>/baseimages", "")
@@ -149,27 +160,33 @@ func NewSettings(printSettings bool) *Settings {
 	s.setAuthDefaults()
 
 	if printSettings {
-		table := tablewriter.NewWriter(os.Stdout)
-		table.Header("KEY", "Description", "Value")
-
-		keys := make([]string, 0, len(s.m))
-		for k := range s.m {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		for _, key := range keys {
-			st := s.m[key]
-			value := st.Raw
-			if st.Secret && value != "" {
-				value = "***"
-			}
-			_ = table.Append([]string{key, st.Description, value})
-		}
-		_ = table.Render()
+		s.printTable()
 	}
 
 	return s
+}
+
+// printTable writes every setting and its effective value to stdout, masking
+// secrets.
+func (s *Settings) printTable() {
+	table := tablewriter.NewWriter(os.Stdout)
+	table.Header("KEY", "Description", "Value")
+
+	keys := make([]string, 0, len(s.m))
+	for k := range s.m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		st := s.m[key]
+		value := st.Raw
+		if st.Secret && value != "" {
+			value = "***"
+		}
+		_ = table.Append([]string{key, st.Description, value})
+	}
+	_ = table.Render()
 }
 
 func (s *Settings) setAuditDefaults() {
@@ -178,6 +195,18 @@ func (s *Settings) setAuditDefaults() {
 	s.SetSecretString(SPLUNK_HEC_TOKEN, "Splunk HEC token; required when SPLUNK_HEC_ENDPOINT is set", "")
 	s.SetString(SPLUNK_HEC_INDEX, "Splunk index for forwarded audit events; empty uses the HEC token's default index", "")
 	s.SetBool(SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SPLUNK_HEC_ENDPOINT", false)
+}
+
+func (s *Settings) setSauronDefaults() {
+	s.SetBool(SAURON_ENABLE, "Collect SauronAgent guest audit events: every new VM gets a virtio-vsock device, and the gateway accepts SauronAgent connections on SAURON_VSOCK_PORT and attributes each one to its VM by the CID libvirt assigned", false)
+	s.SetInt(SAURON_VSOCK_PORT, "AF_VSOCK port on the host (CID 2) that SauronAgent guests dial; must match the agents' transport port", DefaultSauronVSockPort)
+	s.SetString(SAURON_EVENT_LOG_FILE, "Append-only JSON Lines file that receives every SauronAgent guest event, rotated at 256 MiB with 8 files kept; empty disables the file, which then requires SAURON_SPLUNK_HEC_ENDPOINT", DefaultSauronEventLogFile)
+	s.SetString(SAURON_SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL that also receives every SauronAgent guest event, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Events are acknowledged to the guest once they are in the gateway's spool (SAURON_SPOOL_DIR) and delivered from there whenever HEC is reachable. Empty disables HEC forwarding", "")
+	s.SetSecretString(SAURON_SPLUNK_HEC_TOKEN, "Splunk HEC token for SauronAgent guest events; required when SAURON_SPLUNK_HEC_ENDPOINT is set", "")
+	s.SetString(SAURON_SPLUNK_HEC_INDEX, "Splunk index for SauronAgent guest events; empty uses the HEC token's default index", "")
+	s.SetBool(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SAURON_SPLUNK_HEC_ENDPOINT", false)
+	s.SetString(SAURON_SPOOL_DIR, "Directory where SauronAgent guest events wait, durably and across gateway restarts, until Splunk HEC accepts them. Empty -> <DATA_ROOT_DIR>/sauron-spool", "")
+	s.SetInt(SAURON_SPOOL_MAX_MIB, "Disk space in MiB SAURON_SPOOL_DIR may use; size it for the longest Splunk outage to ride out. When full, new guest events are no longer acknowledged and wait in the guests' own spools. Values <=0 fall back to the default", DefaultSauronSpoolMaxMiB)
 }
 
 func (s *Settings) setAuthDefaults() {
@@ -194,6 +223,49 @@ func (s *Settings) setAuthDefaults() {
 	s.SetInt(LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "Maximum failed login attempts allowed across all usernames from one client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables the IP-wide limit", 50)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
 	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after either login failure limit is reached", 15*time.Minute)
+}
+
+// SauronEnabled reports whether the gateway collects SauronAgent guest events
+// and gives new VMs the virtio-vsock device the agent needs.
+func SauronEnabled(settings *Settings) bool {
+	return settings != nil && settings.Bool(SAURON_ENABLE)
+}
+
+// SauronVSockPort resolves the AF_VSOCK port the SauronAgent collector
+// listens on. ValidateSauron rejects out-of-range values at boot; this falls
+// back to DefaultSauronVSockPort for them.
+func SauronVSockPort(settings *Settings) uint32 {
+	if settings == nil {
+		return DefaultSauronVSockPort
+	}
+	port := settings.Int(SAURON_VSOCK_PORT)
+	if port < 1 || int64(port) > maxVSockPort {
+		return DefaultSauronVSockPort
+	}
+	return uint32(port)
+}
+
+// SauronSpoolDir resolves the directory where guest events wait for Splunk
+// HEC: SAURON_SPOOL_DIR, or <DATA_ROOT_DIR>/sauron-spool.
+func SauronSpoolDir(settings *Settings) string {
+	if settings != nil {
+		if configured := strings.TrimSpace(settings.Get(SAURON_SPOOL_DIR)); configured != "" {
+			return filepath.Clean(configured)
+		}
+	}
+	return filepath.Join(DataRootDir(settings), sauronSpoolSubdir)
+}
+
+// SauronSpoolMaxBytes resolves the spool size limit in bytes. A missing or
+// non-positive SAURON_SPOOL_MAX_MIB falls back to DefaultSauronSpoolMaxMiB.
+func SauronSpoolMaxBytes(settings *Settings) int64 {
+	mib := DefaultSauronSpoolMaxMiB
+	if settings != nil {
+		if configured := settings.Int(SAURON_SPOOL_MAX_MIB); configured > 0 {
+			mib = configured
+		}
+	}
+	return int64(mib) << 20
 }
 
 // DataRootDir resolves the root directory for gateway-managed data.
@@ -501,46 +573,55 @@ func (s *Settings) Duration(id string) time.Duration {
 
 // Environment-backed configuration keys.
 const (
-	ACME_EMAIL                       = "ACME_EMAIL"
-	ACME_CA                          = "ACME_CA"
-	ACME_ENABLE                      = "ACME_ENABLE"
-	ADMIN_GROUP                      = "ADMIN_GROUP"
-	AUDIT_LOG_FILE                   = "AUDIT_LOG_FILE"
-	CERT_FILE                        = "CERT_FILE"
-	DATA_ROOT_DIR                    = "DATA_ROOT_DIR"
-	FRONT_DOMAIN                     = "FRONT_DOMAIN"
-	KEY_FILE                         = "KEY_FILE"
-	LDAP_URL                         = "LDAP_URL"
-	LDAP_AUTH_TIMEOUT                = "LDAP_AUTH_TIMEOUT"
-	LDAP_BASE_DN                     = "LDAP_BASE_DN"
-	LDAP_USER_FILTER                 = "LDAP_USER_FILTER"
-	LDAP_REQUIRED_GROUPS             = "LDAP_REQUIRED_GROUPS"
-	LDAP_USER_DOMAIN                 = "LDAP_USER_DOMAIN"
-	LDAP_STARTTLS                    = "LDAP_STARTTLS"
-	LDAP_SKIP_TLS_VERIFY             = "LDAP_SKIP_TLS_VERIFY"
-	LOGIN_RATE_LIMIT_MAX_ATTEMPTS    = "LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
-	LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS = "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS"
-	LOGIN_RATE_LIMIT_WINDOW          = "LOGIN_RATE_LIMIT_WINDOW"
-	LOGIN_RATE_LIMIT_LOCKOUT         = "LOGIN_RATE_LIMIT_LOCKOUT"
-	LISTEN_ADDR                      = "LISTEN_ADDR"
-	PPROF_LISTEN_ADDR                = "PPROF_LISTEN_ADDR"
-	MAX_CONCURRENT_CONNECTIONS       = "MAX_CONCURRENT_CONNECTIONS"
-	MAX_VDI_PER_USER                 = "MAX_VDI_PER_USER"
-	MAX_CONNECTIONS_PER_USER         = "MAX_CONNECTIONS_PER_USER"
-	MAX_CONNECTIONS_PER_SOURCE       = "MAX_CONNECTIONS_PER_SOURCE"
-	SNI_HASH_SECRET                  = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
-	SPLUNK_HEC_ENDPOINT              = "SPLUNK_HEC_ENDPOINT"
-	SPLUNK_HEC_INDEX                 = "SPLUNK_HEC_INDEX"
-	SPLUNK_HEC_SKIP_TLS_VERIFY       = "SPLUNK_HEC_SKIP_TLS_VERIFY"
-	SPLUNK_HEC_TOKEN                 = "SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
-	VDI_AUTO_SHUTDOWN_HOURS          = "VDI_AUTO_SHUTDOWN_HOURS"
-	VIRT_STORAGE_POOL_NAME           = "VIRT_STORAGE_POOL_NAME"
-	BASE_IMAGE_DIR                   = "BASE_IMAGE_DIR"
-	VM_DISK_SIZE_GB                  = "VM_DISK_SIZE_GB"
-	VM_VCPU_COUNT                    = "VM_VCPU_COUNT"
-	VM_MEMORY_MIB                    = "VM_MEMORY_MIB"
-	TIMEOUT                          = "TIMEOUT"
-	DEBUG_CONNECTIONS                = "DEBUG_CONNECTIONS"
+	ACME_EMAIL                        = "ACME_EMAIL"
+	ACME_CA                           = "ACME_CA"
+	ACME_ENABLE                       = "ACME_ENABLE"
+	ADMIN_GROUP                       = "ADMIN_GROUP"
+	AUDIT_LOG_FILE                    = "AUDIT_LOG_FILE"
+	CERT_FILE                         = "CERT_FILE"
+	DATA_ROOT_DIR                     = "DATA_ROOT_DIR"
+	FRONT_DOMAIN                      = "FRONT_DOMAIN"
+	KEY_FILE                          = "KEY_FILE"
+	LDAP_URL                          = "LDAP_URL"
+	LDAP_AUTH_TIMEOUT                 = "LDAP_AUTH_TIMEOUT"
+	LDAP_BASE_DN                      = "LDAP_BASE_DN"
+	LDAP_USER_FILTER                  = "LDAP_USER_FILTER"
+	LDAP_REQUIRED_GROUPS              = "LDAP_REQUIRED_GROUPS"
+	LDAP_USER_DOMAIN                  = "LDAP_USER_DOMAIN"
+	LDAP_STARTTLS                     = "LDAP_STARTTLS"
+	LDAP_SKIP_TLS_VERIFY              = "LDAP_SKIP_TLS_VERIFY"
+	LOGIN_RATE_LIMIT_MAX_ATTEMPTS     = "LOGIN_RATE_LIMIT_MAX_ATTEMPTS"
+	LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS  = "LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS"
+	LOGIN_RATE_LIMIT_WINDOW           = "LOGIN_RATE_LIMIT_WINDOW"
+	LOGIN_RATE_LIMIT_LOCKOUT          = "LOGIN_RATE_LIMIT_LOCKOUT"
+	LISTEN_ADDR                       = "LISTEN_ADDR"
+	PPROF_LISTEN_ADDR                 = "PPROF_LISTEN_ADDR"
+	MAX_CONCURRENT_CONNECTIONS        = "MAX_CONCURRENT_CONNECTIONS"
+	MAX_VDI_PER_USER                  = "MAX_VDI_PER_USER"
+	MAX_CONNECTIONS_PER_USER          = "MAX_CONNECTIONS_PER_USER"
+	MAX_CONNECTIONS_PER_SOURCE        = "MAX_CONNECTIONS_PER_SOURCE"
+	SAURON_ENABLE                     = "SAURON_ENABLE"
+	SAURON_EVENT_LOG_FILE             = "SAURON_EVENT_LOG_FILE"
+	SAURON_SPLUNK_HEC_ENDPOINT        = "SAURON_SPLUNK_HEC_ENDPOINT"
+	SAURON_SPLUNK_HEC_INDEX           = "SAURON_SPLUNK_HEC_INDEX"
+	SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY = "SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY"
+	SAURON_SPLUNK_HEC_TOKEN           = "SAURON_SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
+	SAURON_SPOOL_DIR                  = "SAURON_SPOOL_DIR"
+	SAURON_SPOOL_MAX_MIB              = "SAURON_SPOOL_MAX_MIB"
+	SAURON_VSOCK_PORT                 = "SAURON_VSOCK_PORT"
+	SNI_HASH_SECRET                   = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
+	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
+	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"
+	SPLUNK_HEC_SKIP_TLS_VERIFY        = "SPLUNK_HEC_SKIP_TLS_VERIFY"
+	SPLUNK_HEC_TOKEN                  = "SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
+	VDI_AUTO_SHUTDOWN_HOURS           = "VDI_AUTO_SHUTDOWN_HOURS"
+	VIRT_STORAGE_POOL_NAME            = "VIRT_STORAGE_POOL_NAME"
+	BASE_IMAGE_DIR                    = "BASE_IMAGE_DIR"
+	VM_DISK_SIZE_GB                   = "VM_DISK_SIZE_GB"
+	VM_VCPU_COUNT                     = "VM_VCPU_COUNT"
+	VM_MEMORY_MIB                     = "VM_MEMORY_MIB"
+	TIMEOUT                           = "TIMEOUT"
+	DEBUG_CONNECTIONS                 = "DEBUG_CONNECTIONS"
 )
 
 // OverwriteForTestString replaces a string setting value for tests.

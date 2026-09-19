@@ -11,6 +11,14 @@ services:
     # without it every recreated container reports a new container ID.
     hostname: devbox-gateway
       #    privileged: true
+    # The SauronAgent collector (SAURON_ENABLE below) listens on AF_VSOCK,
+    # which Docker's default seccomp profile blocks. The container already
+    # drives the host's libvirt through its socket, so the syscall filter adds
+    # little on top of that; drop this line together with SAURON_ENABLE to keep
+    # it. vsock is shared with containers while the host's
+    # net.vsock.child_ns_mode is "global", the default.
+    security_opt:
+      - seccomp=unconfined
     environment:
       # Pin the data root to the bind-mounted /data; the binary's built-in
       # default is /var/lib/libvirt/devbox-gateway for native (RPM) installs.
@@ -26,6 +34,14 @@ services:
       - SPLUNK_HEC_INDEX=devbox_audit
       # The bundled Splunk serves HEC with its default self-signed certificate.
       - SPLUNK_HEC_SKIP_TLS_VERIFY=true
+      # Collect SauronAgent events from inside the VMs (over vsock) and forward
+      # them to the bundled Splunk, into their own index.
+      - SAURON_ENABLE=true
+      - SAURON_EVENT_LOG_FILE=/data/logs/sauron.jsonl
+      - SAURON_SPLUNK_HEC_ENDPOINT=https://splunk:8088
+      - SAURON_SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
+      - SAURON_SPLUNK_HEC_INDEX=devbox_sauron
+      - SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=true
       - LDAP_SKIP_TLS_VERIFY=true
       - VDI_AUTO_SHUTDOWN_HOURS=2
       - LDAP_REQUIRED_GROUPS=team10_r
@@ -72,7 +88,7 @@ services:
       # Development-only credentials; override both via the environment or .env.
       - SPLUNK_PASSWORD=${SPLUNK_PASSWORD:-devbox-splunk}
       - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
-      # Creates the devbox_audit index once Splunk is up.
+      # Creates the devbox_audit and devbox_sauron indexes once Splunk is up.
       - SPLUNK_ANSIBLE_POST_TASKS=file:///tmp/defaults/create_index.yml
     ports:
       - "8000:8000"      # Splunk Web

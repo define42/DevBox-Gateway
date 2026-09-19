@@ -66,7 +66,6 @@ func TestManifestMatchesMakeInstallLayout(t *testing.T) {
 		"/usr/lib/systemd/system/sauronhost.service":  {0o644, plainFile},
 		"/usr/lib/sysusers.d/sauronagent.conf":        {0o644, plainFile},
 		"/usr/lib/tmpfiles.d/sauronagent.conf":        {0o644, plainFile},
-		"/etc/sauronagent/sauronagent.yaml.example":   {0o644, configFile},
 		"/etc/sauronhost/sauronhost.yaml.example":     {0o644, configFile},
 		"/usr/share/doc/sauronagent/README.md":        {0o644, docFile},
 		"/usr/share/doc/sauronagent/protocol.md":      {0o644, docFile},
@@ -116,7 +115,7 @@ func TestRPMDescription(t *testing.T) {
 	for _, f := range p.Files {
 		types[f.Destination] = f.Type
 	}
-	if got := types["/etc/sauronagent/sauronagent.yaml.example"]; got != rpmpack.ConfigFile|rpmpack.NoReplaceFile {
+	if got := types["/etc/sauronhost/sauronhost.yaml.example"]; got != rpmpack.ConfigFile|rpmpack.NoReplaceFile {
 		t.Errorf("example config type = %v, want %%config(noreplace)", got)
 	}
 	if got := types["/usr/share/doc/sauronagent/README.md"]; got != rpmpack.DocFile {
@@ -154,7 +153,7 @@ func TestDebDescription(t *testing.T) {
 		}
 		copyright = copyright || f.Destination == debLicenseDest
 	}
-	if strings.Join(conffiles, " ") != "/etc/sauronagent/sauronagent.yaml.example /etc/sauronhost/sauronhost.yaml.example" {
+	if strings.Join(conffiles, " ") != "/etc/sauronhost/sauronhost.yaml.example" {
 		t.Errorf("conffiles = %v", conffiles)
 	}
 	if !copyright {
@@ -228,7 +227,7 @@ func TestWriteDeb(t *testing.T) {
 	if strings.Contains(control["control"], "Depends:") {
 		t.Errorf("control must not carry an empty Depends field:\n%s", control["control"])
 	}
-	if control["conffiles"] != "/etc/sauronagent/sauronagent.yaml.example\n/etc/sauronhost/sauronhost.yaml.example\n" {
+	if control["conffiles"] != "/etc/sauronhost/sauronhost.yaml.example\n" {
 		t.Errorf("conffiles = %q", control["conffiles"])
 	}
 	for _, script := range []string{"postinst", "prerm", "postrm"} {

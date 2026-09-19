@@ -37,6 +37,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Configuration](#configuration)
   - [Audit logs and Splunk](#audit-logs-and-splunk)
     - [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)
+  - [SauronAgent guest events](#sauronagent-guest-events)
   - [TLS certificates](#tls-certificates)
   - [LDAP](#ldap)
   - [Libvirt and VM storage](#libvirt-and-vm-storage)
@@ -129,18 +130,22 @@ This stops any previous stack, rebuilds the images, and starts:
   `testldap/default-config.cfg` for local development.
 - `splunk` — a `splunk/splunk` Splunk Enterprise instance that receives every
   audit event from the gateway over HEC (see
-  [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)). Starting it accepts
+  [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)), and every SauronAgent
+  event from inside the VMs (see
+  [SauronAgent guest events](#sauronagent-guest-events)). Starting it accepts
   the [Splunk General Terms](https://www.splunk.com/en_us/legal/splunk-general-terms.html).
 
 The first Splunk start takes a few minutes; the gateway queues and retries
 audit events until HEC is reachable. Then open Splunk Web at
 `http://localhost:8000` (user `admin`, password `devbox-splunk`) and search
-`index=devbox_audit`. The admin password and the shared HEC token are
+`index=devbox_audit`, or `index=devbox_sauron` for the guest events of VMs whose
+base image runs SauronAgent. The admin password and the shared HEC token are
 development-only defaults; override them with `SPLUNK_PASSWORD` and
-`SPLUNK_HEC_TOKEN` in the environment or a `.env` file. The
-`devbox_audit` index is created by `testsplunk/create_index.yml`, and Splunk's
-configuration and indexed data persist in the `splunk-etc` and `splunk-var`
-Docker volumes.
+`SPLUNK_HEC_TOKEN` in the environment or a `.env` file. Both indexes are created
+by `testsplunk/create_index.yml`, and Splunk's configuration and indexed data
+persist in the `splunk-etc` and `splunk-var` Docker volumes. The gateway
+container runs with `seccomp=unconfined` because Docker's default seccomp
+profile blocks the AF_VSOCK socket the SauronAgent collector listens on.
 
 To stop everything: `docker compose stop`.
 
@@ -281,7 +286,6 @@ enable the component that machine runs:
 |----------------------------------------------------|-----------------------------------------------------------|
 | `/usr/bin/sauronagent`, `sauronagent.service`     | Guest audit agent (run it inside each VM).                |
 | `/usr/bin/sauronhost`, `sauronhost.service`       | Hypervisor collector (run it on the KVM host).            |
-| `/etc/sauronagent/sauronagent.yaml.example`       | Example agent config; copy to `sauronagent.yaml`.         |
 | `/etc/sauronhost/sauronhost.yaml.example`         | Example collector config; copy to `sauronhost.yaml` and fill in the `vms:` CID map. |
 | `/usr/lib/sysusers.d/sauronagent.conf`, `/usr/lib/tmpfiles.d/sauronagent.conf` | The `sauronagent` / `sauronhost` system users and their directories. |
 | `/usr/share/doc/sauronagent/`                     | README, deployment, protocol, security, and vsock docs.   |
@@ -292,21 +296,24 @@ enables and starts **neither** unit: only you know whether a machine is a guest
 or the hypervisor. Upgrades restart whichever unit is running; removal stops and
 disables both but never deletes the agent spool or the collector's output.
 
+On a DevBox Gateway host the gateway itself is the collector: set
+`SAURON_ENABLE=true` (see [SauronAgent guest events](#sauronagent-guest-events))
+and leave `sauronhost` disabled — the two would compete for the same vsock port.
+The gateway gives every new VM its vsock device and maps each connection to its
+VM from libvirt, so there is no `vms:` CID map to maintain. The standalone
+`sauronhost` is for hypervisors that do not run the gateway.
+
+Inside the guests — typically baked into the base images — install the package
+and enable the agent. It needs no configuration file: its built-in defaults
+already dial the host (CID 2) on port 9000:
+
 ```sh
 sudo dnf install ./sauronagent-<version>-1.x86_64.rpm    # or: sudo apt install ./sauronagent_<version>_amd64.deb
-
-# on the hypervisor
-sudo cp /etc/sauronhost/sauronhost.yaml.example /etc/sauronhost/sauronhost.yaml
-sudoedit /etc/sauronhost/sauronhost.yaml                  # fill in the vms: CID map
-sudo systemctl enable --now sauronhost
-
-# in each guest
-sudo cp /etc/sauronagent/sauronagent.yaml.example /etc/sauronagent/sauronagent.yaml
 sudo systemctl enable --now sauronagent
 ```
 
-See the [SauronAgent deployment guide](SauronAgent/docs/deployment.md) for the
-vsock device each VM needs, audit rules, and sizing.
+See the [SauronAgent deployment guide](SauronAgent/docs/deployment.md) for audit
+rules and sizing.
 
 To remove it: `sudo apt remove devbox-gateway` (add `--purge` to also delete the
 config file).
@@ -409,6 +416,15 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
+| `SAURON_ENABLE`           | `false`                                                                                                          | Collect SauronAgent guest audit events: new VMs get a virtio-vsock device and the gateway accepts the agents over AF_VSOCK. See [SauronAgent guest events](#sauronagent-guest-events). |
+| `SAURON_VSOCK_PORT`       | `9000`                                                                                                           | AF_VSOCK port the agents dial on the host (CID 2). Must match the agents' configuration.          |
+| `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
+| `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
+| `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
+| `SAURON_SPLUNK_HEC_INDEX` | _(empty)_                                                                                                        | Destination index for guest events. Empty → the token's default index.                           |
+| `SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                | When `true`, skip TLS certificate verification against `SAURON_SPLUNK_HEC_ENDPOINT`.              |
+| `SAURON_SPOOL_DIR`        | _(empty → `<DATA_ROOT_DIR>/sauron-spool`)_                                                                       | Where guest events wait, durably and across gateway restarts, until Splunk HEC accepts them.      |
+| `SAURON_SPOOL_MAX_MIB`    | `10240`                                                                                                          | Disk space the spool may use. Size it for the longest Splunk outage to ride out. `<=0` → the default. |
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
@@ -504,6 +520,75 @@ SPLUNK_HEC_INDEX=devbox_audit
 A search such as `index=devbox_audit sourcetype="devbox-gateway:audit"
 action=user.login result=failure` then works without any additional props
 configuration: Splunk extracts the JSON fields at search time.
+
+### SauronAgent guest events
+
+[SauronAgent](SauronAgent/README.md), running inside the VMs, reads the guest
+kernel's audit stream (process executions, logins, privilege changes, audit and
+firewall configuration changes, …) and streams it to the hypervisor over
+virtio-vsock — no guest networking involved. With `SAURON_ENABLE=true` the
+gateway embeds SauronAgent's host collector and receives those events itself:
+
+```ini
+SAURON_ENABLE=true
+SAURON_SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
+SAURON_SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
+SAURON_SPLUNK_HEC_INDEX=devbox_sauron
+```
+
+- Every VM created from then on gets a virtio-vsock device, for which libvirt
+  picks a CID that is unique among the running domains. VMs created while the
+  setting was off have no such device; recreate them to collect their events.
+- The gateway listens on AF_VSOCK port `SAURON_VSOCK_PORT` and attributes each
+  connection to the running VM libvirt assigned its CID to. The CID is set by the
+  hypervisor, so a guest cannot pass its events off as another VM's; what the
+  guest says about itself (hostname, machine-id, …) is recorded under
+  `source.reported` and never used for attribution.
+- Each event is written as a collector envelope: the gateway's receive time
+  (`received_at`), the trusted `source` (`vm`, `uuid`, `cid`, `host`, and
+  `labels.owner` — the gateway user who owns the VM), and the guest's normalized
+  `event` unchanged. The collector's own `sauron.*` events (protocol violations,
+  sequence gaps, refused connections, output failures) go to the same stream.
+- Events go to `SAURON_EVENT_LOG_FILE` and, when configured, to Splunk HEC, using
+  their own endpoint, token, and index so guest telemetry can land in a different
+  index than the gateway audit log. In Splunk they arrive with
+  `source=sauronagent`, `sourcetype=devbox-gateway:sauron`, the VM name as
+  `host`, and the gateway's receive time as `_time` (a guest controls its own
+  clock; its timestamp stays in `event.timestamp`).
+- Delivery to Splunk is store and forward. The gateway acknowledges an event to
+  its guest — which then deletes its own copy — as soon as the event is written
+  and fsynced to the gateway's spool (`SAURON_SPOOL_DIR`). A guest never waits
+  for Splunk, and a VM deleted while Splunk is down loses nothing. A background
+  forwarder delivers the spool to Splunk in order, in batches, retrying with
+  backoff (at most 30s apart) for however long Splunk is unreachable — days if
+  need be — and resumes from its checkpoint after a gateway restart. A long
+  outage is reported in the process log every 5 minutes with the spool's size.
+- The spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default). Should an
+  outage outlast it, the gateway stops acknowledging new events rather than
+  discarding any: they then wait in the guests' own spools (1 GiB each by
+  default) until the backlog drains.
+- Delivery is at-least-once. After a crash or restart, events that were
+  delivered just before it can reach Splunk twice. An event Splunk rejects as
+  invalid on its own (HEC codes 6, 12, 13, 15, or too large) is dropped with a
+  log line, so it cannot block the backlog; every other refusal — an index the
+  token may not write to, an unhealthy or unreachable Splunk — keeps the events
+  spooled. The same HEC token requirement applies as above: indexer
+  acknowledgement must be disabled.
+- The gateway refuses to start when `SAURON_SPLUNK_HEC_*` is set without
+  `SAURON_ENABLE=true`, when the endpoint lacks a token (or a token or index
+  lacks an endpoint), or when neither the file nor HEC is configured. It also
+  refuses to start when it cannot open the vsock listener: the host needs the
+  `vhost_vsock` kernel module, and must not run `sauronhost` on the same port.
+  The shipped systemd unit allows the `AF_VSOCK` socket family; in Docker, see
+  the seccomp note under [Quick start](#quick-start-docker-compose).
+- The collector's stream-loss alert (`sauron.stream.lost`) only watches VMs
+  listed in a static `sauronhost` configuration, so it is not active for the
+  gateway's VMs: a VM whose agent is stopped or was never installed is not
+  reported.
+
+For example, `index=devbox_sauron sourcetype="devbox-gateway:sauron"
+event.type=process.exec source.labels.owner=alice` lists every program alice's
+VMs ran.
 
 ### TLS certificates
 
@@ -698,9 +783,10 @@ SauronAgent's own Makefile into `SauronAgent/bin/`, then packages them into
 `dist/sauronagent-<version>-1.x86_64.rpm` / `dist/sauronagent_<version>_amd64.deb`
 through the [`cmd/mksauronagent`](cmd/mksauronagent) command, which reuses the
 pure-Go `internal/rpm` and `internal/deb` writers. SauronAgent is a separate Go
-module that needs a newer Go than the gateway (see `SauronAgent/go.mod`); with
-an older local toolchain, prefix the commands with `GOTOOLCHAIN=auto` as the
-release workflow does.
+module; the gateway also compiles in its host collector (package
+`SauronAgent/collector`, through a `replace` directive in `go.mod`), so both need
+Go 1.27.1 or newer. With an older local toolchain, prefix the commands with
+`GOTOOLCHAIN=auto` as the release workflow does.
 
 ### UI (TypeScript)
 
@@ -749,16 +835,19 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── rpm/         RPM package construction and manifests.
+│   ├── sauron/      Embedded SauronAgent collector: vsock listener, event log, Splunk HEC sink.
 │   ├── sauronpkg/   SauronAgent package manifest and maintainer scripts.
 │   ├── session/     Cookie session manager and middleware.
+│   ├── splunkhec/   Splunk HTTP Event Collector client shared by audit and sauron.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 │   ├── vmname/      VM name construction and validation.
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
-├── SauronAgent/     Guest audit agent and hypervisor collector (separate Go module).
+├── SauronAgent/     Guest audit agent and hypervisor collector (separate Go module;
+│                    the gateway embeds its collector package).
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
-├── testsplunk/      Post-setup task creating the local Splunk's audit index.
+├── testsplunk/      Post-setup task creating the local Splunk's audit and SauronAgent indexes.
 └── Dockerfile, docker-compose.yml, Makefile, tsconfig.json
 ```
 

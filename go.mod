@@ -1,11 +1,13 @@
 module github.com/define42/devbox-gateway
 
-go 1.26.0
+go 1.27.1
 
 require (
 	github.com/alexedwards/scs/v2 v2.9.0
 	github.com/caddyserver/certmagic v0.25.4
 	github.com/danielgtaylor/huma/v2 v2.39.1
+	github.com/define42/SauronAgent v0.0.0-00010101000000-000000000000
+	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/goccy/go-yaml v1.19.2
@@ -13,6 +15,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/kdomanski/iso9660 v0.4.0
+	github.com/mdlayher/vsock v1.3.0
 	github.com/mholt/acmez v1.2.0
 	github.com/olekukonko/tablewriter v1.1.5
 	github.com/shirou/gopsutil/v4 v4.26.8
@@ -46,7 +49,6 @@ require (
 	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
@@ -63,6 +65,7 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
@@ -98,6 +101,11 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+// SauronAgent is developed in this repository as its own module; the gateway
+// embeds its host collector (package collector) to receive guest events.
+replace github.com/define42/SauronAgent => ./SauronAgent

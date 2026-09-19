@@ -81,8 +81,9 @@ root and kernel control in the guest an attacker can:
 * disable auditing (`auditctl -e 0`), delete audit rules, or set the audit
   backlog so small that records are dropped;
 * kill, `SIGSTOP`, `ptrace`, patch or replace the agent process and its binary;
-* modify `/etc/sauronagent/sauronagent.yaml`, for example to exclude the record
-  types their next action would produce;
+* start the agent on a configuration of their own (a unit drop-in adding
+  `-config`), for example to exclude the record types their next action would
+  produce;
 * delete or rewrite `/var/lib/sauronagent/spool` -- everything not yet
   acknowledged by the host is still inside the guest and is still theirs;
 * unload `vmw_vsock_virtio_transport` or otherwise break the path to the host;

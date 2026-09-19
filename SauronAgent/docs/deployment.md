@@ -7,7 +7,7 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 | | Hypervisor | Each guest |
 |---|---|---|
 | Binary | `/usr/bin/sauronhost` | `/usr/bin/sauronagent` |
-| Config | `/etc/sauronhost/sauronhost.yaml` | `/etc/sauronagent/sauronagent.yaml` |
+| Config | `/etc/sauronhost/sauronhost.yaml` | none (built-in defaults) |
 | Unit | `sauronhost.service` | `sauronagent.service` |
 | User | `sauronhost` | `sauronagent` |
 | State | `/var/log/sauronhost` (if the file output is enabled) | `/var/lib/sauronagent/spool` |
@@ -77,14 +77,35 @@ arrive with `"known": false` and a synthetic name.
 make install PREFIX=/usr
 systemd-sysusers
 systemd-tmpfiles --create
-cp /etc/sauronagent/sauronagent.yaml.example /etc/sauronagent/sauronagent.yaml
 systemctl daemon-reload
 systemctl enable --now sauronagent
 journalctl -u sauronagent -n 50
 ```
 
-The defaults dial CID 2 port 9000 and spool to `/var/lib/sauronagent/spool`, so
-most guests need no configuration change at all.
+The agent needs no configuration file. The shipped unit runs it on the built-in
+defaults, which dial CID 2 port 9000 and spool to `/var/lib/sauronagent/spool`.
+Most guests never need anything else.
+
+### Changing an agent setting
+
+Write only the keys that change to a file --
+[../examples/sauronagent.yaml](../examples/sauronagent.yaml) lists every key at
+its default -- and point the agent at it with a drop-in:
+
+```sh
+mkdir -p /etc/sauronagent
+printf 'spool:\n  sync_on_write: true\n' > /etc/sauronagent/sauronagent.yaml
+sauronagent -check-config -config /etc/sauronagent/sauronagent.yaml
+systemctl edit sauronagent
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
+systemctl restart sauronagent
+```
+
+The startup line in the journal names the configuration in force
+(`config=/etc/sauronagent/sauronagent.yaml`, or
+`config="the built-in default configuration"`).
 
 ### The agent does not create audit rules
 
