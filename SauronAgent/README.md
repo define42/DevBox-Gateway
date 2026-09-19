@@ -13,7 +13,7 @@ Two programs:
 
 | Program | Runs on | Needs | Does |
 |---|---|---|---|
-| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, a virtio-vsock device | reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
+| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, a virtio-vsock device | configures execution auditing, reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
 | `sauronhost` | the hypervisor | no capabilities at all | accepts VSOCK connections, identifies each guest by its CID, enriches, writes events onward |
 
 ## Data path
@@ -142,6 +142,15 @@ The agent needs no configuration file. Its built-in defaults dial `CID 2`
 (`VMADDR_CID_HOST`) port 9000 and spool to `/var/lib/sauronagent/spool`, which
 is what a guest needs. To change a setting, see
 [docs/deployment.md](docs/deployment.md#changing-an-agent-setting).
+
+On startup, the agent enables kernel auditing and ensures `execve`/`execveat`
+rules are loaded, including the 32-bit compatibility ABI on x86_64. Commands
+such as `nmap` then produce process execution events. Setup uses netlink
+directly; no rules file, `auditd`, or audit tools are required. The RPM and DEB
+install both components without starting them, so enable the guest unit as
+shown above. Every subsequent start reapplies the execution baseline as needed.
+See [guest audit rules](docs/deployment.md#guest-audit-rules) for conflicting
+policy and the `audit.manage_rules: false` option for external rule management.
 
 ## The normalized event
 
@@ -286,15 +295,17 @@ inside a guest is to silence its telemetry, and only the host can notice that.
 
 ## Privilege model
 
-The agent holds exactly one capability, `CAP_AUDIT_READ`, granted ambiently by
-its systemd unit and bounded by `CapabilityBoundingSet=CAP_AUDIT_READ`. That
-capability allows joining the `NETLINK_AUDIT` read-log multicast group and
-nothing else:
+The agent runs as the `sauronagent` system user with `CAP_AUDIT_READ` and
+`CAP_AUDIT_CONTROL`, granted ambiently and bounded by its systemd unit.
+`CAP_AUDIT_READ` permits joining the `NETLINK_AUDIT` read-log multicast group;
+`CAP_AUDIT_CONTROL` permits enabling auditing and installing execution rules.
+Both capabilities remain available for the process lifetime. The agent never
+registers as the audit daemon and can coexist with `auditd`. It has no
+`CAP_SYS_ADMIN` and the service never runs as root.
 
-* it is **not** `CAP_AUDIT_CONTROL`: the agent cannot change audit rules,
-* it never registers as the audit daemon, so a standard `auditd` keeps working
-  alongside it,
-* it is **not** `CAP_SYS_ADMIN`, and it never runs as root.
+For externally managed audit policy, set `audit.manage_rules: false` and
+restrict the unit to `CAP_AUDIT_READ`; see the deployment guide. This mode
+collects the events produced by the existing policy without changing it.
 
 The collector runs with an empty capability bounding set. It parses frames sent
 by guests that must be assumed hostile, so the process doing that parsing is

@@ -5,10 +5,10 @@
 # sauronagent.tmpfiles.conf.
 #
 # Every hardening directive below was chosen against what this program
-# actually does: read NETLINK_AUDIT, append to /var/lib/sauronagent/spool and
-# write to one AF_VSOCK stream. Directives whose absence or tightening would
-# break it are marked; do not "harden further" past those without testing that
-# events still arrive at the collector.
+# actually does: configure audit rules, read NETLINK_AUDIT, append to
+# /var/lib/sauronagent/spool and write to one AF_VSOCK stream. Directives whose
+# absence or tightening would break it are marked; do not "harden further"
+# past those without testing that events still arrive at the collector.
 
 [Unit]
 Description=SauronAgent guest audit and security telemetry agent
@@ -18,7 +18,7 @@ Documentation=file:/usr/share/doc/sauronagent/deployment.md
 # No network dependency on purpose: audit records come from the kernel and
 # events leave over VSOCK, so this agent must start and keep working on a guest
 # with no IP configuration at all.
-After=local-fs.target
+After=local-fs.target auditd.service
 Wants=local-fs.target
 
 # An agent that systemd has given up on restarting is an audit stream that
@@ -45,22 +45,24 @@ RestartSec=5s
 
 # Dedicated unprivileged system user, created by sauronagent.sysusers.conf.
 # Running as root would give an attacker who finds a bug in the audit parser
-# the whole guest; CAP_AUDIT_READ is all this program needs.
+# the whole guest; the two audit capabilities cover setup and collection.
 User=sauronagent
 Group=sauronagent
 
 # --- capabilities -----------------------------------------------------------
 #
 # CAP_AUDIT_READ is what lets a process join the NETLINK_AUDIT read-log
-# multicast group. It is deliberately *not* CAP_AUDIT_CONTROL: the agent is a
-# consumer, it never becomes the audit daemon, and a standard auditd keeps
-# running alongside it. Without the ambient capability the netlink socket
-# fails with EPERM at startup.
+# multicast group. CAP_AUDIT_CONTROL enables auditing and installs the built-in
+# execve/execveat rules at startup, so auditd and auditctl are not required.
+# The agent never claims the audit daemon PID. If auditd is present, ordering
+# after it lets startup detect conflicts with its loaded policy. After= does
+# not start auditd or require it to exist.
+# For audit.manage_rules=false, both capability lists may omit AUDIT_CONTROL.
 #
 # The bounding set is the ceiling: even a successful exploit of this process
 # cannot acquire a capability that is not listed here.
-CapabilityBoundingSet=CAP_AUDIT_READ
-AmbientCapabilities=CAP_AUDIT_READ
+CapabilityBoundingSet=CAP_AUDIT_READ CAP_AUDIT_CONTROL
+AmbientCapabilities=CAP_AUDIT_READ CAP_AUDIT_CONTROL
 
 # NoNewPrivileges keeps the ambient capability (ambient caps survive execve);
 # what it removes is any path to *more* privilege through a setuid or
@@ -153,7 +155,7 @@ IPAddressDeny=any
 #
 # @system-service is the standard allow-list for long-running daemons;
 # subtracting @privileged and @resources removes the calls a process with
-# CAP_AUDIT_READ has no use for. One consequence worth knowing: @resources
+# the audit capabilities have no use for. One consequence worth knowing: @resources
 # includes setrlimit, which the Go runtime attempts at startup to raise
 # RLIMIT_NOFILE. The failure is ignored by the runtime, so the limit is set
 # explicitly below instead of being raised by the process.
@@ -174,11 +176,9 @@ OOMScoreAdjust=-250
 #
 #   systemd-analyze security --offline=true sauronagent.service
 #
-# scores this unit at exposure level 1.2 ("OK"). Everything it still flags is
-# required by the design and is explained above: the ambient CAP_AUDIT_READ and
-# the audit capability itself, AF_NETLINK, AF_UNIX and AF_VSOCK ("exotic"),
-# ProcSubset, PrivateNetwork and PrivateUsers. If a future change makes that
-# list longer, the addition needs a reason written next to it.
+# The audit capabilities and socket families, and the absence of ProcSubset,
+# PrivateNetwork and PrivateUsers, are required as explained above. Any future
+# exception to the sandbox needs a reason written next to it.
 
 [Install]
 WantedBy=multi-user.target

@@ -87,8 +87,11 @@ type Options struct {
 	Logger   *slog.Logger
 	// Dialer overrides transport construction in tests.
 	Dialer transport.Dialer
-	// Source overrides the audit record source in tests.
+	// Source overrides the audit record source in tests. An injected source
+	// skips kernel rule setup unless ConfigureRules is also provided.
 	Source func(ctx context.Context, out chan<- *audit.Record) error
+	// ConfigureRules overrides kernel rule setup in tests.
+	ConfigureRules func(context.Context) error
 }
 
 // Agent is the guest pipeline.
@@ -105,9 +108,10 @@ type Agent struct {
 	// source produces raw audit records. It is the netlink listener in a
 	// deployment and an injected function in tests, and is nil when audit
 	// collection is disabled.
-	source     func(ctx context.Context, out chan<- *audit.Record) error
-	listener   *audit.Listener
-	correlator *audit.Correlator
+	source         func(ctx context.Context, out chan<- *audit.Record) error
+	listener       *audit.Listener
+	correlator     *audit.Correlator
+	configureRules func(context.Context) error
 
 	seq   *sequencer
 	queue *queue.Queue
@@ -203,6 +207,12 @@ func New(opts Options) (*Agent, error) {
 			Metrics:          a.metrics,
 			Logger:           a.log,
 		})
+		if cfg.Audit.ManageRules {
+			a.configureRules = opts.ConfigureRules
+			if a.configureRules == nil && opts.Source == nil {
+				a.configureRules = audit.EnsureExecutionRules
+			}
+		}
 	}
 
 	dialer := opts.Dialer
@@ -311,6 +321,18 @@ func (a *Agent) Run(ctx context.Context) error {
 	// queue reports that it is closed and drained, so an early failure must
 	// not leave it parked waiting for an event that will never come.
 	defer a.queue.Close()
+
+	// Subscribe before enabling syscall auditing (New opened the listener),
+	// and configure before claiming a started stream or launching the sender.
+	if a.configureRules != nil {
+		if err := a.configureRules(ctx); err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return nil
+			}
+			return fmt.Errorf("agent: configure kernel audit rules: %w", err)
+		}
+		a.log.Info("kernel audit execution rules are active")
+	}
 
 	records := make(chan *audit.Record, recordChanCap)
 	groups := make(chan *audit.Group, groupChanCap)

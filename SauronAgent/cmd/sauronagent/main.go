@@ -169,6 +169,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			"events_acknowledged", snap.EventsAcknowledged,
 			"events_dropped", snap.EventsDropped)
 		fmt.Fprintf(stderr, "%s: %v\n", progName, err)
+		if hint := startupHint(cfg, err); hint != "" {
+			fmt.Fprintf(stderr, "%s: %s\n", progName, hint)
+		}
 		return exitFailure
 	}
 	if snap.EventsDropped > 0 {
@@ -215,8 +218,8 @@ func configDescription(path string) string {
 // mean, and these are the values worth reading back.
 func writeSummary(w io.Writer, cfg config.Agent) {
 	fmt.Fprintf(w, "  collector:  %s\n", targetDescription(cfg))
-	fmt.Fprintf(w, "  audit:      enabled=%t preserve_raw=%t correlation_timeout=%s\n",
-		cfg.Audit.Enabled, cfg.Audit.PreserveRaw, cfg.Audit.CorrelationTimeout)
+	fmt.Fprintf(w, "  audit:      enabled=%t preserve_raw=%t correlation_timeout=%s manage_rules=%t\n",
+		cfg.Audit.Enabled, cfg.Audit.PreserveRaw, cfg.Audit.CorrelationTimeout, cfg.Audit.ManageRules)
 	if len(cfg.Audit.ExcludeTypes) > 0 {
 		fmt.Fprintf(w, "  excluded:   %s (never reaches the host)\n", strings.Join(cfg.Audit.ExcludeTypes, ", "))
 	}
@@ -270,6 +273,7 @@ func logStartup(log *slog.Logger, configPath string, cfg config.Agent, id identi
 	}
 	attrs = append(attrs,
 		"audit_enabled", cfg.Audit.Enabled,
+		"audit_manage_rules", cfg.Audit.ManageRules,
 		"preserve_raw", cfg.Audit.PreserveRaw,
 		"queue_capacity", cfg.Queue.Capacity,
 		"spool", spoolDescription(cfg))
@@ -289,15 +293,20 @@ func startupHint(cfg config.Agent, err error) string {
 	if !errors.Is(err, fs.ErrPermission) {
 		return ""
 	}
+	if strings.Contains(err.Error(), "CAP_AUDIT_CONTROL") {
+		return "kernel audit rule setup needs CAP_AUDIT_CONTROL. The shipped sauronagent.service " +
+			"grants CAP_AUDIT_READ and CAP_AUDIT_CONTROL through AmbientCapabilities and " +
+			"CapabilityBoundingSet. For externally managed audit policy, set audit.manage_rules: false"
+	}
 	if strings.Contains(err.Error(), "CAP_AUDIT_READ") {
 		return "the kernel refused the audit socket. Grant CAP_AUDIT_READ: the shipped unit " +
 			"/usr/lib/systemd/system/sauronagent.service (packaging/systemd/sauronagent.service in " +
-			"the source tree) sets both AmbientCapabilities=CAP_AUDIT_READ and " +
-			"CapabilityBoundingSet=CAP_AUDIT_READ, and both are needed, because an ambient " +
+			"the source tree) includes it in both AmbientCapabilities and " +
+			"CapabilityBoundingSet, and both are needed, because an ambient " +
 			"capability outside the bounding set grants nothing. Do not add PrivateUsers=: inside a " +
 			"user namespace CAP_AUDIT_READ does not cover the initial namespace the kernel checks, " +
 			"and the agent would start and receive nothing. Running the binary by hand needs root, " +
-			"or setcap cap_audit_read+ep on it"
+			"or setcap cap_audit_read,cap_audit_control+ep on it for the default managed policy"
 	}
 	if cfg.Spool.Enabled {
 		return fmt.Sprintf("a path the agent needs was refused. The spool is %s: the shipped unit "+

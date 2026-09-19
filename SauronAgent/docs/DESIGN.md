@@ -53,13 +53,18 @@ Sauron host collector
 
 The primary event source is `NETLINK_AUDIT`. Linux provides `CAP_AUDIT_READ`
 specifically for reading the audit stream through a multicast Netlink socket.
-This allows SauronAgent to operate primarily as a consumer rather than becoming
-the audit subsystem controller, and to coexist with a standard `auditd`.
+SauronAgent subscribes to that multicast stream without claiming the audit
+daemon PID, so it can coexist with `auditd`. By default it also enables kernel
+auditing and ensures execution rules through netlink when it starts. This
+makes command execution visible when SauronAgent is the only audit service.
 
 # 5. Linux Capabilities
 
-Preferred guest privilege model is `CAP_AUDIT_READ`. `CAP_AUDIT_CONTROL` and
-`CAP_SYS_ADMIN` should normally NOT be granted.
+The guest service holds `CAP_AUDIT_READ` for collection and `CAP_AUDIT_CONTROL`
+for automatic execution-rule setup. Both remain available while it runs.
+`audit.manage_rules: false` disables setup and allows a service override that
+grants only `CAP_AUDIT_READ` when policy is managed externally. The collector
+needs no capabilities, and neither service receives `CAP_SYS_ADMIN`.
 
 # 6. Audit Events
 

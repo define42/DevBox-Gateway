@@ -161,6 +161,7 @@ func TestCheckConfigAcceptsAGoodFile(t *testing.T) {
 	path := writeConfig(t, fmt.Sprintf(`
 audit:
   preserve_raw: false
+  manage_rules: false
 vsock:
   cid: 2
   port: 9100
@@ -175,7 +176,7 @@ spool:
 		t.Fatalf("exit status = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{path, "is valid", "vsock cid 2 port 9100", "2048 events", spool, "preserve_raw=false"} {
+	for _, want := range []string{path, "is valid", "vsock cid 2 port 9100", "2048 events", spool, "preserve_raw=false", "manage_rules=false"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("summary does not report %q:\n%s", want, out)
 		}
@@ -197,6 +198,9 @@ func TestCheckConfigWithNoFileReportsTheDefaults(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "built-in default configuration") {
 		t.Errorf("stdout does not say the defaults were used:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "manage_rules=true") {
+		t.Errorf("defaults do not enable automatic rule setup:\n%s", stdout.String())
 	}
 }
 
@@ -467,6 +471,16 @@ func TestStartupHintNamesTheCapabilityAndTheUnit(t *testing.T) {
 	for _, want := range []string{"CAP_AUDIT_READ", "sauronagent.service", "AmbientCapabilities", "CapabilityBoundingSet"} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("hint does not mention %q:\n%s", want, hint)
+		}
+	}
+}
+
+func TestStartupHintForAuditControl(t *testing.T) {
+	err := fmt.Errorf("audit: configure rules requires CAP_AUDIT_CONTROL: %w", syscall.EPERM)
+	hint := startupHint(defaultTestConfig(t), err)
+	for _, want := range []string{"CAP_AUDIT_CONTROL", "sauronagent.service", "audit.manage_rules: false"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint does not mention %q: %s", want, hint)
 		}
 	}
 }

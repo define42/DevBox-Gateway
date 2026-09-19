@@ -11,13 +11,15 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 | Unit | `sauronhost.service` | `sauronagent.service` |
 | User | `sauronhost` | `sauronagent` |
 | State | `/var/log/sauronhost` (if the file output is enabled) | `/var/lib/sauronagent/spool` |
-| Privilege | none | `CAP_AUDIT_READ` |
+| Privilege | none | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL` |
 
 ### Requirements
 
 * Linux 4.8 or newer on both ends for virtio-vsock (`vhost_vsock` on the host,
   `vmw_vsock_virtio_transport` in the guest).
 * `CAP_AUDIT_READ` and the audit read-log multicast group: Linux 3.16 or newer.
+* `CAP_AUDIT_CONTROL` for the default automatic execution-rule setup. No
+  `auditd` or audit command-line tools are required.
 * systemd 247 or newer for the units as shipped. Older systemd ignores the
   directives it does not know (`ProtectProc=`, `ProcSubset=`) with a warning;
   everything else applies.
@@ -107,23 +109,80 @@ The startup line in the journal names the configuration in force
 (`config=/etc/sauronagent/sauronagent.yaml`, or
 `config="the built-in default configuration"`).
 
-### The agent does not create audit rules
+### Guest audit rules
 
-SauronAgent holds `CAP_AUDIT_READ`, not `CAP_AUDIT_CONTROL`: it reads what the
-kernel emits and cannot change what the kernel decides to emit. That is a
-deliberate part of the security model, and it has a practical consequence --
-**with no audit rules loaded you will see login and user-space records and
-almost nothing else.** Process execution, file access and privilege changes all
-come from syscall rules.
+With the defaults `audit.enabled: true` and `audit.manage_rules: true`, the
+agent enables kernel auditing and ensures `execve`/`execveat` rules through
+`NETLINK_AUDIT` when it starts. On x86_64 these cover both native 64-bit and
+32-bit compatibility execution, without filtering by user or success. Other
+supported architectures use their native ABI. Unsupported architectures report
+a startup error; externally managed rules can be used instead.
 
-Rules are loaded by `auditd` (or by `auditctl` at boot). A minimal starting set
-in `/etc/audit/rules.d/sauron.rules`:
+Commands such as `nmap` produce execution events containing the executable and
+arguments. These events do not contain terminal output or a port-scan detection
+alert. The agent preserves unrelated rules, does not lock policy, and never
+claims the audit daemon PID. Repeated starts do not duplicate its rules. The
+rules remain active when the agent stops and are reapplied as needed on the
+next start, including after reboot.
+
+The package installs both guest and collector components without enabling or
+starting either unit. In each guest, `systemctl enable --now sauronagent`
+activates collection and automatic rule setup. There is no packaged audit rules
+file and no dependency on `auditd`, `auditctl`, or `augenrules`.
+
+Startup fails with an actionable error if the agent cannot establish its
+execution baseline: for example, missing `CAP_AUDIT_CONTROL`, immutable policy
+without the required rules, or a conflicting `never,task` rule. Resolve the
+existing policy rather than having the agent delete unrelated rules. Immutable
+policy changes require a reboot. After removing `never,task`, start a new login
+session or reboot so newly created processes receive syscall auditing.
+
+Optional diagnostics, if audit tools are already installed:
+
+```sh
+sudo auditctl -s
+sudo auditctl -l
+```
+
+`enabled 1` means auditing is enabled; `enabled 2` means policy is immutable.
+Use `journalctl -u sauronagent` to inspect startup failures without audit tools.
+If the kernel was booted with `audit=0` and `NETLINK_AUDIT` is unavailable,
+remove that boot argument and reboot. Runtime setup can enable an initialized
+audit subsystem, but cannot restore one disabled during kernel initialization.
+
+#### Externally managed policy
+
+To collect an existing policy without configuring the kernel, set:
+
+```yaml
+audit:
+  manage_rules: false
+```
+
+Load that configuration using the service drop-in described above. To also
+remove rule-management privilege, add this to the drop-in:
+
+```ini
+[Service]
+AmbientCapabilities=
+AmbientCapabilities=CAP_AUDIT_READ
+CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_AUDIT_READ
+```
+
+Restart the agent after changing the unit. This mode requires the external
+policy to enable auditing and supply the execution rules. With
+`audit.enabled: false`, the agent performs neither rule setup nor collection.
+
+#### Optional broader coverage
+
+The agent manages execution rules only. If your detection needs file and
+privilege activity, manage additional rules separately with your audit policy
+tools. For example, an existing `augenrules` deployment can load rules such as
+these from `/etc/audit/rules.d/sauron-local.rules`. If its reload clears active
+rules, restart SauronAgent afterwards to restore the execution baseline:
 
 ```text
-## execution
--a always,exit -F arch=b64 -S execve,execveat -k exec
--a always,exit -F arch=b32 -S execve,execveat -k exec
-
 ## identity and privilege files
 -w /etc/passwd     -p wa -k identity
 -w /etc/shadow     -p wa -k identity
@@ -141,18 +200,9 @@ in `/etc/audit/rules.d/sauron.rules`:
 -w /etc/audit/ -p wa -k audit-config
 ```
 
-```sh
-augenrules --load     # or: auditctl -R /etc/audit/rules.d/sauron.rules
-auditctl -s           # enabled 1, and a backlog_limit that is not tiny
-```
-
-Verify that auditing is enabled at all: `enabled 0` in `auditctl -s`, or
-`audit=0` on the kernel command line, means the kernel emits nothing and the
-agent will correctly report a stream with no audit events in it.
-
 Syscall rules are not free. `-S execve` on a build server is a large volume of
-records; start with execution and the identity files, then add what your
-detection actually uses.
+records; start with the execution baseline, then add what your detection
+actually uses.
 
 ## 5. Sizing
 
@@ -318,33 +368,44 @@ unit))
 ```
 
 * `systemctl show sauronagent -p AmbientCapabilities -p CapabilityBoundingSet`
-  must show `cap_audit_read` in both. `AmbientCapabilities=` without the
-  capability in `CapabilityBoundingSet=` grants nothing.
+  must show `cap_audit_read` and, for automatic rule setup, `cap_audit_control`
+  in both. `AmbientCapabilities=` without the capability in
+  `CapabilityBoundingSet=` grants nothing.
 * Do not add `PrivateUsers=yes`: inside a user namespace `CAP_AUDIT_READ`
   applies to that namespace, and the kernel checks audit access against the
   initial one. The agent starts and receives nothing.
 * Running the binary by hand needs root, or
-  `setcap cap_audit_read+ep /usr/bin/sauronagent`.
-* A container needs the capability granted to the container itself
-  (`--cap-add=AUDIT_READ`) and a non-user-namespaced runtime.
+  `setcap cap_audit_read,cap_audit_control+ep /usr/bin/sauronagent`.
+* A container needs the capabilities granted to the container itself
+  (`--cap-add=AUDIT_READ --cap-add=AUDIT_CONTROL`) and a non-user-namespaced
+  runtime. With `audit.manage_rules: false`, only `AUDIT_READ` is needed.
 
 ### The agent runs but there are no audit events
 
 `journalctl -u sauronagent` shows a connection and heartbeats; the host sees
 `sauron.*` events but nothing about the guest.
 
-* `auditctl -s` -- `enabled 0` means the kernel is emitting nothing.
-  `auditctl -e 1`, or remove `audit=0` from the kernel command line.
-* `auditctl -l` -- `No rules` means no syscall auditing. See section 4.
+* Check `audit.enabled` and `audit.manage_rules` in the active configuration.
+  Automatic setup is performed on startup; an external policy reload can later
+  disable auditing or remove rules. Restart the agent to restore its baseline.
+* If audit tools are installed, `auditctl -s` shows whether auditing is enabled
+  and `auditctl -l` lists active rules. `No rules` means no syscall auditing.
+  Also check for `never,task`, which suppresses syscall events despite loaded
+  execution rules. See section 4 for policy conflicts and external management.
 * `auditctl -s` showing a rising `lost` means the kernel is dropping records
   before anyone reads them: raise `-b` and `net.core.rmem_max`.
 
 ### Coexisting with auditd
 
-They coexist by design, and no configuration is needed on either side. The
-agent subscribes to the audit **read-log multicast group**; it never sends
+They can coexist because the agent subscribes to the audit **read-log multicast
+group**; it never sends
 `AUDIT_SET` with an audit pid, so it never becomes the audit daemon and never
 displaces one. `auditctl -s` continues to show auditd's pid.
+
+By default, the agent also enables auditing and adds execution rules. If
+`auditd`'s policy should control all rules, set `audit.manage_rules: false` and
+provide the desired execution rules there. If an external reload clears the
+agent's rules, restart SauronAgent to restore them.
 
 Consequences worth knowing:
 

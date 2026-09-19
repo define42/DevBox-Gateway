@@ -295,6 +295,8 @@ creates the users and directories (`systemd-sysusers`, `systemd-tmpfiles`) but
 enables and starts **neither** unit: only you know whether a machine is a guest
 or the hypervisor. Upgrades restart whichever unit is running; removal stops and
 disables both but never deletes the agent spool or the collector's output.
+The guest agent enables kernel auditing and installs its execution rules when
+it starts. No audit rules file, `auditd`, or audit tools are needed.
 
 On a DevBox Gateway host the gateway itself is the collector: set
 `SAURON_ENABLE=true` (see [SauronAgent guest events](#sauronagent-guest-events))
@@ -312,8 +314,13 @@ sudo dnf install ./sauronagent-<version>-1.x86_64.rpm    # or: sudo apt install 
 sudo systemctl enable --now sauronagent
 ```
 
-See the [SauronAgent deployment guide](SauronAgent/docs/deployment.md) for audit
-rules and sizing.
+Starting the agent automatically enables `execve`/`execveat` auditing, including
+64-bit and 32-bit process execution on x86_64 guests, so commands such as `nmap`
+produce execution events. The agent checks and applies the rules on every
+start, including after reboot. It preserves unrelated rules and reports a
+startup error if an immutable or conflicting policy prevents setup. See the
+[SauronAgent deployment guide](SauronAgent/docs/deployment.md#guest-audit-rules)
+for externally managed policy and optional broader coverage.
 
 To remove it: `sudo apt remove devbox-gateway` (add `--purge` to also delete the
 config file).

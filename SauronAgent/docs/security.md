@@ -13,7 +13,8 @@ gets trusted for things it cannot do.
 |                                                              |
 |   kernel audit subsystem                                     |
 |        |  NETLINK_AUDIT                                      |
-|   sauronagent  (uid sauronagent, CAP_AUDIT_READ)             |
+|   sauronagent  (uid sauronagent)                              |
+|     CAP_AUDIT_READ + CAP_AUDIT_CONTROL                         |
 |        |                                                     |
 |   /var/lib/sauronagent/spool  (0700, still inside the guest) |
 +--------|-----------------------------------------------------+
@@ -71,7 +72,9 @@ allocates nothing from a length field it has not validated.
 
 **Auditing keeps working alongside auditd.** The agent is a consumer on the
 audit multicast group. It never registers as the audit daemon, so deploying it
-does not displace an existing `auditd` or change any audit rule.
+does not displace an existing `auditd`. By default it enables auditing and
+ensures execution rules at startup, preserving unrelated rules. Set
+`audit.manage_rules: false` when the complete policy is managed externally.
 
 ## 3. What the design does not protect against
 
@@ -135,16 +138,22 @@ host's clock so drift is detectable. Correlation across VMs should use
 
 | Component | Runs as | Capabilities | Why |
 |---|---|---|---|
-| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ`, ambient and bounded | the minimum that allows joining the `NETLINK_AUDIT` read-log multicast group |
+| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ` and `CAP_AUDIT_CONTROL`, ambient and bounded | joining the audit multicast group and configuring execution auditing |
 | `sauronhost` | `sauronhost` (system user) | none; empty bounding set | it parses hostile input and needs no privilege to do so |
 
-`CAP_AUDIT_READ` was added to Linux for exactly this use: reading the audit
-stream without controlling the audit subsystem. The agent therefore does not
-get:
+`CAP_AUDIT_READ` permits receiving audit events. `CAP_AUDIT_CONTROL` permits
+enabling auditing and installing execution rules without a separate audit
+service. Both capabilities remain available throughout the process lifetime.
+A compromise of the agent therefore exposes audit contents and also grants
+the ability to change rules or disable auditing when policy is mutable.
 
-* `CAP_AUDIT_CONTROL` -- it cannot change audit rules or the audit daemon
-  registration. An attacker who takes over the agent process cannot turn
-  auditing off with the privilege they inherited.
+For externally managed policy, `audit.manage_rules: false` disables automatic
+setup. Also override `AmbientCapabilities` and `CapabilityBoundingSet` to
+`CAP_AUDIT_READ` to remove control privilege; changing the configuration alone
+does not remove a capability. See the deployment guide for the drop-in.
+
+The service does not get:
+
 * `CAP_AUDIT_WRITE` -- it cannot inject user-space audit records.
 * `CAP_NET_ADMIN` -- which means `SO_RCVBUFFORCE` on the netlink socket falls
   back to `SO_RCVBUF`, clamped by `net.core.rmem_max`. That is a deliberate
@@ -180,7 +189,7 @@ with why it is present. The security-relevant ones:
 | Directive | Effect |
 |---|---|
 | `User=` / `Group=` | neither component ever runs as root |
-| `CapabilityBoundingSet=` | a ceiling on what a successful exploit can acquire: one capability for the agent, none for the collector |
+| `CapabilityBoundingSet=` | a ceiling on what a successful exploit can acquire: audit read and control for the agent, none for the collector |
 | `NoNewPrivileges=true` | no path to more privilege through setuid or file capabilities |
 | `ProtectSystem=strict`, `ProtectHome=true` | the filesystem is read-only except the one state or log directory |
 | `StateDirectory=` / `LogsDirectory=` | the only writable path, owned by the service user, mode 0700 / 0750 |

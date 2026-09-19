@@ -51,6 +51,11 @@ type AuditSection struct {
 	// for testing the transport in isolation.
 	Enabled bool `yaml:"enabled"`
 
+	// ManageRules enables kernel auditing and installs the built-in process
+	// execution rules at startup. Disable only when another service owns the
+	// guest's audit policy. Requires CAP_AUDIT_CONTROL in addition to READ.
+	ManageRules bool `yaml:"manage_rules"`
+
 	// PreserveRaw keeps the original kernel record text on every event.
 	// Turning it off shrinks events but discards the forensic evidence that
 	// normalization was derived from.
@@ -171,6 +176,7 @@ func DefaultAgent() Agent {
 	return Agent{
 		Agent: AgentSection{Name: "sauronagent"},
 		Audit: AuditSection{
+			ManageRules:         true,
 			Enabled:             true,
 			PreserveRaw:         true,
 			CorrelationTimeout:  Duration(2_000_000_000), // 2s

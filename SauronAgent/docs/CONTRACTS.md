@@ -34,6 +34,10 @@ func (c *NetlinkConn) Receive() ([]RawMessage, error)
 func (c *NetlinkConn) Close() error
 func (c *NetlinkConn) SetReceiveDeadline(t time.Time) error
 
+// Startup policy: enable auditing and idempotently ensure execution rules.
+// Requires CAP_AUDIT_CONTROL; does not register the audit daemon PID.
+func EnsureExecutionRules(ctx context.Context) error
+
 // Listener: netlink receiver + parser, emitting parsed records on a channel.
 type ListenerOptions struct {
     ReceiveBuffer int

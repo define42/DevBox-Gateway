@@ -118,6 +118,9 @@ func TestRPMDescription(t *testing.T) {
 	if got := types["/etc/sauronhost/sauronhost.yaml.example"]; got != rpmpack.ConfigFile|rpmpack.NoReplaceFile {
 		t.Errorf("example config type = %v, want %%config(noreplace)", got)
 	}
+	if _, ok := types["/etc/audit/rules.d/sauron.rules"]; ok {
+		t.Error("audit rules must be configured by the agent, not packaged as a file")
+	}
 	if got := types["/usr/share/doc/sauronagent/README.md"]; got != rpmpack.DocFile {
 		t.Errorf("README type = %v, want %%doc", got)
 	}
@@ -237,6 +240,9 @@ func TestWriteDeb(t *testing.T) {
 	}
 
 	payload := debMember(t, data, "data.tar.gz")
+	if _, ok := payload["etc/audit/rules.d/sauron.rules"]; ok {
+		t.Error("audit rules must be configured by the agent, not packaged as a file")
+	}
 	for _, name := range []string{"usr/bin/sauronagent", "usr/bin/sauronhost", "usr/lib/systemd/system/sauronagent.service", "usr/share/doc/sauronagent/copyright"} {
 		if _, ok := payload[name]; !ok {
 			t.Errorf("data archive missing %s", name)

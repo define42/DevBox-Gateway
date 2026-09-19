@@ -28,6 +28,13 @@ audit:
   # running with nothing to send, which is only useful when testing the link.
   enabled: true
 
+  # Enable kernel auditing and ensure execve/execveat rules on every startup.
+  # Uses CAP_AUDIT_CONTROL directly; no auditd, auditctl or rules file needed.
+  # Set false when another service manages policy. That mode only requires
+  # CAP_AUDIT_READ; remove CAP_AUDIT_CONTROL from the unit as well.
+  # Has no effect when audit.enabled is false.
+  manage_rules: true
+
   # SECURITY. Keep the kernel's original record text on every event. The
   # normalized fields are an interpretation; the raw records are the evidence
   # that interpretation was derived from, and they are what a forensic review,
