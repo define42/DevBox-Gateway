@@ -156,11 +156,12 @@ To stop everything: `docker compose stop`.
 
 ## Installing the RPM
 
-For a native (non-container) deployment on an RPM-based distribution
-(Fedora / RHEL / Rocky / Alma / openSUSE …), each tagged release publishes a
-`devbox-gateway-<version>-1.x86_64.rpm` artifact on the
+For a native (non-container) deployment on Rocky Linux 9 (x86_64), each tagged
+release publishes a `devbox-gateway-<version>-1.x86_64.rpm` artifact on the
 [GitHub Releases](https://github.com/define42/devbox-gateway/releases) page. The
-RPM version matches the container image tag for the same release.
+RPM version matches the container image tag for the same release. Packages are
+built and installation-tested against the current Rocky Linux 9 repositories;
+other RPM distributions are not part of the native compatibility baseline.
 
 The package installs its binary, unit, and config; the service creates the
 audit file at runtime:
@@ -175,9 +176,12 @@ audit file at runtime:
 It requires `libvirt-libs`, `ca-certificates`, `libvirt-daemon-kvm`,
 `libvirt-daemon-driver-nwfilter`, and `qemu-kvm`. The nwfilter driver supplies
 mandatory host-side guest traffic enforcement; its dependencies provide the
-firewall tools. The modular daemons include `virtqemud`, `virtnetworkd`,
-`virtstoraged`, and `virtnwfilterd`. Package installation does not open the
-public gateway port; allow it yourself (`443/tcp` by default, or your custom
+firewall tools. The package also declares the shared-library and versioned
+symbol requirements detected in its binary, so `dnf` rejects an installation
+when the available libraries cannot load it. The modular daemons include
+`virtqemud`, `virtnetworkd`, `virtstoraged`, and `virtnwfilterd`. Package
+installation does not open the public gateway port; allow it yourself (`443/tcp`
+by default, or your custom
 `LISTEN_ADDR` port). The gateway installs its VM network filter at startup.
 
 1. **Install** (let `dnf` pull in the dependencies):
@@ -243,11 +247,13 @@ remove it: `sudo dnf remove devbox-gateway`.
 
 ## Installing the deb
 
-For a native deployment on a Debian-based distribution (Debian / Ubuntu / Mint
-…), each tagged release also publishes a `devbox-gateway_<version>_amd64.deb`
-artifact on the
+For a native deployment on Debian 12 (amd64), each tagged release also publishes
+a `devbox-gateway_<version>_amd64.deb` artifact on the
 [GitHub Releases](https://github.com/define42/devbox-gateway/releases) page,
-built from the same binary as the RPM and container for that release.
+built and installation-tested against Debian 12 (Bookworm). It uses the same
+source version as the RPM and container, with a separate binary linked against
+Debian 12 libraries. Other Debian-based distributions are not part of the
+native compatibility baseline.
 
 The package installs its binary, unit, and config; the service creates the
 audit file at runtime:
@@ -264,7 +270,9 @@ It depends on `libvirt0`, `ca-certificates`, `libvirt-daemon-system`,
 releases with split drivers, the nwfilter config package pulls in
 `libvirt-daemon-driver-nwfilter`; older releases include that driver in the
 main daemon. `iptables` supplies the ebtables frontend needed for guest traffic
-enforcement.
+enforcement. Minimum shared-library package versions, including `libvirt0` and
+`libc6`, are generated from the binary by `dpkg-shlibdeps`, so `apt` rejects an
+installation when the available libraries cannot load it.
 
 1. **Install** (let `apt` pull in the dependencies):
 
@@ -755,12 +763,12 @@ For a native (RPM) install the data root defaults to
 
 ## Building from source
 
-Requirements:
+Requirements for a local development binary:
 
 - Go (see `go.mod` for the minimum version).
 - A C toolchain and `libvirt-dev` headers (the binary is built with
   `CGO_ENABLED=1`).
-- Node.js + TypeScript 5.x for the dashboard bundle.
+- Node.js + TypeScript 5.5.4 for the dashboard bundle.
 
 Build the dashboard bundle and the binary locally:
 
@@ -768,6 +776,10 @@ Build the dashboard bundle and the binary locally:
 tsc -p tsconfig.json          # compile ui/dashboard.ts → internal/webassets/dashboard.js
 CGO_ENABLED=1 go build -o devbox-gateway ./cmd/devbox-gateway
 ```
+
+`make build` performs both steps and writes the binary to `dist/devbox-gateway`.
+This binary links against the build host's libraries. Use the native package
+targets below to build distributable packages against their supported baselines.
 
 Or build the production container image:
 
@@ -782,6 +794,12 @@ runtime image.
 
 ### Building the RPM
 
+Gateway native package builds require Docker with Buildx on the host. Go, the
+C toolchain, libvirt headers, and TypeScript 5.5.4 run inside
+[`Dockerfile.native`](Dockerfile.native); the Go version comes from `go.mod`.
+Both package formats currently support Linux amd64 only (`ARCH=x86_64` and
+`DEB_ARCH=amd64`). Other architecture overrides are rejected.
+
 To produce the same RPM the [release workflow](#installing-the-rpm) publishes,
 run (overriding `VERSION` as needed):
 
@@ -789,12 +807,13 @@ run (overriding `VERSION` as needed):
 make rpm VERSION=1.4.0
 ```
 
-This compiles the UI and a `CGO_ENABLED=1` binary into `dist/`, then packages it
-together with the systemd unit and `devbox-gateway.conf` into
-`dist/devbox-gateway-<version>-1.x86_64.rpm` using the pure-Go
-[`internal/rpm`](internal/rpm) implementation through the
-[`cmd/mkrpm`](cmd/mkrpm) command — no `rpmbuild` or spec file required. Run `go
-run ./cmd/mkrpm -h` to see the available packaging flags.
+This compiles the UI and a `CGO_ENABLED=1` binary against Rocky Linux 9's
+libraries, then packages it together with the systemd unit and
+`devbox-gateway.conf` into `dist/devbox-gateway-<version>-1.x86_64.rpm`. The
+[`cmd/mkrpm`](cmd/mkrpm) command uses RPM's `elfdeps` scanner to declare the
+binary's actual ABI requirements and the pure-Go [`internal/rpm`](internal/rpm)
+writer to create the archive. The container build installs the package with
+`dnf` and checks dynamic linking and process startup before exporting it.
 
 ### Building the deb
 
@@ -805,12 +824,13 @@ run (overriding `VERSION` as needed):
 make deb VERSION=1.4.0
 ```
 
-This packages the same `dist/` artifacts into
-`dist/devbox-gateway_<version>_amd64.deb` using the pure-Go
-[`internal/deb`](internal/deb) implementation through the
-[`cmd/mkdeb`](cmd/mkdeb) command — no `dpkg-deb` or `debian/` tree required. Run
-`go run ./cmd/mkdeb -h` to see the available packaging flags. Override
-`DEB_ARCH` for a non-`amd64` target.
+This builds a separate binary against Debian 12's libraries and writes
+`dist/devbox-gateway_<version>_amd64.deb`. The [`cmd/mkdeb`](cmd/mkdeb) command
+uses `dpkg-shlibdeps` to derive minimum library package versions and the
+pure-Go [`internal/deb`](internal/deb) writer to create the archive. The
+container build installs the package with `apt` and checks dynamic linking and
+process startup before exporting it. Neither native package target reuses a
+binary built on the host. CI runs both builds for pull requests and releases.
 
 ### Building the SauronAgent packages
 

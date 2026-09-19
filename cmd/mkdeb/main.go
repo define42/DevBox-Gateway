@@ -1,8 +1,8 @@
 // Command mkdeb packages the prebuilt devbox-gateway binary together with its
-// systemd unit, sample config file, and license into a Debian .deb. No dpkg-deb,
-// debian/ tree, or Go toolchain is needed in a buildroot, so the package can be
-// produced on any build host. It is invoked by the Makefile `deb` target after
-// `make build` and mirrors the sibling cmd/mkrpm command.
+// systemd unit, sample config file, and license into a Debian .deb. It requires
+// dpkg-shlibdeps and the matching distribution's library metadata to derive ABI
+// dependencies from the binary. The Makefile `deb` target runs it inside the
+// supported distribution's build container; no dpkg-deb or debian/ tree is needed.
 package main
 
 import (

@@ -1,8 +1,9 @@
 // Command mkrpm packages the prebuilt devbox-gateway binary together with its
 // systemd unit, sample config file, and license into an RPM using the
-// pure-Go github.com/google/rpmpack. No rpmbuild, spec file, or Go toolchain is
-// needed in a buildroot, so the package can be produced on any build host. It is
-// invoked by the Makefile `rpm` target after `make build`.
+// pure-Go github.com/google/rpmpack. It requires rpm-build's elfdeps helper to
+// derive SONAME and symbol-version requirements from the binary. The Makefile
+// `rpm` target runs it inside the supported distribution's build container;
+// no rpmbuild invocation or spec file is needed.
 package main
 
 import (

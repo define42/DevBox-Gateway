@@ -1,6 +1,7 @@
 package rpm
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,7 @@ func TestPostInstallDoesNotConfigureFirewall(t *testing.T) {
 // absent-LICENSE skip path by default.
 func stageInputs(t *testing.T, dir string) (bin, unit, conf string) {
 	t.Helper()
+	fakeDependencyScanner(t, "printf '%s\\n' 'libc.so.6()(64bit)' 'libc.so.6(GLIBC_2.34)(64bit)' 'libvirt.so.0()(64bit)' 'libvirt.so.0(LIBVIRT_9.0.0)(64bit)' 'rtld(GNU_HASH)'\n")
 	bin = filepath.Join(dir, "devbox-gateway")
 	unit = filepath.Join(dir, "devbox-gateway.service")
 	conf = filepath.Join(dir, "devbox-gateway.conf")
@@ -155,6 +157,13 @@ func TestWriteRPM(t *testing.T) {
 	magic := []byte{0xED, 0xAB, 0xEE, 0xDB}
 	if len(data) < len(magic) || string(data[:4]) != string(magic) {
 		t.Fatalf("output does not start with the RPM lead magic; got % x", data[:min(4, len(data))])
+	}
+	// Requires are stored as NUL-terminated header strings; the fixture payload
+	// contains none of these names, so this checks the actual archive metadata.
+	for _, dependency := range []string{"libc.so.6(GLIBC_2.34)(64bit)", "libvirt.so.0(LIBVIRT_9.0.0)(64bit)", "libvirt-daemon-driver-nwfilter"} {
+		if !bytes.Contains(data, []byte(dependency+"\x00")) {
+			t.Errorf("archive missing binary or service dependency %q", dependency)
+		}
 	}
 }
 

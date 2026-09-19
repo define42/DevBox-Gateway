@@ -11,6 +11,11 @@ import (
 
 func stageInputs(t *testing.T, dir string) (binary, unit, config string) {
 	t.Helper()
+	scanner := filepath.Join(dir, "elfdeps")
+	if err := os.WriteFile(scanner, []byte("#!/bin/sh\nprintf '%s\\n' 'libc.so.6(GLIBC_2.34)(64bit)' 'libvirt.so.0(LIBVIRT_9.0.0)(64bit)'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 	binary = filepath.Join(dir, "devbox-gateway")
 	unit = filepath.Join(dir, "devbox-gateway.service")
 	config = filepath.Join(dir, "devbox-gateway.conf")

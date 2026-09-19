@@ -114,6 +114,10 @@ type File struct {
 
 // Write builds the DevBox Gateway RPM from the supplied options.
 func Write(o Options) error {
+	abiRequires, err := binaryDependencies(o.BinarySource)
+	if err != nil {
+		return err
+	}
 	return WritePackage(Package{
 		Name:        packageName,
 		Version:     o.Version,
@@ -123,7 +127,7 @@ func Write(o Options) error {
 		Description: description,
 		URL:         url,
 		License:     o.License,
-		Requires:    packageRequires(),
+		Requires:    append(packageRequires(), abiRequires...),
 		Files:       packageFiles(o),
 		PostIn:      postinScript,
 		PreUn:       preunScript,

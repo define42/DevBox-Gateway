@@ -119,6 +119,10 @@ func Write(o Options) error {
 	if err != nil {
 		return err
 	}
+	abiDepends, err := binaryDependencies(o.BinarySource)
+	if err != nil {
+		return err
+	}
 	return WritePackage(Package{
 		Name:        packageName,
 		Version:     o.Version,
@@ -126,7 +130,7 @@ func Write(o Options) error {
 		Maintainer:  Maintainer,
 		Section:     section,
 		Homepage:    url,
-		Depends:     packageRelations(),
+		Depends:     abiDepends + ", " + packageRelations(),
 		Summary:     summary,
 		Description: description,
 		Files:       files,

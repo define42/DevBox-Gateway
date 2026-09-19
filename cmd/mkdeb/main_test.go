@@ -11,6 +11,11 @@ import (
 
 func stageInputs(t *testing.T, dir string) (binary, unit, config string) {
 	t.Helper()
+	scanner := filepath.Join(dir, "dpkg-shlibdeps")
+	if err := os.WriteFile(scanner, []byte("#!/bin/sh\nprintf '%s\\n' 'shlibs:Depends=libc6 (>= 2.34), libvirt0 (>= 9.0.0)'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 	binary = filepath.Join(dir, "devbox-gateway")
 	unit = filepath.Join(dir, "devbox-gateway.service")
 	config = filepath.Join(dir, "devbox-gateway.conf")

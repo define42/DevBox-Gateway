@@ -49,6 +49,7 @@ func TestMaintainerScriptsDoNotConfigureFirewall(t *testing.T) {
 // absent-LICENSE skip path by default.
 func stageInputs(t *testing.T, dir string) (bin, unit, conf string) {
 	t.Helper()
+	fakeDependencyScanner(t, "printf '%s\\n' 'shlibs:Depends=libc6 (>= 2.34), libvirt0 (>= 9.0.0)'\n")
 	bin = filepath.Join(dir, "devbox-gateway")
 	unit = filepath.Join(dir, "devbox-gateway.service")
 	conf = filepath.Join(dir, "devbox-gateway.conf")
@@ -98,6 +99,11 @@ func TestWriteDeb(t *testing.T) {
 	}
 	if !strings.Contains(control, "Package: "+packageName) {
 		t.Fatalf("control file missing package name:\n%s", control)
+	}
+	for _, dependency := range []string{"libc6 (>= 2.34)", "libvirt0 (>= 9.0.0)", "libvirt-daemon-config-nwfilter"} {
+		if !strings.Contains(control, dependency) {
+			t.Errorf("control file missing binary or service dependency %q:\n%s", dependency, control)
+		}
 	}
 
 	assertDataDirectories(t, data, []string{

@@ -1,14 +1,16 @@
 all: ui
 	docker compose build
 
-# VERSION/RELEASE/ARCH feed the rpm metadata and output filename. Override on the
-# command line, e.g. `make rpm VERSION=1.4.0`. DEB_ARCH is the Debian spelling of
-# ARCH (amd64 vs x86_64); override it for cross-arch deb builds.
+# VERSION/RELEASE feed native package metadata and output filenames. Gateway
+# packages currently target x86_64/amd64; SauronAgent also accepts other arches.
 VERSION  ?= 0.0.0
 RELEASE  ?= 1
 ARCH     ?= x86_64
 DEB_ARCH ?= amd64
 BINARY   := dist/devbox-gateway
+GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
+
+.PHONY: all build rpm deb sauron-build sauron-rpm sauron-deb lint lint2 gosec test run ui
 
 # build compiles the UI and a native (CGO/libvirt-linked) binary into dist/.
 # Requires the libvirt development headers and a C toolchain on the build host.
@@ -16,15 +18,20 @@ build: ui
 	mkdir -p dist
 	CGO_ENABLED=1 go build -o $(BINARY) ./cmd/devbox-gateway
 
-# rpm packages the prebuilt binary, systemd unit, and sample env file into an RPM
-# via the pure-Go cmd/mkrpm helper (no rpmbuild/spec file needed).
-rpm: build
-	go run ./cmd/mkrpm -version $(VERSION) -release $(RELEASE) -arch $(ARCH)
+# Native packages are compiled and inspected inside their distribution baseline.
+# Each target installs and checks its package before exporting it to dist/.
+# Never package the host-linked development binary produced by `make build`.
+rpm:
+	@test "$(ARCH)" = x86_64 || { echo "Gateway RPM builds support ARCH=x86_64" >&2; exit 1; }
+	docker buildx build --platform linux/amd64 -f Dockerfile.native --target rpm \
+		--build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
+		--build-arg RELEASE=$(RELEASE) --output type=local,dest=dist .
 
-# deb packages the same artifacts into a Debian .deb via the pure-Go cmd/mkdeb
-# helper (no dpkg-deb/debian tree needed).
-deb: build
-	go run ./cmd/mkdeb -version $(VERSION) -arch $(DEB_ARCH)
+deb:
+	@test "$(DEB_ARCH)" = amd64 || { echo "Gateway deb builds support DEB_ARCH=amd64" >&2; exit 1; }
+	docker buildx build --platform linux/amd64 -f Dockerfile.native --target deb \
+		--build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
+		--output type=local,dest=dist .
 
 # sauron-build compiles SauronAgent's static guest agent and hypervisor collector
 # with SauronAgent's own Makefile (into SauronAgent/bin), stamping VERSION into
