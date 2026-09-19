@@ -9,6 +9,10 @@ ARCH     ?= x86_64
 DEB_ARCH ?= amd64
 BINARY   := dist/devbox-gateway
 GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
+COVERAGE_MIN ?= 80.0
+GATEWAY_COVERPROFILE := coverage.gateway.out
+SAURON_COVERPROFILE := coverage.sauron.out
+COVERPROFILE := coverage.out
 SAURON_RPM_GOARCH = $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(patsubst i686,386,$(patsubst armhfp,arm,$(patsubst loongarch64,loong64,$(ARCH))))))
 SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,ppc64le,$(DEB_ARCH))))
 
@@ -62,8 +66,18 @@ lint2:
 gosec:
 	go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 ./...
 test:
-	go test ./... -coverprofile=coverage.out -coverpkg=./...
-	go tool cover -html=coverage.out -o coverage.html
+	go test ./... -covermode=atomic -coverprofile=$(GATEWAY_COVERPROFILE) -coverpkg=github.com/define42/devbox-gateway/...
+	$(MAKE) -C SauronAgent cover COVERPROFILE=$(CURDIR)/$(SAURON_COVERPROFILE)
+	@awk 'FNR == 1 { if (NR == 1) print; next } { print }' $(GATEWAY_COVERPROFILE) $(SAURON_COVERPROFILE) > $(COVERPROFILE)
+	go tool cover -html=$(COVERPROFILE) -o coverage.html
+	@coverage=$$(go tool cover -func=$(COVERPROFILE) | awk '/^total:/ { sub(/%$$/, "", $$3); print $$3 }'); \
+		echo "aggregate coverage: $$coverage% (minimum $(COVERAGE_MIN)%)"; \
+		awk -v coverage="$$coverage" -v minimum="$(COVERAGE_MIN)" 'BEGIN { \
+			if (coverage + 0 < minimum + 0) { \
+				printf "coverage %.1f%% is below the required %.1f%%\n", coverage, minimum > "/dev/stderr"; \
+				exit 1; \
+			} \
+		}'
 run: 
 	docker compose stop
 	docker compose build

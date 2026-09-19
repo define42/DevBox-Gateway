@@ -111,7 +111,7 @@ fuzz:
 	exit $$fail
 
 cover:
-	$(GO) test ./... -count=1 -covermode=atomic -coverprofile=$(COVERPROFILE)
+	$(GO) test ./... -count=1 -covermode=atomic -coverpkg=$(MODULE)/... -coverprofile=$(COVERPROFILE)
 	@$(GO) tool cover -func=$(COVERPROFILE) | tail -n 1
 
 clean:

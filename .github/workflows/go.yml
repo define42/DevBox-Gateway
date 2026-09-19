@@ -74,7 +74,7 @@ jobs:
           sudo mkdir /data/
           sudo chmod 777 /data/
           sudo chmod 777 /var/lib/libvirt/images/
-          go test ./... -coverprofile=coverage.out -coverpkg=./...
+          make test
 
       - name: Show coverage in job summary
         run: |
@@ -93,14 +93,15 @@ jobs:
           fail_ci_if_error: true
 
       # -------------------------------
-      # SauronAgent vet & test. SauronAgent/ is its own Go module (the gateway
-      # embeds its collector package through a replace directive), so its steps
-      # run with GOTOOLCHAIN=auto: the go command fetches exactly the toolchain
-      # SauronAgent/go.mod asks for (checksum-verified via the Go module proxy)
-      # should it ever need a newer Go than the one set up above.
+      # SauronAgent vet. The top-level test target already runs its tests and
+      # includes them in coverage.out. SauronAgent/ is its own Go module (the
+      # gateway embeds its collector package through a replace directive), so
+      # vet runs with GOTOOLCHAIN=auto: the go command fetches exactly the
+      # toolchain SauronAgent/go.mod asks for (checksum-verified via the Go
+      # module proxy) should it ever need a newer Go than the one set up above.
       # -------------------------------
-      - name: Vet and test SauronAgent
-        run: GOTOOLCHAIN=auto make -C SauronAgent lint test
+      - name: Vet SauronAgent
+        run: GOTOOLCHAIN=auto make -C SauronAgent lint
 
       # Native packages compile and validate against their distribution
       # baselines inside Docker, independently of the runner's libvirt ABI.

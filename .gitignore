@@ -1,5 +1,5 @@
 *.img
 dist/
-coverage.out
+coverage*.out
 coverage.html
 SauronAgent/bin/
