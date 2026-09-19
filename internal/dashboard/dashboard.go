@@ -126,6 +126,7 @@ func GenerateRDPContent(server, username string, port int) string {
 	lines := []string{
 		fmt.Sprintf("full address:s:%s", net.JoinHostPort(server, strconv.Itoa(port))),
 		fmt.Sprintf("username:s:%s", username),
+		"screen mode id:i:2",
 		"prompt for credentials:i:1",
 		"administrative session:i:1",
 		"enablecredsspsupport:i:0",
