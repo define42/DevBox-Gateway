@@ -399,14 +399,11 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 		Handler:           withRequestScheme(mux, "https"),
 		ReadTimeout:       settings.Duration(config.TIMEOUT),
 		ReadHeaderTimeout: settings.Duration(config.TIMEOUT),
+		WriteTimeout:      httpWriteTimeout(settings),
 		IdleTimeout:       httpIdleTimeout,
-		// WriteTimeout is deliberately unset. This server multiplexes the
-		// dashboard's long-lived WebSocket consoles (serial/VNC/ping), which hijack
-		// the connection and enforce their own write deadlines (see the console
-		// package). A blanket WriteTimeout would risk cutting a streaming console
-		// mid-write while adding negligible protection for the small HTTP responses
-		// the dashboard otherwise returns; slow-header attacks are bounded by
-		// ReadHeaderTimeout and the pre-TLS setup deadline instead.
+		// VM creation and authenticated uploads renew their response deadlines
+		// around writes so processing can outlast this ordinary response limit.
+		// WebSocket handlers hijack the connection and manage their own deadlines.
 	}
 	ln := newSingleConnListener(clientTLS)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {

@@ -49,31 +49,32 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			writeDashboardConsoleOwnershipError(w, name, user.Name, nil)
 			return
 		}
-		debugf("serial: ownership confirmed for vm %q; opening libvirt console", name)
-
-		// The serial socket is libvirt-managed; the gateway cannot connect to its
-		// path directly, so OpenSerialConsole has libvirt stream the console (same
-		// reason VNC uses OpenVNCConn).
-		console, err := virt.OpenSerialConsole(name)
-		if err != nil {
-			writeDashboardSerialSocketError(w, name, err)
-			return
-		}
-		// Opening the serial terminal counts as use for auto-shutdown.
-		virt.MarkVMUsed(name)
-		debugf("serial: libvirt console opened for vm %q; upgrading websocket", name)
-
+		// Complete handshake and origin validation before OpenSerialConsole,
+		// whose forced open would otherwise evict an existing terminal even for
+		// an ordinary GET or rejected WebSocket request.
 		dashboardSocketUpgrader := websocket.Upgrader{
-			CheckOrigin: sameOriginWebsocketRequest,
+			CheckOrigin:      sameOriginWebsocketRequest,
+			HandshakeTimeout: wsWriteWait,
 		}
 
 		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("serial", name, w), r, nil)
 		if err != nil {
-			_ = console.Close()
 			log.Printf("upgrade dashboard websocket for vm %s failed: %v", strconv.Quote(name), err)
 			return
 		}
+		defer func() { _ = ws.Close() }()
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
+
+		// The serial socket is libvirt-managed; the gateway cannot connect to its
+		// path directly, so OpenSerialConsole has libvirt stream the console.
+		console, err := virt.OpenSerialConsole(name)
+		if err != nil {
+			closeDashboardSerialSocketError(ws, name, err)
+			return
+		}
+		// Opening the serial terminal counts as use for auto-shutdown.
+		virt.MarkVMUsed(name)
+		debugf("serial: libvirt console opened for vm %q", name)
 		unregisterConnection, ok := sessionManager.RegisterUserConnection(authorization, func() {
 			_ = ws.Close()
 			_ = console.Interrupt()
@@ -91,21 +92,25 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 	}
 }
 
-func writeDashboardSerialSocketError(w http.ResponseWriter, name string, err error) {
+func closeDashboardSerialSocketError(ws *websocket.Conn, name string, err error) {
+	code := websocket.CloseTryAgainLater
+	var message string
 	switch {
 	case errors.Is(err, virt.ErrSerialConsoleNotRunning):
 		log.Printf("reject serial console for vm %s: VM is not running", strconv.Quote(name))
-		http.Error(w, "VM must be running for terminal access.", http.StatusConflict)
+		message = "VM must be running for terminal access."
 	case errors.Is(err, virt.ErrSerialConsoleNotConfigured):
 		log.Printf("reject serial console for vm %s: no serial console device configured", strconv.Quote(name))
-		http.Error(w, "Serial terminal is not available for this VM.", http.StatusConflict)
+		message = "Serial terminal is not available for this VM."
 	case errors.Is(err, virt.ErrSerialConsoleNotReady):
 		log.Printf("reject serial console for vm %s: console not ready yet", strconv.Quote(name))
-		http.Error(w, "Serial terminal is not ready yet.", http.StatusConflict)
+		message = "Serial terminal is not ready yet."
 	default:
 		log.Printf("open serial console for vm %s failed: %v", strconv.Quote(name), err)
-		http.Error(w, "Failed to open serial terminal.", http.StatusInternalServerError)
+		message = "Failed to open serial terminal."
+		code = websocket.CloseInternalServerErr
 	}
+	_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, message), time.Now().Add(wsWriteWait))
 }
 
 func writeDashboardConsoleOwnershipError(w http.ResponseWriter, name, username string, err error) {

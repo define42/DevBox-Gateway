@@ -41,12 +41,8 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 		debugf("vnc: request from %s user=%q vm=%q", r.RemoteAddr, user.Name, name)
 
 		owned, err := virt.UserOwnsVM(name, user.Name)
-		if err != nil {
+		if err != nil || !owned {
 			writeDashboardVNCOwnershipError(w, name, user.Name, err)
-			return
-		}
-		if !owned {
-			writeDashboardVNCOwnershipError(w, name, user.Name, nil)
 			return
 		}
 		debugf("vnc: ownership confirmed for vm %q; opening VNC backend", name)
@@ -61,7 +57,8 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 		debugf("vnc: backend connected for vm %q (%s); upgrading websocket", name, vncConn.RemoteAddr())
 
 		dashboardSocketUpgrader := websocket.Upgrader{
-			CheckOrigin: sameOriginWebsocketRequest,
+			CheckOrigin:      sameOriginWebsocketRequest,
+			HandshakeTimeout: wsWriteWait,
 		}
 
 		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("vnc", name, w), r, nil)

@@ -81,7 +81,8 @@ func handleDashboardWS(sessionManager *session.Manager, settings *config.Setting
 		sessionDeadline := sessionManager.Deadline(r.Context())
 
 		dashboardSocketUpgrader := websocket.Upgrader{
-			CheckOrigin: sameOriginWebsocketRequest,
+			CheckOrigin:      sameOriginWebsocketRequest,
+			HandshakeTimeout: wsWriteWait,
 		}
 
 		ws, err := dashboardSocketUpgrader.Upgrade(upgradeResponseWriter("dashboard", "control", w), r, nil)

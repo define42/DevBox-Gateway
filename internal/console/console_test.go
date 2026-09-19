@@ -100,55 +100,6 @@ func TestParseDashboardVMPathParam(t *testing.T) {
 // streams it via libvirt's OpenConsole, which needs a live domain and is covered
 // by the virt package's integration test (waitForSerialConsole).
 
-func TestWriteDashboardSerialSocketError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		wantCode int
-		wantBody string
-	}{
-		{
-			name:     "not running",
-			err:      virt.ErrSerialConsoleNotRunning,
-			wantCode: http.StatusConflict,
-			wantBody: "VM must be running for terminal access.",
-		},
-		{
-			name:     "not configured",
-			err:      virt.ErrSerialConsoleNotConfigured,
-			wantCode: http.StatusConflict,
-			wantBody: "Serial terminal is not available for this VM.",
-		},
-		{
-			name:     "not ready",
-			err:      virt.ErrSerialConsoleNotReady,
-			wantCode: http.StatusConflict,
-			wantBody: "Serial terminal is not ready yet.",
-		},
-		{
-			name:     "unexpected",
-			err:      errors.New("boom"),
-			wantCode: http.StatusInternalServerError,
-			wantBody: "Failed to open serial terminal.",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-
-			writeDashboardSerialSocketError(rec, "alice-devbox", tc.err)
-
-			if rec.Code != tc.wantCode {
-				t.Fatalf("expected %d, got %d with body %s", tc.wantCode, rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tc.wantBody) {
-				t.Fatalf("expected body to contain %q, got %q", tc.wantBody, rec.Body.String())
-			}
-		})
-	}
-}
-
 // VNC no longer dials a socket path — virt.OpenVNCConn obtains the connection via
 // libvirt's OpenGraphicsFD, which requires a live libvirt domain and is covered
 // by the virt package's integration test (waitForVNCSocket). The generic

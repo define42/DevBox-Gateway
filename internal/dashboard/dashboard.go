@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,12 +119,12 @@ func rdpDownloadFilename(vmName string) string {
 	return name + ".rdp"
 }
 
-// GenerateRDPContent builds the raw .rdp file body for the provided server/user
-// pair. It is the single source of truth for the connection settings used by the
-// downloadable file (WriteRDPFile).
-func GenerateRDPContent(server, username string) string {
+// GenerateRDPContent builds the raw .rdp file body for the provided server, user,
+// and public port. It is the single source of truth for the connection settings
+// used by the downloadable file (WriteRDPFile).
+func GenerateRDPContent(server, username string, port int) string {
 	lines := []string{
-		fmt.Sprintf("full address:s:%s:443", server),
+		fmt.Sprintf("full address:s:%s", net.JoinHostPort(server, strconv.Itoa(port))),
 		fmt.Sprintf("username:s:%s", username),
 		"prompt for credentials:i:1",
 		"administrative session:i:1",
@@ -157,7 +159,7 @@ func RDPFileForUser(settings *config.Settings, user, vmName string) (filename st
 		if rdpUser == "" {
 			rdpUser = user
 		}
-		body := GenerateRDPContent(rdpConnectHost(settings, vm.Name), rdpUser)
+		body := GenerateRDPContent(rdpConnectHost(settings, vm.Name), rdpUser, config.RDPPort(settings))
 		return rdpDownloadFilename(vm.Name), []byte(body), true
 	}
 	return "", nil, false

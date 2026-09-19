@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,8 @@ const (
 	// flushPoll is how often the shutdown flush re-checks for progress while
 	// waiting for the host to acknowledge the last events.
 	flushPoll = 20 * time.Millisecond
+
+	oversizedEventReason = "event exceeds the maximum payload size and cannot be delivered"
 )
 
 // errHostFatal marks a session that ended because the host said it was ending
@@ -65,10 +68,9 @@ type backlog interface {
 	Release()
 	// Append records an event that already carries a sequence number.
 	Append(e *event.Event) error
-	// Next returns up to max unacknowledged events in sequence order. It is
-	// idempotent: only Ack advances anything, so the caller must track what it
-	// has already sent.
-	Next(max int) ([]*event.Event, error)
+	// NextAfter returns up to max unacknowledged events after through in
+	// sequence order. Reading never acknowledges or consumes an event.
+	NextAfter(through uint64, max int) ([]*event.Event, error)
 	// Ack discards every event up to and including seq.
 	Ack(seq uint64) error
 	// FirstUnacked is the lowest sequence still held.
@@ -143,10 +145,11 @@ type sender struct {
 
 	// oversized holds sequences the host's payload limit refuses. Retrying one
 	// forever would wedge delivery of everything behind it, so it is reported
-	// as a loss once and then skipped; the entries are pruned as
-	// acknowledgements pass them.
-	oversizedMu sync.Mutex
-	oversized   map[uint64]bool
+	// as a loss once and then skipped. Markers stay only while their backlog
+	// records remain replayable, and acknowledgements also prune them.
+	oversizedMu            sync.Mutex
+	oversized              map[uint64]bool
+	oversizedPrunedThrough uint64
 
 	// Accounting for events the spool would not accept. It is drained by the
 	// agent's loss poller, which turns it into a sauron.spool.error event;
@@ -441,11 +444,9 @@ func (s *sender) session(ctx context.Context, conn *protocol.Conn, ready protoco
 // sendLoop delivers events from the backlog until the session or the agent
 // ends.
 //
-// Outstanding events are tracked here and nowhere else. spool.Next is
-// idempotent -- it returns the same events until an Ack moves the cursor -- so
-// without an in-flight list the sender would re-send the whole backlog on
-// every pass. The list is also what caps outstanding events at
-// transport.max_unacked, and it is deliberately discarded on reconnect:
+// Backlog reads never consume events. The session cursor prevents duplicate
+// sends, while the in-flight list caps outstanding events at
+// transport.max_unacked. Both are deliberately discarded on reconnect:
 // anything that was in flight when the connection died may never have arrived,
 // so it is sent again. That is the at-least-once guarantee.
 func (s *sender) sendLoop(ctx, sctx context.Context, conn *protocol.Conn) error {
@@ -471,18 +472,17 @@ func (s *sender) sendLoop(ctx, sctx context.Context, conn *protocol.Conn) error 
 	)
 
 	for {
+		select {
+		case <-ctx.Done():
+			return s.flush(sctx, conn, inflight, sentThrough)
+		case <-sctx.Done():
+			return nil
+		default:
+		}
 		s.reconcile()
 		if n := trimInflight(&inflight, s.ackedThrough.Load()); n > 0 {
 			s.metrics.EventsAcknowledged.Add(uint64(n))
 			lastProgress = time.Now()
-		}
-
-		sent, err := s.dispatch(conn, &inflight, &sentThrough)
-		if err != nil {
-			return err
-		}
-		if sent > 0 {
-			continue
 		}
 
 		wait := idleWait
@@ -498,6 +498,18 @@ func (s *sender) sendLoop(ctx, sctx context.Context, conn *protocol.Conn) error 
 			if remaining < wait {
 				wait = remaining
 			}
+		}
+
+		before := sentThrough
+		sent, err := s.dispatch(conn, &inflight, &sentThrough)
+		if err != nil {
+			return err
+		}
+		if sent > 0 || sentThrough > before {
+			// Skipping an oversized batch is progress too. Read the next
+			// batch immediately, even when nothing was put on the wire.
+			// The next pass still checks for ACK timeout and cancellation.
+			continue
 		}
 
 		timer := time.NewTimer(wait)
@@ -539,9 +551,10 @@ func (s *sender) dispatch(conn *protocol.Conn, inflight *[]uint64, sentThrough *
 		return 0, nil
 	}
 
-	// Next starts at FirstUnacked, which still includes what is in flight, so
-	// the batch has to be large enough to reach past it.
-	events, err := s.backlog.Next(len(*inflight) + room)
+	// Read after this session's cursor, including entries it skipped. Starting
+	// again at FirstUnacked would repeatedly return an oversized prefix that
+	// cannot be acknowledged until a later, deliverable event reaches the host.
+	events, err := s.backlog.NextAfter(*sentThrough, room)
 	if err != nil {
 		// Nothing is lost: the events stay in the backlog and the next
 		// attempt reads them again.
@@ -566,6 +579,7 @@ func (s *sender) dispatch(conn *protocol.Conn, inflight *[]uint64, sentThrough *
 			continue
 		}
 		if s.isOversized(e.Sequence) {
+			s.releaseOversized(e.Sequence)
 			*sentThrough = e.Sequence
 			continue
 		}
@@ -576,6 +590,7 @@ func (s *sender) dispatch(conn *protocol.Conn, inflight *[]uint64, sentThrough *
 				// event never can be, though, and retrying it forever would
 				// block everything behind it.
 				s.reportOversized(e, err)
+				s.releaseOversized(e.Sequence)
 				*sentThrough = e.Sequence
 				continue
 			}
@@ -619,11 +634,12 @@ func (s *sender) flush(sctx context.Context, conn *protocol.Conn, inflight []uin
 	for time.Now().Before(deadline) && sctx.Err() == nil {
 		s.reconcile()
 		trimInflight(&inflight, s.ackedThrough.Load())
+		before := sentThrough
 		sent, err := s.dispatch(conn, &inflight, &sentThrough)
 		if err != nil {
 			return err
 		}
-		if sent > 0 {
+		if sent > 0 || sentThrough > before {
 			continue
 		}
 		// Nothing outstanding and nothing left this session has not already
@@ -930,10 +946,16 @@ func (s *sender) adoptHostPosition(seq uint64) {
 // because it suppresses them as duplicates -- and the send loop reads them
 // back on every pass.
 //
-// In steady state it is two cheap accessors and no work at all.
+// In steady state it checks positions without changing the backlog.
 func (s *sender) reconcile() {
+	// Spool eviction can release old oversized entries without a host ACK.
+	// Their markers are needed only while those records remain replayable.
+	first := s.backlog.FirstUnacked()
+	if first > 0 {
+		s.pruneOversized(first - 1)
+	}
 	through := s.ackedThrough.Load()
-	if through == 0 || s.backlog.PendingCount() == 0 || s.backlog.FirstUnacked() > through {
+	if through == 0 || s.backlog.PendingCount() == 0 || first > through {
 		return
 	}
 	if err := s.backlog.Ack(through); err != nil {
@@ -973,11 +995,19 @@ func (s *sender) reportOversized(e *event.Event, err error) {
 	s.metrics.EventsDropped.Add(1)
 	s.log.Error("event is too large for the transport and will not be delivered",
 		"sequence", e.Sequence, "type", e.Type, "error", err)
+	if e.Type == event.TypeProtocolViolation && e.Fields["reason"] == oversizedEventReason {
+		// A smaller peer limit may reject the loss report itself. Another
+		// report would repeat that failure forever, so preserve its evidence
+		// locally and keep delivering any subsequent events that do fit.
+		s.log.Error("transport payload limit cannot carry its loss report",
+			"sequence", e.Sequence, "loss", e.Fields, "error", err)
+		return
+	}
 	// There is no more specific internal type for "this agent built a frame
 	// the protocol cannot carry", and it is a protocol-level failure: the
 	// event exists, is numbered, and can never be delivered on this link.
 	s.emit(event.NewInternal(event.TypeProtocolViolation, event.SeverityCritical, map[string]any{
-		"reason":                 "event exceeds the maximum payload size and cannot be delivered",
+		"reason":                 oversizedEventReason,
 		"events_dropped":         uint64(1),
 		"first_missing_sequence": e.Sequence,
 		"last_missing_sequence":  e.Sequence,
@@ -991,15 +1021,32 @@ func (s *sender) isOversized(seq uint64) bool {
 	return s.oversized[seq]
 }
 
-// pruneOversized forgets skipped sequences the host has now acknowledged past.
+// releaseOversized lets the bounded memory backlog accept later events and
+// the loss report. Only this known, reported loss is removed; earlier valid
+// events still require an ACK. The disk spool retains its records until ACK.
+func (s *sender) releaseOversized(seq uint64) {
+	if b, ok := s.backlog.(*memBacklog); ok {
+		b.discard(seq)
+		// This sequence cannot be replayed once its memory slot is released.
+		s.oversizedMu.Lock()
+		delete(s.oversized, seq)
+		s.oversizedMu.Unlock()
+	}
+}
+
+// pruneOversized forgets skipped sequences no longer eligible for replay.
 func (s *sender) pruneOversized(through uint64) {
 	s.oversizedMu.Lock()
 	defer s.oversizedMu.Unlock()
+	if through <= s.oversizedPrunedThrough {
+		return
+	}
 	for seq := range s.oversized {
 		if seq <= through {
 			delete(s.oversized, seq)
 		}
 	}
+	s.oversizedPrunedThrough = through
 }
 
 // recordAppendFailure accounts for an event the backlog refused.
@@ -1195,17 +1242,39 @@ func (b *memBacklog) Append(e *event.Event) error {
 // Next returns up to max unacknowledged events, oldest first, without
 // consuming them.
 func (b *memBacklog) Next(max int) ([]*event.Event, error) {
+	return b.NextAfter(0, max)
+}
+
+// NextAfter reads beyond the session's cursor without acknowledging anything.
+func (b *memBacklog) NextAfter(through uint64, max int) ([]*event.Event, error) {
 	if max <= 0 {
 		return nil, nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if max > len(b.events) {
-		max = len(b.events)
+	start := sort.Search(len(b.events), func(i int) bool { return b.events[i].Sequence > through })
+	if max > len(b.events)-start {
+		max = len(b.events) - start
 	}
 	out := make([]*event.Event, max)
-	copy(out, b.events[:max])
+	copy(out, b.events[start:start+max])
 	return out, nil
+}
+
+// discard releases only an event already reported as undeliverable.
+func (b *memBacklog) discard(seq uint64) {
+	b.mu.Lock()
+	i := sort.Search(len(b.events), func(i int) bool { return b.events[i].Sequence >= seq })
+	found := i < len(b.events) && b.events[i].Sequence == seq
+	if found {
+		copy(b.events[i:], b.events[i+1:])
+		b.events[len(b.events)-1] = nil
+		b.events = b.events[:len(b.events)-1]
+	}
+	b.mu.Unlock()
+	if found {
+		b.Release()
+	}
 }
 
 // Ack discards every event through seq and returns the slots they held.

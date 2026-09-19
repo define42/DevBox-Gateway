@@ -62,6 +62,37 @@ func TestNewSettingsPprofListenAddressFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestRDPPort(t *testing.T) {
+	if got := RDPPort(nil); got != 443 {
+		t.Fatalf("RDPPort(nil) = %d, want 443", got)
+	}
+	cases := []struct {
+		name   string
+		listen string
+		public string
+		want   int
+	}{
+		{name: "default", listen: ":443", want: 443},
+		{name: "custom listener", listen: ":8443", want: 8443},
+		{name: "IPv4 listener", listen: "127.0.0.1:9443", want: 9443},
+		{name: "IPv6 listener", listen: "[::1]:8443", want: 8443},
+		{name: "service name", listen: ":https", want: 443},
+		{name: "ephemeral listener", listen: ":0", want: 443},
+		{name: "proxy port", listen: ":8443", public: "443", want: 443},
+		{name: "custom public port", listen: ":443", public: "3390", want: 3390},
+		{name: "maximum port", listen: ":443", public: "65535", want: 65535},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(LISTEN_ADDR, tc.listen)
+			t.Setenv(RDP_PORT, tc.public)
+			if got := RDPPort(NewSettings(false)); got != tc.want {
+				t.Fatalf("RDPPort = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLDAPAuthTimeoutSetting(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

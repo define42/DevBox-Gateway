@@ -118,7 +118,7 @@ func TestHTMLPathValid(t *testing.T) {
 }
 
 func TestGenerateRDPContent(t *testing.T) {
-	got := GenerateRDPContent("vm1.example.test", "alice")
+	got := GenerateRDPContent("vm1.example.test", "alice", 443)
 	// The downloadable .rdp body is the raw text (no data: URI wrapper).
 	if strings.HasPrefix(got, "data:") {
 		t.Fatalf("expected raw .rdp content, got data URI: %q", got)

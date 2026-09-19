@@ -6,11 +6,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
@@ -335,7 +338,7 @@ func TestUpdateDomainsNoChange(t *testing.T) {
 		},
 		domains: want,
 	}
-	manager.updateDomains()
+	manager.updateDomains(t.Context())
 
 	if providerCalls != 1 {
 		t.Fatalf("expected VM name provider to be called once, got %d", providerCalls)
@@ -455,4 +458,93 @@ func TestTLSManagerCloseStopsWorker(t *testing.T) {
 	if err := manager.Close(); err != nil {
 		t.Fatalf("close worker a second time: %v", err)
 	}
+}
+
+type blockingCertificateStorage struct {
+	certmagic.Storage
+
+	started chan context.Context
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingCertificateStorage) Load(ctx context.Context, _ string) ([]byte, error) {
+	s.once.Do(func() { s.started <- ctx })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, errors.New("test storage released")
+	}
+}
+
+func TestTLSManagerCloseCancelsCertificateUpdate(t *testing.T) {
+	t.Setenv(config.FRONT_DOMAIN, "shutdown.example.test")
+	storage := &blockingCertificateStorage{
+		Storage: &certmagic.FileStorage{Path: t.TempDir()},
+		started: make(chan context.Context, 1),
+		release: make(chan struct{}),
+	}
+	magic := certmagic.NewDefault()
+	magic.Storage = storage
+	ctx, cancel := context.WithCancel(t.Context())
+	manager := &TLSManager{
+		magic:      magic,
+		settings:   config.NewSettings(false),
+		vmNames:    noVMNames,
+		cancel:     cancel,
+		workerDone: make(chan struct{}),
+	}
+	go manager.worker(ctx, time.NewTicker(time.Millisecond))
+	t.Cleanup(func() {
+		close(storage.release)
+		_ = manager.Close()
+	})
+	select {
+	case <-storage.started:
+	case <-time.After(time.Second):
+		t.Fatal("certificate update did not start")
+	}
+	closed := make(chan struct{})
+	go func() {
+		_ = manager.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not cancel the blocked certificate update")
+	}
+	if got := manager.managedDomains(); len(got) != 0 {
+		t.Fatalf("cancelled update recorded managed domains: %v", got)
+	}
+}
+
+func TestCertificateUpdateTimesOut(t *testing.T) {
+	t.Setenv(config.FRONT_DOMAIN, "timeout.example.test")
+	settings := config.NewSettings(false)
+	magic := certmagic.NewDefault()
+	fileStorage := &certmagic.FileStorage{Path: t.TempDir()}
+
+	synctest.Test(t, func(t *testing.T) {
+		storage := &blockingCertificateStorage{
+			Storage: fileStorage,
+			started: make(chan context.Context, 1),
+			release: make(chan struct{}),
+		}
+		magic.Storage = storage
+		manager := &TLSManager{magic: magic, settings: settings, vmNames: noVMNames}
+		started := time.Now()
+		manager.updateDomains(t.Context())
+		operationCtx := <-storage.started
+		if !errors.Is(operationCtx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("certificate operation ended with %v, want deadline exceeded", operationCtx.Err())
+		}
+		if elapsed := time.Since(started); elapsed != acmeDomainUpdateTimeout {
+			t.Fatalf("update duration = %v, want %v", elapsed, acmeDomainUpdateTimeout)
+		}
+		if got := manager.managedDomains(); len(got) != 0 {
+			t.Fatalf("timed-out update recorded managed domains: %v", got)
+		}
+	})
 }

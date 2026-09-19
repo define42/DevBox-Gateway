@@ -164,7 +164,6 @@ func TestCovxConsoleAndVNCOwnershipAndStoppedBranches(t *testing.T) {
 	}{
 		{name: "not owned", metadata: covxOtherOwnerMetadata, wantStatus: http.StatusForbidden, wantBody: "You do not have permission"},
 		{name: "ownership lookup error", metadata: covxBrokenOwnerMetadata, wantStatus: http.StatusInternalServerError, wantBody: "Unable to verify VM ownership."},
-		{name: "stopped vm", metadata: covxOwnerMetadata, wantStatus: http.StatusConflict, wantBody: "must be running for"},
 	}
 
 	for _, tc := range tests {
@@ -173,6 +172,14 @@ func TestCovxConsoleAndVNCOwnershipAndStoppedBranches(t *testing.T) {
 			covxAssertDashboardChannelsStatus(t, server, cookie, dom.name, tc.wantStatus, tc.wantBody)
 		})
 	}
+
+	t.Run("stopped vm rejects VNC", func(t *testing.T) {
+		dom.setOwnerMetadata(covxOwnerMetadata)
+		status, body := covxGetStatus(t, server, "/api/dashboard/vnc/"+dom.name+"/ws", cookie)
+		if status != http.StatusConflict || !strings.Contains(body, "must be running for") {
+			t.Fatalf("stopped VM VNC response = %d %q", status, body)
+		}
+	})
 
 	t.Run("administrator remains owner scoped", func(t *testing.T) {
 		dom.setOwnerMetadata(covxOtherOwnerMetadata)
@@ -203,8 +210,8 @@ func TestCovxConsoleAndVNCOnRunningVM(t *testing.T) {
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
 	t.Run("plain request fails websocket upgrade", func(t *testing.T) {
-		// The backend (serial console / VNC socket) opens successfully, then the
-		// upgrade of a non-websocket request fails and the backend is closed.
+		// Ordinary requests never open the serial backend; both channels reject
+		// a request without WebSocket handshake headers.
 		for _, channel := range []string{"console", "vnc"} {
 			status, body := covxGetStatus(t, server, "/api/dashboard/"+channel+"/"+dom.name+"/ws", cookie)
 			if status != http.StatusBadRequest {
@@ -234,7 +241,17 @@ func TestCovxDashboardConsoleWSEndToEnd(t *testing.T) {
 	cookie := covxSessionCookie(t, manager, covxTestUsername)
 
 	conn := covxDialWebsocket(t, server, "/api/dashboard/console/"+dom.name+"/ws", cookie)
-	dom.resume()
+	// The upgrade precedes opening the backend. A pong confirms the bridge is
+	// ready before resuming the VM, so its early BIOS output cannot be missed.
+	conn.SetPongHandler(func(payload string) error {
+		if payload == "console-ready" {
+			dom.resume()
+		}
+		return nil
+	})
+	if err := conn.WriteControl(websocket.PingMessage, []byte("console-ready"), time.Now().Add(websocketTestTimeout)); err != nil {
+		t.Fatalf("wait for serial bridge: %v", err)
+	}
 
 	if err := conn.SetReadDeadline(time.Now().Add(covxSerialDataTimeout)); err != nil {
 		t.Fatalf("set read deadline: %v", err)

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -139,6 +140,7 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetInt(VDI_AUTO_SHUTDOWN_HOURS, "Shut down a running VDI after this many hours without use; a VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard. The guest is first asked to power off (ACPI) and is force-stopped if still running a few minutes later. Values <=0 disable auto-shutdown", DefaultVDIAutoShutdownHours)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
+	s.SetString(RDP_PORT, "Public port advertised in downloaded RDP files; empty uses the LISTEN_ADDR port, or 443 for an ephemeral listener", "")
 	s.SetString(PPROF_LISTEN_ADDR, "Optional separate loopback-only listen address for Go runtime profiles (for example 127.0.0.1:6060); empty disables pprof", "")
 	s.SetInt(MAX_CONCURRENT_CONNECTIONS, "Maximum number of simultaneously open front connections (RDP + HTTPS); connections beyond the cap are accepted and immediately closed (fail fast, logged) so clients see an error instead of hanging, bounding memory/FD use under a connection flood or slow pre-TLS clients. Values <=0 disable the cap", DefaultMaxConcurrentConnections)
 	s.SetInt(MAX_CONNECTIONS_PER_USER, "Maximum number of concurrently open authenticated long-lived connections (dashboard/serial/VNC websockets and proxied RDP sessions) per user; connections beyond the cap are closed immediately so one scripted user cannot exhaust the shared front-connection budget. Values <=0 disable the cap", DefaultMaxConnectionsPerUser)
@@ -147,7 +149,7 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetString(KEY_FILE, "TLS private key PEM for clients (front side, unencrypted)", "")
 
 	// Duration-typed setting
-	s.SetDuration(TIMEOUT, "handshake/dial/read timeout for setup", 10*time.Second)
+	s.SetDuration(TIMEOUT, "handshake/dial/read timeout for setup and HTTP response writes; HTTP writes use 10s when non-positive", 10*time.Second)
 
 	s.SetBool(ACME_ENABLE, "enable ACME certificate management with certmagic for front TLS", false)
 	s.SetString(ACME_EMAIL, "ACME account email (recommended)", "")
@@ -223,6 +225,26 @@ func (s *Settings) setAuthDefaults() {
 	s.SetInt(LOGIN_RATE_LIMIT_IP_MAX_ATTEMPTS, "Maximum failed login attempts allowed across all usernames from one client IP within LOGIN_RATE_LIMIT_WINDOW; <=0 disables the IP-wide limit", 50)
 	s.SetDuration(LOGIN_RATE_LIMIT_WINDOW, "Rolling window for failed login attempt counting", 5*time.Minute)
 	s.SetDuration(LOGIN_RATE_LIMIT_LOCKOUT, "How long to reject login attempts after either login failure limit is reached", 15*time.Minute)
+}
+
+// RDPPort resolves the public connection port for RDP downloads. An explicit
+// RDP_PORT supports proxies and port mappings; otherwise use the listener's
+// fixed TCP port. Ephemeral or invalid listener addresses cannot advertise a
+// usable port and retain the default 443. Invalid overrides are rejected at boot.
+func RDPPort(settings *Settings) int {
+	if settings == nil {
+		return 443
+	}
+	if port, err := strconv.Atoi(settings.Get(RDP_PORT)); err == nil && port > 0 && port <= 65535 {
+		return port
+	}
+	_, service, err := net.SplitHostPort(strings.TrimSpace(settings.Get(LISTEN_ADDR)))
+	if err == nil {
+		if port, err := net.LookupPort("tcp", service); err == nil && port > 0 {
+			return port
+		}
+	}
+	return 443
 }
 
 // SauronEnabled reports whether the gateway collects SauronAgent guest events
@@ -595,6 +617,7 @@ const (
 	LOGIN_RATE_LIMIT_WINDOW           = "LOGIN_RATE_LIMIT_WINDOW"
 	LOGIN_RATE_LIMIT_LOCKOUT          = "LOGIN_RATE_LIMIT_LOCKOUT"
 	LISTEN_ADDR                       = "LISTEN_ADDR"
+	RDP_PORT                          = "RDP_PORT"
 	PPROF_LISTEN_ADDR                 = "PPROF_LISTEN_ADDR"
 	MAX_CONCURRENT_CONNECTIONS        = "MAX_CONCURRENT_CONNECTIONS"
 	MAX_VDI_PER_USER                  = "MAX_VDI_PER_USER"

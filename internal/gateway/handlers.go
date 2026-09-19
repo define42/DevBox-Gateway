@@ -765,6 +765,7 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 		if !ok {
 			return
 		}
+		w = withRenewableWriteDeadline(w, httpWriteTimeout(settings))
 
 		var creationStream *dashboard.CreationStream
 		var reportProgress virt.DiskCopyProgressFunc

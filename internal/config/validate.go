@@ -38,6 +38,23 @@ func ValidateFrontDomain(settings *Settings) error {
 	return nil
 }
 
+// ValidateRDPPort rejects invalid advertised-port overrides. Empty derives the
+// port from LISTEN_ADDR; an explicit override must name a usable numeric TCP port.
+func ValidateRDPPort(settings *Settings) error {
+	if settings == nil {
+		return fmt.Errorf("settings is nil")
+	}
+	raw := strings.TrimSpace(settings.Get(RDP_PORT))
+	if raw == "" {
+		return nil
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("%s must be empty or a TCP port between 1 and 65535", RDP_PORT)
+	}
+	return nil
+}
+
 // ValidateSplunkHEC rejects a partial Splunk HEC configuration. Forwarding is
 // enabled by SPLUNK_HEC_ENDPOINT, which then requires SPLUNK_HEC_TOKEN; a token
 // or index without an endpoint means forwarding was intended but would

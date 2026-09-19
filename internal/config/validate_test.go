@@ -64,6 +64,38 @@ func TestValidateFrontDomainNilSettings(t *testing.T) {
 	}
 }
 
+func TestValidateRDPPort(t *testing.T) {
+	if err := ValidateRDPPort(nil); err == nil {
+		t.Fatal("nil settings accepted")
+	}
+	cases := []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{name: "automatic", valid: true},
+		{name: "minimum", value: "1", valid: true},
+		{name: "maximum", value: "65535", valid: true},
+		{name: "trimmed", value: " 8443 ", valid: true},
+		{name: "zero", value: "0"},
+		{name: "negative", value: "-1"},
+		{name: "out of range", value: "65536"},
+		{name: "not numeric", value: "https"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(RDP_PORT, tc.value)
+			err := ValidateRDPPort(NewSettings(false))
+			if tc.valid && err != nil {
+				t.Fatalf("ValidateRDPPort: %v", err)
+			}
+			if !tc.valid && (err == nil || !strings.Contains(err.Error(), RDP_PORT)) {
+				t.Fatalf("error = %v, want error naming RDP_PORT", err)
+			}
+		})
+	}
+}
+
 func TestValidateRemovedSSHTunnelModeAcceptsUnsetAndDisabled(t *testing.T) {
 	// Unset is the common case; disabled and unparsable values match how the
 	// setting resolved when it existed (SetBool ignored unparsable values), and

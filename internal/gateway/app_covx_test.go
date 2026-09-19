@@ -252,6 +252,16 @@ func TestMcovBootGatewayFrontDomainError(t *testing.T) {
 	}
 }
 
+func TestMcovBootGatewayRDPPortError(t *testing.T) {
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv(config.RDP_PORT, "65536")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), config.RDP_PORT) {
+		t.Fatalf("expected RDP_PORT validation error, got %v", err)
+	}
+}
+
 func TestMcovBootGatewayRejectsRemovedSSHTunnelMode(t *testing.T) {
 	// A configuration preserved from before the SSH reverse-tunnel mode was
 	// removed may still enable it; boot must fail fast instead of silently

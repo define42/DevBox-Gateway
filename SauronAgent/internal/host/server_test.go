@@ -107,18 +107,21 @@ func (f *fakeSink) closed() int {
 // against a real protocol.Conn without a socket.
 type pipeListener struct {
 	conns     chan net.Conn
+	errs      chan error
 	closeOnce sync.Once
 	done      chan struct{}
 }
 
 func newPipeListener() *pipeListener {
-	return &pipeListener{conns: make(chan net.Conn, 16), done: make(chan struct{})}
+	return &pipeListener{conns: make(chan net.Conn, 16), errs: make(chan error, 1), done: make(chan struct{})}
 }
 
 func (l *pipeListener) Accept() (net.Conn, error) {
 	select {
 	case c := <-l.conns:
 		return c, nil
+	case err := <-l.errs:
+		return nil, err
 	case <-l.done:
 		return nil, net.ErrClosed
 	}
@@ -536,6 +539,52 @@ func TestRunDrainsSessionsAndClosesSink(t *testing.T) {
 	}
 	if got := h.sink.closed(); got != 1 {
 		t.Fatalf("sink closed %d times, want exactly 1 and only after the sessions drained", got)
+	}
+}
+
+func TestFatalAcceptErrorStopsSessionsAndMonitoring(t *testing.T) {
+	cfg := config.DefaultHost()
+	cfg.Listen = config.ListenSection{Kind: config.TransportTCP, TCPAddress: "127.0.0.1:0"}
+	cfg.Monitor.Enabled = true
+	cfg.Limits.AllowUnknownCIDs = true
+	sink := newFakeSink()
+	lis := newPipeListener()
+	srv, err := New(Options{Config: cfg, Sink: sink, Listener: lis})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx) }()
+	t.Cleanup(func() { cancel(); _ = srv.Close() })
+	client, server := net.Pipe()
+	lis.conns <- server
+	g := newGuest(t, client)
+	g.handshake(&protocol.Hello{AgentVersion: "test", BootID: "boot-a"})
+	if srv.metrics.ConnectionsActive.Load() != 1 {
+		t.Fatal("test requires an active session before the listener fails")
+	}
+
+	acceptErr := errors.New("listener failed permanently")
+	lis.errs <- acceptErr
+	select {
+	case err := <-done:
+		if !errors.Is(err, acceptErr) {
+			t.Fatalf("Run returned %v, want original accept error", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not cancel sessions and monitoring after a fatal accept error")
+	}
+	if ctx.Err() != nil {
+		t.Fatal("Run required external cancellation to stop")
+	}
+	g.wantClosed()
+	if srv.metrics.ConnectionsActive.Load() != 0 {
+		t.Error("Run returned with a live session")
+	}
+	if got := sink.closed(); got != 1 {
+		t.Errorf("sink closed %d times, want 1 after workers exit", got)
 	}
 }
 

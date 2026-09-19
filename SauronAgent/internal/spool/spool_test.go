@@ -197,6 +197,45 @@ func TestNextIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestNextAfterDoesNotAcknowledgeSkippedEvents(t *testing.T) {
+	sp := mustOpen(t, Options{Dir: t.TempDir(), SegmentSize: 4096})
+	appendRange(t, sp, 1, 10)
+	for _, tc := range []struct {
+		name    string
+		through uint64
+		want    []uint64
+	}{
+		{name: "start", want: []uint64{1, 2}},
+		{name: "middle", through: 5, want: []uint64{6, 7}},
+		{name: "last", through: 9, want: []uint64{10}},
+		{name: "past end", through: 10},
+		{name: "maximum sequence", through: ^uint64(0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events, err := sp.NextAfter(tc.through, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []uint64
+			for _, e := range events {
+				got = append(got, e.Sequence)
+			}
+			wantSeqs(t, got, tc.want...)
+		})
+	}
+	if sp.PendingCount() != 10 || sp.FirstUnacked() != 1 {
+		t.Fatal("advancing the read cursor discarded unacknowledged events")
+	}
+	wantSeqs(t, nextSeqs(t, sp, 2), 1, 2)
+	if err := sp.Ack(7); err != nil {
+		t.Fatal(err)
+	}
+	events, err := sp.NextAfter(5, 2)
+	if err != nil || len(events) != 2 || events[0].Sequence != 8 || events[1].Sequence != 9 {
+		t.Fatalf("read cursor behind ACK returned %v, %v", events, err)
+	}
+}
+
 func TestAckDiscardsPrefix(t *testing.T) {
 	dir := t.TempDir()
 	sp := mustOpen(t, Options{Dir: dir})

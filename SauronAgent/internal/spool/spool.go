@@ -381,12 +381,20 @@ func (s *Spool) Append(e *event.Event) error {
 // A non-nil error means the backlog could not be read; nothing has been lost
 // and the same call can be retried.
 func (s *Spool) Next(max int) ([]*event.Event, error) {
+	return s.NextAfter(0, max)
+}
+
+// NextAfter returns up to max unacknowledged events whose sequences exceed
+// through. It lets a sender advance its session cursor past events already
+// sent or skipped without consuming them: Next still replays all retained
+// events after a reconnect, and only Ack releases durable records.
+func (s *Spool) NextAfter(through uint64, max int) ([]*event.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, errClosed
 	}
-	if max <= 0 || s.pending == 0 {
+	if max <= 0 || s.pending == 0 || through >= s.lastSeq {
 		return nil, nil
 	}
 
@@ -401,7 +409,7 @@ func (s *Spool) Next(max int) ([]*event.Event, error) {
 		if len(out) >= max {
 			break
 		}
-		if sg.count == 0 || sg.last < from {
+		if sg.count == 0 || sg.last < from || sg.last <= through {
 			continue
 		}
 		start := int64(0)
@@ -430,6 +438,9 @@ func (s *Spool) Next(max int) ([]*event.Event, error) {
 				}
 				badHigh = seq
 				return len(out) < max
+			}
+			if seq <= through {
+				return true
 			}
 			out = append(out, &ev)
 			return len(out) < max

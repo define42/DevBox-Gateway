@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -131,8 +132,25 @@ func assertGatewayWebsocketDialOrPreparation(t *testing.T, server gatewayTestSer
 func assertGatewayStoppedConsoleAndVNC(t *testing.T, server gatewayTestServer, fullName string) {
 	t.Helper()
 
-	assertGatewayStatusContains(t, server.client, http.MethodGet, server.baseURL+"/api/dashboard/console/"+fullName+"/ws", nil, http.StatusConflict, "VM must be running for terminal access.")
+	path := "/api/dashboard/console/" + fullName + "/ws"
+	assertGatewayStatus(t, server.client, http.MethodGet, server.baseURL+path, nil, http.StatusBadRequest)
 	assertGatewayStatusContains(t, server.client, http.MethodGet, server.baseURL+"/api/dashboard/vnc/"+fullName+"/ws", nil, http.StatusConflict, "VM must be running for VNC access.")
+
+	// A valid serial request upgrades before opening libvirt's forced console.
+	// Backend failures are therefore reported with a WebSocket close frame.
+	ws, _, body, err := tryGatewayWebsocketDial(t, server, path)
+	if err != nil {
+		t.Fatalf("upgrade stopped VM serial connection: %v, body %q", err, body)
+	}
+	defer func() { _ = ws.Close() }()
+	if err := ws.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set serial read deadline: %v", err)
+	}
+	_, _, err = ws.ReadMessage()
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != websocket.CloseTryAgainLater || closeErr.Text != "VM must be running for terminal access." {
+		t.Fatalf("stopped VM serial close = %v, want retryable close explaining that the VM is stopped", err)
+	}
 }
 
 func TestGatewayConsoleAndVNCFlows(t *testing.T) {

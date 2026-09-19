@@ -29,6 +29,10 @@ import (
 // VMNameProvider returns the current VM names used to maintain the ACME domain set.
 type VMNameProvider func() []string
 
+// acmeDomainUpdateTimeout bounds a synchronous refresh; failed domains are
+// retried on the next worker tick without holding up later refreshes forever.
+const acmeDomainUpdateTimeout = 5 * time.Minute
+
 // TLSManager owns the frontend TLS configuration and ACME domain updates.
 type TLSManager struct {
 	magic          *certmagic.Config
@@ -56,7 +60,7 @@ func (tm *TLSManager) worker(ctx context.Context, ticker *time.Ticker) {
 	for {
 		select {
 		case <-ticker.C:
-			tm.updateDomains()
+			tm.updateDomains(ctx)
 		case <-ctx.Done():
 			return
 		}
@@ -81,7 +85,10 @@ func (tm *TLSManager) Close() error {
 	return nil
 }
 
-func (tm *TLSManager) updateDomains() {
+func (tm *TLSManager) updateDomains(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	vmNames := tm.vmNames()
 	frontPageDomain := tm.settings.Get(config.FRONT_DOMAIN)
 	secret := []byte(tm.settings.Get(config.SNI_HASH_SECRET))
@@ -91,7 +98,9 @@ func (tm *TLSManager) updateDomains() {
 	if sameElements(tm.managedDomains(), domains) {
 		return
 	}
-	if err := tm.magic.ManageSync(context.Background(), domains); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, acmeDomainUpdateTimeout)
+	defer cancel()
+	if err := tm.magic.ManageSync(ctx, domains); err != nil {
 		log.Printf("acme: error updating managed domains: %v", err)
 		return
 	}

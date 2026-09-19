@@ -191,11 +191,25 @@ func TestWriteRDPFileWithLibvirtVM(t *testing.T) {
 	t.Setenv(config.SNI_HASH_SECRET, covxSNISecret)
 	settings := config.NewSettings(false)
 
-	t.Run("download", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		WriteRDPFile(rec, settings, owner, vmName)
-		assertRDPDownload(t, rec, owner, vmName)
-	})
+	for _, tc := range []struct {
+		name   string
+		listen string
+		public string
+		want   int
+	}{
+		{name: "default port", listen: ":443", want: 443},
+		{name: "custom listener port", listen: ":8443", want: 8443},
+		{name: "IPv6 listener port", listen: "[::]:9443", want: 9443},
+		{name: "proxy port override", listen: ":8443", public: "443", want: 443},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.LISTEN_ADDR, tc.listen)
+			t.Setenv(config.RDP_PORT, tc.public)
+			rec := httptest.NewRecorder()
+			WriteRDPFile(rec, config.NewSettings(false), owner, vmName)
+			assertRDPDownload(t, rec, owner, vmName, tc.want)
+		})
+	}
 
 	t.Run("other VM name not found", func(t *testing.T) {
 		if _, _, ok := RDPFileForUser(settings, owner, vmName+"-other"); ok {
@@ -212,7 +226,7 @@ func TestWriteRDPFileWithLibvirtVM(t *testing.T) {
 	})
 }
 
-func assertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, owner, vmName string) {
+func assertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, owner, vmName string, port int) {
 	t.Helper()
 
 	if rec.Code != http.StatusOK {
@@ -228,7 +242,7 @@ func assertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, owner, vmNa
 
 	body := rec.Body.String()
 	wantHost := hash.RoutingLabel([]byte(covxSNISecret), vmName) + "." + covxFrontDomain
-	if !strings.Contains(body, "full address:s:"+wantHost+":443") {
+	if !strings.Contains(body, fmt.Sprintf("full address:s:%s:%d\n", wantHost, port)) {
 		t.Fatalf("expected connect host %q in body %q", wantHost, body)
 	}
 	// The test domain carries no guest-user metadata, so the RDP login falls

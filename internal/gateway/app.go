@@ -368,6 +368,9 @@ func loadBootSettings() (*config.Settings, error) {
 	if err := config.ValidateFrontDomain(settings); err != nil {
 		return nil, err
 	}
+	if err := config.ValidateRDPPort(settings); err != nil {
+		return nil, err
+	}
 	if err := config.ValidateSplunkHEC(settings); err != nil {
 		return nil, err
 	}

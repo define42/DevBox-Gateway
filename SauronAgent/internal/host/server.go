@@ -241,6 +241,9 @@ func (s *Server) Run(ctx context.Context) error {
 		"hypervisor", s.cfg.Host.Name)
 
 	runErr := s.accept(ctx)
+	// A fatal listener error ends acceptance without cancelling the parent.
+	// Stop the sessions and monitor before waiting for either to finish.
+	cancel()
 
 	// Sessions are woken by the same context and finish what they were doing;
 	// the sink must stay open until the last of them has stopped writing to it.

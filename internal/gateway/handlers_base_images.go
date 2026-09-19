@@ -72,6 +72,7 @@ func registerAdminBaseImageUploadRoute(group huma.API, sessionManager *session.M
 		if !ok {
 			return
 		}
+		w = withRenewableWriteDeadline(w, httpWriteTimeout(settings))
 		clearBaseImageUploadReadDeadline(w, user)
 
 		maxBytes := maxBaseImageUploadBytes(settings)

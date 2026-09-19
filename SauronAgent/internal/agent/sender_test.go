@@ -1,14 +1,21 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"net"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/define42/SauronAgent/internal/config"
 	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/SauronAgent/internal/logging"
+	"github.com/define42/SauronAgent/internal/metrics"
 	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/SauronAgent/internal/spool"
 )
 
 // TestMaxUnackedCapsOutstanding checks the flow-control bound. Without it a
@@ -205,6 +212,310 @@ func TestSenderRefusesOversizedEvents(t *testing.T) {
 		t.Errorf("Run: %v", err)
 	}
 	c.checkClean(t)
+}
+
+func TestDispatchAdvancesPastOversizedBacklog(t *testing.T) {
+	for _, name := range []string{"memory", "spool"} {
+		t.Run(name, func(t *testing.T) {
+			const oversizedCount = 2*maxSendBatch + 1
+			cfg := testConfig("")
+			cfg.Transport.MaxUnacked = oversizedCount + 1
+			opts := senderOptions{
+				cfg: cfg, metrics: &metrics.Agent{}, log: logging.Discard(),
+				emit: func(*event.Event) {},
+			}
+			if name == "spool" {
+				sp, err := spool.Open(spool.Options{Dir: t.TempDir()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = sp.Close() })
+				opts.spool = sp
+			}
+			s := newSender(opts)
+			for seq := uint64(1); seq <= oversizedCount+1; seq++ {
+				e := &event.Event{Sequence: seq, Type: event.TypeProcessExec}
+				if seq <= oversizedCount {
+					e.Command = strings.Repeat("A", 8192)
+				}
+				if err := s.backlog.Reserve(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.backlog.Append(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			client, server := net.Pipe()
+			t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+			conn := protocol.NewConn(client, 4096)
+			received := make(chan protocol.Frame, 2)
+			go func() {
+				peer := protocol.NewConn(server, 4096)
+				for {
+					f, err := peer.Receive(0)
+					if err != nil {
+						return
+					}
+					received <- *f
+				}
+			}()
+
+			// Reset only the session cursor to simulate a reconnect. Valid
+			// unacknowledged events must replay, and losses must not be recounted.
+			for session := 0; session < 2; session++ {
+				var inflight []uint64
+				var sentThrough uint64
+				sent := 0
+				for pass := 0; pass < 4; pass++ {
+					n, err := s.dispatch(conn, &inflight, &sentThrough)
+					if err != nil {
+						t.Fatal(err)
+					}
+					sent += n
+				}
+				if sent != 1 {
+					t.Fatalf("session %d sent %d events after an oversized prefix, want 1", session, sent)
+				}
+				select {
+				case f := <-received:
+					if f.Type != protocol.MsgEvent || f.Sequence != oversizedCount+1 {
+						t.Fatalf("received %s sequence %d, want valid event %d", f.Type, f.Sequence, oversizedCount+1)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("valid event did not reach the collector")
+				}
+			}
+			if got := s.metrics.EventsDropped.Load(); got != oversizedCount {
+				t.Errorf("reported %d losses, want %d", got, oversizedCount)
+			}
+			if s.ackedThrough.Load() != 0 || s.backlog.PendingCount() == 0 {
+				t.Fatal("sending consumed an event without a host acknowledgement")
+			}
+		})
+	}
+}
+
+func TestOversizedMemoryEventsReleaseOnlyTheirSlots(t *testing.T) {
+	cfg := testConfig("")
+	cfg.Transport.MaxUnacked = 3
+	var losses []*event.Event
+	s := newSender(senderOptions{
+		cfg: cfg, metrics: &metrics.Agent{}, log: logging.Discard(),
+		emit: func(e *event.Event) { losses = append(losses, e) },
+	})
+	b := s.backlog.(*memBacklog)
+	appendEvent := func(seq uint64, command string) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if err := b.Reserve(ctx); err != nil {
+			t.Fatalf("reserving slot for sequence %d: %v", seq, err)
+		}
+		if err := b.Append(&event.Event{Sequence: seq, Type: event.TypeProcessExec, Command: command}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendEvent(1, "valid but unacknowledged")
+	appendEvent(2, strings.Repeat("A", 8192))
+	appendEvent(3, strings.Repeat("A", 8192))
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	go func() {
+		peer := protocol.NewConn(server, 4096)
+		for {
+			if _, err := peer.Receive(0); err != nil {
+				return
+			}
+		}
+	}()
+	conn := protocol.NewConn(client, 4096)
+	var inflight []uint64
+	var through uint64
+	if sent, err := s.dispatch(conn, &inflight, &through); err != nil || sent != 1 {
+		t.Fatalf("first dispatch sent %d: %v", sent, err)
+	}
+	if len(losses) != 2 || s.metrics.EventsDropped.Load() != 2 {
+		t.Fatal("oversized events were released without recording both losses")
+	}
+	appendEvent(4, "later valid event")
+	if sent, err := s.dispatch(conn, &inflight, &through); err != nil || sent != 1 {
+		t.Fatalf("second dispatch sent %d: %v", sent, err)
+	}
+	retained, err := b.Next(3)
+	if err != nil || len(retained) != 2 || retained[0].Sequence != 1 || retained[1].Sequence != 4 {
+		t.Fatalf("valid events were not retained for replay: %v, %v", retained, err)
+	}
+	if s.ackedThrough.Load() != 0 || b.FirstUnacked() != 1 {
+		t.Fatal("skipping oversized events acknowledged the earlier valid event")
+	}
+}
+
+func TestOversizedLossReportDoesNotRecurse(t *testing.T) {
+	for _, name := range []string{"memory", "spool"} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			cfg := testConfig("")
+			cfg.Transport.MaxUnacked = 4
+			opts := senderOptions{
+				cfg: cfg, metrics: &metrics.Agent{},
+				log: slog.New(slog.NewJSONHandler(&logs, nil)),
+			}
+			if name == "spool" {
+				sp, err := spool.Open(spool.Options{Dir: t.TempDir()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = sp.Close() })
+				opts.spool = sp
+			}
+			s := newSender(opts)
+			next := uint64(1)
+			appendEvent := func(e *event.Event) {
+				t.Helper()
+				e.Sequence = next
+				next++
+				if err := s.backlog.Reserve(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.backlog.Append(e); err != nil {
+					t.Fatal(err)
+				}
+			}
+			emitted := 0
+			s.emit = func(e *event.Event) { emitted++; appendEvent(e) }
+			appendEvent(&event.Event{Type: event.TypeProcessExec, Command: strings.Repeat("A", 8192)})
+
+			client, server := net.Pipe()
+			t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+			conn := protocol.NewConn(client, 300)
+			var inflight []uint64
+			var through uint64
+			for pass := 0; pass < 8; pass++ {
+				if sent, err := s.dispatch(conn, &inflight, &through); err != nil || sent != 0 {
+					t.Fatalf("oversized dispatch sent %d: %v", sent, err)
+				}
+			}
+			if emitted != 1 || s.metrics.EventsDropped.Load() != 2 {
+				t.Fatalf("one oversized event generated %d reports and %d drops, want 1 report and 2 drops",
+					emitted, s.metrics.EventsDropped.Load())
+			}
+			if !strings.Contains(logs.String(), "payload limit cannot carry its loss report") ||
+				!strings.Contains(logs.String(), "first_missing_sequence") {
+				t.Fatal("undeliverable loss report and its original range were not preserved in local logs")
+			}
+			if name == "memory" && len(s.oversized) != 0 {
+				t.Fatalf("%d oversized markers retained for discarded memory events", len(s.oversized))
+			}
+
+			appendEvent(&event.Event{Type: event.TypeProcessExec})
+			received := make(chan uint64, 1)
+			go func() {
+				f, err := protocol.NewConn(server, 300).Receive(time.Second)
+				if err == nil {
+					received <- f.Sequence
+				}
+			}()
+			if sent, err := s.dispatch(conn, &inflight, &through); err != nil || sent != 1 {
+				t.Fatalf("later small event sent %d: %v", sent, err)
+			}
+			select {
+			case seq := <-received:
+				if seq != 3 {
+					t.Fatalf("received sequence %d, want later small event 3", seq)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("later small event did not reach collector")
+			}
+		})
+	}
+}
+
+func TestOversizedSpoolMarkersFollowRetention(t *testing.T) {
+	sp, err := spool.Open(spool.Options{Dir: t.TempDir(), SegmentSize: 4096, MaxSize: 8192})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sp.Close() })
+	s := newSender(senderOptions{
+		cfg: testConfig(""), spool: sp, metrics: &metrics.Agent{}, log: logging.Discard(),
+		emit: func(*event.Event) {},
+	})
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	conn := protocol.NewConn(client, 300)
+	for seq := uint64(1); seq <= 8; seq++ {
+		if err := sp.Append(&event.Event{Sequence: seq, Command: strings.Repeat("A", 4096)}); err != nil {
+			t.Fatal(err)
+		}
+		s.reconcile()
+		// Replay the retained backlog twice; eviction should forget only old
+		// markers, leaving once-only loss accounting for the surviving record.
+		for replay := 0; replay < 2; replay++ {
+			var through uint64
+			var inflight []uint64
+			if sent, err := s.dispatch(conn, &inflight, &through); err != nil || sent != 0 {
+				t.Fatalf("oversized dispatch sent %d: %v", sent, err)
+			}
+		}
+		if sp.FirstUnacked() != seq || len(s.oversized) != 1 || !s.isOversized(seq) {
+			t.Fatalf("markers do not match retained sequence %d: first=%d, markers=%v", seq, sp.FirstUnacked(), s.oversized)
+		}
+		if got := s.metrics.EventsDropped.Load(); got != seq {
+			t.Fatalf("replay recounted loss: got %d dropped events, want %d", got, seq)
+		}
+	}
+}
+
+func TestOversizedProgressDoesNotExtendAckTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig("")
+		cfg.Transport.MaxUnacked = 4
+		cfg.Transport.AckTimeout = config.Duration(100 * time.Millisecond)
+		s := newSender(senderOptions{
+			cfg: cfg, metrics: &metrics.Agent{}, log: logging.Discard(),
+		})
+		appendEvent := func(seq uint64, oversized bool) {
+			t.Helper()
+			e := &event.Event{Sequence: seq, Type: event.TypeProcessExec}
+			if oversized {
+				e.Command = strings.Repeat("A", 8192)
+			}
+			if err := s.backlog.Reserve(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.backlog.Append(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		appendEvent(1, false)
+		appendEvent(2, true)
+		appendEvent(3, true)
+		next := uint64(4)
+		s.emit = func(*event.Event) {
+			// Keep the backlog nonempty and advance the clock as losses are
+			// processed, while the first valid event remains unacknowledged.
+			time.Sleep(10 * time.Millisecond)
+			appendEvent(next, true)
+			next++
+		}
+		client, server := net.Pipe()
+		t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+		go func() {
+			peer := protocol.NewConn(server, 4096)
+			for {
+				if _, err := peer.Receive(0); err != nil {
+					return
+				}
+			}
+		}()
+		sctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		err := s.sendLoop(t.Context(), sctx, protocol.NewConn(client, 4096))
+		if err == nil || !strings.Contains(err.Error(), "unacknowledged") {
+			t.Fatalf("sendLoop returned %v, want acknowledgement timeout despite skipped-event progress", err)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

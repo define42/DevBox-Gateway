@@ -137,7 +137,7 @@ func TestUpdateDomainsManageSyncError(t *testing.T) {
 	magic.Storage = &certmagic.FileStorage{Path: storagePath}
 
 	manager := &TLSManager{magic: magic, settings: settings, vmNames: noVMNames}
-	manager.updateDomains()
+	manager.updateDomains(t.Context())
 
 	if got := manager.managedDomains(); len(got) != 0 {
 		t.Fatalf("expected managed domains unchanged after ManageSync failure, got %v", got)
