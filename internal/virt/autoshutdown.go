@@ -13,7 +13,7 @@ import (
 // passes keeps shutdowns timely at negligible cost: a pass reads only the
 // background worker's cached VM snapshot and the in-memory last-used registry,
 // touching libvirt once per VM after a gateway restart (to recover persisted
-// timestamps) and only for VMs it is actually stopping.
+// timestamps), checkpointing connected VMs, and stopping idle VMs.
 const autoShutdownSweepInterval = time.Minute
 
 // autoShutdownGracePeriod is how long the sweeper waits between asking an idle
@@ -34,6 +34,7 @@ type autoShutdownSweeper struct {
 	listVMs         func() []VMInfo
 	lastUsed        *vmLastUsedRegistry
 	loadLastUsed    func(name string) (time.Time, bool)
+	persistLastUsed func(name string, usedAt time.Time) error
 	requestShutdown func(name string) error
 	forceShutdown   func(name string) error
 	// shutdownRequestedAt records, per VM name, when the sweeper asked the
@@ -71,6 +72,17 @@ func (s *autoShutdownSweeper) sweep() {
 }
 
 func (s *autoShutdownSweeper) sweepVM(vm VMInfo) {
+	// VM creation/start/removal takes the lifecycle lock before updating last
+	// use. Follow that order so a sweep cannot stop a just-started VM before
+	// its new timestamp is published.
+	unlockVM := vmNameLocks.Lock(vm.Name)
+	defer unlockVM()
+	// Serialize connection admission and activity updates with the entire idle
+	// decision and shutdown RPC. This also prevents a slow metadata recovery
+	// from overwriting a newly connected user's timestamp. Other VMs are free
+	// to connect while this VM's libvirt operation is in progress.
+	unlock := s.lastUsed.guards.Lock(vm.Name)
+	defer unlock()
 	// Only gateway-managed VDIs are candidates: the inventory lists every
 	// persistent domain on the host, and stopping an operator's unrelated VM
 	// (no owner metadata) would be destructive. A VM that is not running needs
@@ -78,6 +90,19 @@ func (s *autoShutdownSweeper) sweepVM(vm VMInfo) {
 	// honored, so the escalation state is complete.
 	if vm.Owner == "" || vm.State != "running" {
 		delete(s.shutdownRequestedAt, vm.Name)
+		return
+	}
+	if s.lastUsed.inUse(vm.Name) {
+		delete(s.shutdownRequestedAt, vm.Name)
+		now := s.now()
+		s.lastUsed.set(vm.Name, now)
+		// Checkpoint live use so an abrupt gateway restart does not recover a
+		// timestamp from hours before the connection was interrupted.
+		if s.persistLastUsed != nil {
+			if err := s.persistLastUsed(vm.Name, now); err != nil {
+				log.Printf("persist active use for VDI %s: %v", vm.Name, err)
+			}
+		}
 		return
 	}
 
@@ -143,7 +168,9 @@ func (s *autoShutdownSweeper) stopIdleVM(vm VMInfo, idleFor time.Duration) {
 // StartAutoShutdownWorker starts the background loop that stops VDIs unused
 // for longer than VDI_AUTO_SHUTDOWN_HOURS, and returns a function that stops
 // it. A VDI counts as used when it is created or started and whenever its
-// owner opens RDP, serial, or noVNC from the dashboard (see MarkVMUsed). An
+// owner opens RDP, serial, or noVNC from the dashboard (see MarkVMUsed).
+// Connected RDP, serial, and noVNC sessions prevent shutdown; the idle window
+// starts again when the last connection ends (see TrackVMUse). An
 // idle VDI is first asked to shut down via an ACPI power button event and is
 // force-stopped if still running after autoShutdownGracePeriod. When the
 // setting is unset or non-positive the feature is disabled and the returned
@@ -171,6 +198,7 @@ func StartAutoShutdownWorker(settings *config.Settings) (stop func()) {
 		},
 		lastUsed:            vmLastUsed,
 		loadLastUsed:        loadVMLastUsedFromMetadata,
+		persistLastUsed:     persistVMLastUsed,
 		requestShutdown:     GracefulShutdownVM,
 		forceShutdown:       ShutdownVM,
 		shutdownRequestedAt: make(map[string]time.Time),

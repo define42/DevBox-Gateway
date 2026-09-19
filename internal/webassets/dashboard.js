@@ -60,6 +60,7 @@ const state = {
         baseImage: "",
         created: "",
         lastUsed: "",
+        inUse: false,
         vmState: "",
     },
     baseImageManager: {
@@ -145,15 +146,18 @@ function formatDurationShort(ms) {
 }
 // formatAutoShutdown renders when the idle reaper will stop the VM: the
 // last-used time plus the configured VDI_AUTO_SHUTDOWN_HOURS limit. Only
-// running VMs are candidates, so anything else shows n/a; "imminent" means the
+// running VMs without desktop connections are candidates; "imminent" means the
 // limit has already passed and the gateway is about to ask the guest to shut
 // down (force-stop follows a few minutes later if it does not).
-function formatAutoShutdown(lastUsed, vmState) {
+function formatAutoShutdown(lastUsed, vmState, inUse) {
     if (state.autoShutdownHours <= 0) {
         return "Disabled";
     }
     if (vmState.trim().toLowerCase() !== "running") {
         return "n/a";
+    }
+    if (inUse) {
+        return "Connected — auto-shutdown paused";
     }
     const raw = (lastUsed || "").trim();
     if (raw === "") {
@@ -1362,7 +1366,7 @@ function bootstrap() {
         infoImageEl.textContent = state.info.baseImage || "n/a";
         infoCreatedEl.textContent = formatCreatedAt(state.info.created);
         infoLastUsedEl.textContent = formatCreatedAt(state.info.lastUsed);
-        infoAutoShutdownEl.textContent = formatAutoShutdown(state.info.lastUsed, state.info.vmState);
+        infoAutoShutdownEl.textContent = formatAutoShutdown(state.info.lastUsed, state.info.vmState, state.info.inUse);
     }
     function setInfoFromVM(vm) {
         const ipValue = (vm.ip || "").trim();
@@ -1373,6 +1377,7 @@ function bootstrap() {
         state.info.baseImage = (vm.baseImage || "").trim();
         state.info.created = (vm.createdAt || "").trim();
         state.info.lastUsed = (vm.lastUsed || "").trim();
+        state.info.inUse = vm.inUse === true;
         state.info.vmState = (vm.state || "").trim();
     }
     function openInfo(vm) {
@@ -1404,6 +1409,7 @@ function bootstrap() {
         state.info.baseImage = "";
         state.info.created = "";
         state.info.lastUsed = "";
+        state.info.inUse = false;
         state.info.vmState = "";
         renderInfo();
     }

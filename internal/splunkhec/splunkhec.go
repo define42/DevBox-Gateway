@@ -36,8 +36,9 @@ const (
 	// EventPath is the JSON event endpoint used when Config.Endpoint has no path.
 	EventPath = "/services/collector/event"
 
-	requestTimeout = 10 * time.Second
-	errorBodyLimit = 512
+	requestTimeout   = 10 * time.Second
+	errorBodyLimit   = 512
+	successBodyLimit = 64 << 10
 )
 
 // Envelope is the HEC JSON event format. Several marshaled envelopes
@@ -80,7 +81,15 @@ func New(config Config) (*Client, error) {
 		endpoint:      endpoint,
 		authorization: "Splunk " + token,
 		index:         strings.TrimSpace(config.Index),
-		http:          &http.Client{Transport: transport, Timeout: requestTimeout},
+		http: &http.Client{
+			Transport: transport,
+			Timeout:   requestTimeout,
+			// A redirect can discard the POST body or send evidence and the
+			// token to a different endpoint. Only the configured HEC may reply.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}, nil
 }
 
@@ -126,9 +135,7 @@ func (c *Client) Post(ctx context.Context, body []byte) error {
 	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		// Drain the acknowledgement so the connection can be reused.
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return nil
+		return confirmAccepted(response.Body)
 	}
 
 	detail, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
@@ -137,6 +144,23 @@ func (c *Client) Post(ctx context.Context, body []byte) error {
 		return statusErr
 	}
 	return &rejectedError{err: statusErr, status: response.StatusCode, code: replyCode(detail)}
+}
+
+// confirmAccepted requires HEC's success code before callers can discard their
+// copy of an event. An unknown reply is retryable: a proxy's HTML page, a torn
+// response, or a nonzero code does not establish that HEC accepted the data.
+func confirmAccepted(body io.Reader) error {
+	reply, err := io.ReadAll(io.LimitReader(body, successBodyLimit+1))
+	if err != nil {
+		return fmt.Errorf("read splunk hec acknowledgement: %w", err)
+	}
+	if len(reply) > successBodyLimit {
+		return fmt.Errorf("splunk hec acknowledgement exceeds %d bytes", successBodyLimit)
+	}
+	if code := replyCode(reply); code != 0 {
+		return fmt.Errorf("splunk hec did not confirm acceptance with code 0 (reply code %d)", code)
+	}
+	return nil
 }
 
 // replyCode extracts the HEC status code from a collector reply such as
@@ -213,13 +237,15 @@ func IsInvalidEvent(err error) bool {
 // retryableStatus reports whether a failed request may succeed later without
 // a configuration change on the sender's side. Besides throttling and server
 // errors this covers authentication failures, because a disabled token can be
-// re-enabled on the Splunk side. Other client errors (bad request, incorrect
-// index, wrong path) reject the request itself.
+// re-enabled on the Splunk side. Redirects leave acceptance unknown and must
+// retain the events too. Other client errors (bad request, incorrect index,
+// wrong path) reject the request itself.
 func retryableStatus(status int) bool {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
 		return true
 	default:
-		return status >= http.StatusInternalServerError
+		return (status >= http.StatusMultipleChoices && status < http.StatusBadRequest) ||
+			status >= http.StatusInternalServerError
 	}
 }

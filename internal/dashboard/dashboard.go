@@ -41,6 +41,7 @@ type VM struct {
 	BaseImage    string `json:"baseImage,omitempty"`
 	CreatedAt    string `json:"createdAt,omitempty"`
 	LastUsed     string `json:"lastUsed,omitempty"`
+	InUse        bool   `json:"inUse,omitempty"`
 	RDPFilename  string `json:"rdpFilename"`
 	IP           string `json:"ip"`
 	State        string `json:"state"`
@@ -255,6 +256,7 @@ func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 			BaseImage:    strings.TrimSpace(vm.BaseImage),
 			CreatedAt:    strings.TrimSpace(vm.CreatedAt),
 			LastUsed:     strings.TrimSpace(vm.LastUsed),
+			InUse:        vm.InUse,
 			RDPFilename:  rdpDownloadFilename(vm.Name),
 			IP:           vm.IP,
 			State:        vm.State,

@@ -113,6 +113,13 @@ func pingWebsocketUntil(ws *websocket.Conn, done <-chan struct{}) {
 	}
 }
 
+// finishDashboardConnection persists the disconnect before unregistering tells
+// gateway shutdown that this connection has drained.
+func finishDashboardConnection(endVMUse, unregister func()) {
+	endVMUse()
+	unregister()
+}
+
 // rejectDashboardConnection closes a just-upgraded websocket whose authorization
 // expired, whose user reached the connection limit, or whose gateway is stopping.
 func rejectDashboardConnection(kind, username string, ws *websocket.Conn) {

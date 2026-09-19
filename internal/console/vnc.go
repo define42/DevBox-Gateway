@@ -46,14 +46,14 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			return
 		}
 		debugf("vnc: ownership confirmed for vm %q; opening VNC backend", name)
+		endVMUse := virt.TrackVMUse(name)
+		defer endVMUse()
 
 		vncConn, err := openDashboardVNCSocket(name)
 		if err != nil {
 			writeDashboardVNCSocketError(w, name, err)
 			return
 		}
-		// Opening noVNC counts as use for auto-shutdown.
-		virt.MarkVMUsed(name)
 		debugf("vnc: backend connected for vm %q (%s); upgrading websocket", name, vncConn.RemoteAddr())
 
 		dashboardSocketUpgrader := websocket.Upgrader{
@@ -77,7 +77,7 @@ func HandleDashboardVNCWS(sessionManager *session.Manager) http.HandlerFunc {
 			_ = vncConn.Close()
 			return
 		}
-		defer unregisterConnection()
+		defer finishDashboardConnection(endVMUse, unregisterConnection)
 
 		defer auditConsoleConnection(r.Context(), user, r.RemoteAddr, name, audit.ProtocolNoVNC)()
 

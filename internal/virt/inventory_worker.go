@@ -139,8 +139,9 @@ func (s *Inventory) invalidateVMSnapshot() {
 // entry's LastUsed is overlaid with the in-memory registry when it has a
 // fresher value: the cached snapshot carries the persisted metadata as of the
 // domain's first sweep, while the registry records every touch since. The
-// overlay happens on the returned copies only — the internal snapshot keeps
-// raw sweep data so its change detection is unaffected.
+// current connection activity is also overlaid in InUse. These overlays change
+// the returned copies only; the internal snapshot keeps raw sweep data so its
+// change detection is unaffected.
 func (s *Inventory) VMs(user string) []VMInfo {
 	snapshot := s.snapshotVMs()
 
@@ -152,6 +153,7 @@ func (s *Inventory) VMs(user string) []VMInfo {
 		if lastUsed, ok := vmLastUsed.get(vm.Name); ok {
 			vm.LastUsed = formatLastUsedTimestamp(lastUsed)
 		}
+		vm.InUse = vmLastUsed.inUse(vm.Name)
 		filteredVMs = append(filteredVMs, vm)
 	}
 	return filteredVMs

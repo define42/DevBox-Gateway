@@ -143,6 +143,7 @@ func TestBuildDashboardRows(t *testing.T) {
 			Owner:     "alice",
 			GuestUser: "guest",
 			LastUsed:  " 2026-08-16T09:30:00Z ",
+			InUse:     true,
 			IP:        "192.0.2.10",
 			State:     "running",
 			MemoryMiB: 4096,
@@ -162,6 +163,9 @@ func TestBuildDashboardRows(t *testing.T) {
 	if row.LastUsed != "2026-08-16T09:30:00Z" {
 		t.Fatalf("expected trimmed last-used timestamp, got %q", row.LastUsed)
 	}
+	if !row.InUse {
+		t.Fatal("expected active desktop use to be copied to the dashboard row")
+	}
 	if row.User != "guest" {
 		t.Fatalf("expected user %q, got %q", "guest", row.User)
 	}
@@ -176,6 +180,21 @@ func TestBuildDashboardRows(t *testing.T) {
 	}
 	if row.RDPFilename != "alice.vm.rdp" {
 		t.Fatalf("expected per-VM download filename %q, got %q", "alice.vm.rdp", row.RDPFilename)
+	}
+}
+
+func TestDashboardVMSerializesActiveUse(t *testing.T) {
+	for _, inUse := range []bool{false, true} {
+		payload, err := json.Marshal(VM{InUse: inUse})
+		if err != nil {
+			t.Fatalf("marshal VM: %v", err)
+		}
+		if got := strings.Contains(string(payload), `"inUse":true`); got != inUse {
+			t.Fatalf("inUse=%t: unexpected active-use JSON: %s", inUse, payload)
+		}
+		if !inUse && strings.Contains(string(payload), `"inUse"`) {
+			t.Fatalf("expected inactive use to be omitted: %s", payload)
+		}
 	}
 }
 

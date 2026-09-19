@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -302,6 +303,51 @@ func TestHECForwarderRetriesTransientFailures(t *testing.T) {
 	}
 	if got := forwarder.dropped.Load(); got != 0 {
 		t.Errorf("dropped = %d, want 0", got)
+	}
+}
+
+func TestHECForwarderRetriesUnconfirmedResponses(t *testing.T) {
+	var attempts atomic.Int64
+	requests := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			t.Error("followed a redirect away from the configured collector")
+			_, _ = io.WriteString(w, `{"code":0}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		select {
+		case requests <- string(body):
+		default:
+			t.Error("received more delivery attempts than expected")
+		}
+		switch attempts.Add(1) {
+		case 1:
+			http.Redirect(w, r, "/login", http.StatusFound)
+		case 2:
+			_, _ = io.WriteString(w, `<html>Please sign in</html>`)
+		case 3:
+			_, _ = io.WriteString(w, `{"code":6}`)
+		default:
+			_, _ = io.WriteString(w, `{"text":"Success","code":0}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	forwarder := newTestForwarder(t, HECConfig{Endpoint: server.URL, Token: "token"})
+	writeRecord(t, forwarder, `{"user":"alice"}`)
+	forwarder.start()
+	t.Cleanup(func() { _ = forwarder.Close() })
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("delivery attempts = %d, want three retries and a confirmed success", got)
+	}
+	first := <-requests
+	for range 3 {
+		if got := <-requests; got != first {
+			t.Fatalf("retried a different batch: %q, want %q", got, first)
+		}
 	}
 }
 

@@ -52,6 +52,9 @@ func TestRetryableStatus(t *testing.T) {
 		status int
 		want   bool
 	}{
+		{status: http.StatusMovedPermanently, want: true},
+		{status: http.StatusFound, want: true},
+		{status: http.StatusTemporaryRedirect, want: true},
 		{status: http.StatusBadRequest, want: false},
 		{status: http.StatusUnauthorized, want: true},
 		{status: http.StatusForbidden, want: true},
@@ -162,7 +165,9 @@ func TestPostClassifiesFailures(t *testing.T) {
 }
 
 func TestPostVerifiesTLSByDefault(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"text":"Success","code":0}`)
+	}))
 	t.Cleanup(server.Close)
 
 	strict, err := New(Config{Endpoint: server.URL, Token: "hec-token"})

@@ -21,7 +21,10 @@ type VMInfo struct {
 	// VMs overlays the fresher in-memory registry before handing entries to
 	// callers, so touches (RDP/serial/noVNC clicks, starts) show up without
 	// waiting for a domain XML re-read.
-	LastUsed       string
+	LastUsed string
+	// InUse reports a gateway desktop connection or connection setup that
+	// pauses automatic shutdown. VMs overlays this from the activity registry.
+	InUse          bool
 	State          string
 	MemoryMiB      int
 	VCPU           int

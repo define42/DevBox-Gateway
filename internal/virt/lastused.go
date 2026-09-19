@@ -90,12 +90,54 @@ func parseLastUsedTimestamp(value string) (time.Time, error) {
 // every pass; the durable copy lives in per-domain last-used metadata so the
 // timestamps survive gateway restarts.
 type vmLastUsedRegistry struct {
-	mu    sync.Mutex
-	times map[string]time.Time
+	mu     sync.Mutex
+	times  map[string]time.Time
+	uses   map[string]map[*vmUse]struct{}
+	guards *keyedMutex
 }
 
 func newVMLastUsedRegistry() *vmLastUsedRegistry {
-	return &vmLastUsedRegistry{times: make(map[string]time.Time)}
+	return &vmLastUsedRegistry{
+		times:  make(map[string]time.Time),
+		uses:   make(map[string]map[*vmUse]struct{}),
+		guards: newKeyedMutex(),
+	}
+}
+
+// vmUse has a distinct identity for each connection, including connections to
+// a VM recreated under the same name. A nonzero-sized token keeps pointers unique.
+type vmUse struct{ _ byte }
+
+func (r *vmLastUsedRegistry) beginUse(name string, now time.Time) *vmUse {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	use := &vmUse{}
+	if r.uses[name] == nil {
+		r.uses[name] = make(map[*vmUse]struct{})
+	}
+	r.uses[name][use] = struct{}{}
+	r.times[name] = now
+	return use
+}
+
+func (r *vmLastUsedRegistry) endUse(name string, use *vmUse, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.uses[name][use]; !ok {
+		return false
+	}
+	delete(r.uses[name], use)
+	if len(r.uses[name]) == 0 {
+		delete(r.uses, name)
+	}
+	r.times[name] = now
+	return true
+}
+
+func (r *vmLastUsedRegistry) inUse(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.uses[name]) > 0
 }
 
 func (r *vmLastUsedRegistry) set(name string, t time.Time) {
@@ -112,18 +154,21 @@ func (r *vmLastUsedRegistry) get(name string) (time.Time, bool) {
 }
 
 func (r *vmLastUsedRegistry) remove(name string) {
+	unlock := r.guards.Lock(name)
+	defer unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.times, name)
+	delete(r.uses, name)
 }
 
-// retainNames drops every entry whose VM name is not in names, so deleted VMs
-// do not accumulate timestamps forever.
+// retainNames drops inactive entries whose VM name is not in names. Live
+// connections must remain protected even when a cached listing omits their VM.
 func (r *vmLastUsedRegistry) retainNames(names map[string]struct{}) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for name := range r.times {
-		if _, ok := names[name]; !ok {
+		if _, ok := names[name]; !ok && len(r.uses[name]) == 0 {
 			delete(r.times, name)
 		}
 	}
@@ -134,6 +179,39 @@ func (r *vmLastUsedRegistry) retainNames(names map[string]struct{}) {
 // handlers, VM start paths) and the auto-shutdown sweeper must observe one
 // shared record.
 var vmLastUsed = newVMLastUsedRegistry() //nolint:gochecknoglobals // process-wide last-used state shared by touch points and the auto-shutdown sweeper
+
+// TrackVMUse protects a VM from auto-shutdown while an authorized RDP, serial,
+// or VNC connection is opening or connected. Call the returned function when
+// setup fails or the connection ends; it is safe to call more than once. The
+// last disconnect starts a full idle window, including after a clean restart.
+func TrackVMUse(name string) func() {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return func() {}
+	}
+	unlock := vmLastUsed.guards.Lock(name)
+	defer unlock()
+	now := time.Now()
+	use := vmLastUsed.beginUse(name, now)
+	persistVMUse(name, now)
+	notifyVMLastUsedChanged()
+
+	return func() {
+		unlock := vmLastUsed.guards.Lock(name)
+		defer unlock()
+		now := time.Now()
+		if vmLastUsed.endUse(name, use, now) {
+			persistVMUse(name, now)
+			notifyVMLastUsedChanged()
+		}
+	}
+}
+
+func persistVMUse(name string, now time.Time) {
+	if err := persistVMLastUsed(name, now); err != nil {
+		log.Printf("persist last-used metadata for %s: %v", name, err)
+	}
+}
 
 // MarkVMUsed records now as the named VM's last-used time, in memory and in
 // the domain's persistent metadata. It is best-effort by design: the in-memory
@@ -146,14 +224,14 @@ func MarkVMUsed(name string) {
 	if name == "" {
 		return
 	}
+	unlock := vmLastUsed.guards.Lock(name)
+	defer unlock()
 
 	now := time.Now()
 	vmLastUsed.set(name, now)
 	notifyVMLastUsedChanged()
 
-	if err := persistVMLastUsed(name, now); err != nil {
-		log.Printf("persist last-used metadata for %s: %v", name, err)
-	}
+	persistVMUse(name, now)
 }
 
 // notifyVMLastUsedChanged nudges open dashboards to re-pull VM data so a
@@ -191,6 +269,8 @@ func persistVMLastUsed(name string, t time.Time) error {
 // semantics: the started VM must not be reported as failed over a metadata
 // stamp, so persistence errors are only logged.
 func markDomainUsed(dom *libvirt.Domain, name string) {
+	unlock := vmLastUsed.guards.Lock(name)
+	defer unlock()
 	now := time.Now()
 	vmLastUsed.set(name, now)
 	notifyVMLastUsedChanged()

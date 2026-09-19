@@ -64,6 +64,8 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 		}
 		defer func() { _ = ws.Close() }()
 		debugf("serial: websocket upgraded for vm %q (remote %s)", name, r.RemoteAddr)
+		endVMUse := virt.TrackVMUse(name)
+		defer endVMUse()
 
 		// The serial socket is libvirt-managed; the gateway cannot connect to its
 		// path directly, so OpenSerialConsole has libvirt stream the console.
@@ -72,8 +74,6 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			closeDashboardSerialSocketError(ws, name, err)
 			return
 		}
-		// Opening the serial terminal counts as use for auto-shutdown.
-		virt.MarkVMUsed(name)
 		debugf("serial: libvirt console opened for vm %q", name)
 		unregisterConnection, ok := sessionManager.RegisterUserConnection(authorization, func() {
 			_ = ws.Close()
@@ -84,7 +84,7 @@ func HandleDashboardConsoleWS(sessionManager *session.Manager) http.HandlerFunc 
 			_ = console.Close()
 			return
 		}
-		defer unregisterConnection()
+		defer finishDashboardConnection(endVMUse, unregisterConnection)
 
 		defer auditConsoleConnection(r.Context(), user, r.RemoteAddr, name, audit.ProtocolSerial)()
 

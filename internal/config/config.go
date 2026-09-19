@@ -137,7 +137,7 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetInt(VM_VCPU_COUNT, "Number of virtual CPUs assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMVCPUCount)
 	s.SetInt(VM_MEMORY_MIB, "Memory in MiB assigned to every VM; users cannot choose or change this per VM. Values <=0 fall back to the default", DefaultVMMemoryMiB)
 	s.SetInt(MAX_VDI_PER_USER, "Maximum number of VDIs (VMs) each user may own at once; creating another VM is refused once the user owns this many. Values <=0 disable the per-user limit", DefaultMaxVDIPerUser)
-	s.SetInt(VDI_AUTO_SHUTDOWN_HOURS, "Shut down a running VDI after this many hours without use; a VDI counts as used when it is created or started and whenever its owner opens RDP, serial, or noVNC from the dashboard. The guest is first asked to power off (ACPI) and is force-stopped if still running a few minutes later. Values <=0 disable auto-shutdown", DefaultVDIAutoShutdownHours)
+	s.SetInt(VDI_AUTO_SHUTDOWN_HOURS, "Shut down a running VDI after this many hours without use. Creation, start, and opening RDP, serial, or noVNC count as use. Open gateway connections prevent auto-shutdown; the full idle window starts when the last connection ends. The guest is first asked to power off (ACPI) and is force-stopped if still running a few minutes later. Values <=0 disable auto-shutdown", DefaultVDIAutoShutdownHours)
 
 	s.SetString(LISTEN_ADDR, "listen address", ":443")
 	s.SetString(RDP_PORT, "Public port advertised in downloaded RDP files; empty uses the LISTEN_ADDR port, or 443 for an ephemeral listener", "")

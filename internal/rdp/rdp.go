@@ -104,6 +104,8 @@ func handleWithBackendIdentity(raw net.Conn, frontTLS *cert.TLSManager, sessionM
 		_ = clientConn.tlsConn.Close()
 		return
 	}
+	endVMUse := virt.TrackVMUse(clientConn.hostname)
+	defer endVMUse()
 
 	backendAddr, ok := resolveBackendAddr(raw.RemoteAddr(), clientConn.sni, clientConn.hostname)
 	if !ok {
@@ -125,7 +127,11 @@ func handleWithBackendIdentity(raw net.Conn, frontTLS *cert.TLSManager, sessionM
 		_ = backendTLS.Close()
 		return
 	}
-	defer unregisterConnection()
+	defer func() {
+		// Persist the disconnect before gateway shutdown considers us drained.
+		endVMUse()
+		unregisterConnection()
+	}()
 
 	defer auditRDPConnection(raw.RemoteAddr(), authorization.Username(), clientConn.hostname)()
 
