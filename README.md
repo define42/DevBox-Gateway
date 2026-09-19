@@ -96,11 +96,13 @@ The RDP flow on the front side is:
 1. Read the client's X.224 Connection Request (TPKT).
 2. Reply with an X.224 Connection Confirm selecting `PROTOCOL_SSL` (TLS).
 3. Complete the TLS handshake with the client and read SNI.
-4. TCP-connect to the chosen backend.
-5. Send a fresh Connection Request to the backend requesting TLS only.
-6. Read the backend's Connection Confirm and require `PROTOCOL_SSL`.
-7. Complete the backend TLS handshake (backend cert verification is skipped).
-8. Splice bytes between client TLS and backend TLS for the rest of the session.
+4. Authorize the VM owner and consume the single-use Connect grant.
+5. Load the VM's host-assigned address and provisioned certificate identity,
+   then TCP-connect to the backend.
+6. Send a fresh Connection Request to the backend requesting TLS only.
+7. Read the backend's Connection Confirm and require `PROTOCOL_SSL`.
+8. Verify the backend certificate and its provisioned server name during TLS.
+9. Splice bytes between client TLS and backend TLS for the rest of the session.
 
 ## Quick start (Docker Compose)
 
@@ -109,7 +111,9 @@ Requirements on the host:
 - Docker and Docker Compose v2.
 - A libvirt daemon reachable at `/var/run/libvirt` (the compose file
   bind-mounts it into the gateway container).
-- A `virbr0` bridge for the macvlan network (the default libvirt NAT bridge).
+- Libvirt's network-filter driver and its firewall tools on the host. The
+  gateway creates its dedicated `devbox` NAT network and `virbr-devbox` bridge
+  during startup; no pre-existing bridge or macvlan is needed.
 - Write access to `/data/` on the host (used for ACME data, VM images, serial /
   VNC sockets, and the persistent audit log at `/data/logs/audit.jsonl`).
 - At least one QCOW2 base disk image in `/data/baseimages`, named with an
@@ -125,7 +129,8 @@ make run
 
 This stops any previous stack, rebuilds the images, and starts:
 
-- `gateway` — the Go binary, listening on `https://localhost` (port `443`).
+- `gateway` — the Go binary, using host networking and listening on
+  `https://localhost` (port `443`).
 - `ldap` — a `glauth/glauth` LDAP server pre-populated from
   `testldap/default-config.cfg` for local development.
 - `splunk` — a `splunk/splunk` Splunk Enterprise instance that receives every
@@ -167,12 +172,13 @@ audit file at runtime:
 | `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests), marked `%config(noreplace)` so your edits survive upgrades. |
 | `/var/log/devbox-gateway/audit.jsonl`             | Append-only JSON Lines audit log, created when the gateway starts. |
 
-It requires `libvirt-libs` and `ca-certificates`, plus `libvirt-daemon-kvm` and
-`qemu-kvm` — the local libvirt/KVM stack that hosts the virtual desktops.
-`libvirt-daemon-kvm` pulls in the modular libvirt daemons
-(`virtqemud`/`virtnetworkd`/`virtstoraged`), so `dnf` installs everything needed
-to provision VMs. The package does not configure firewall rules; open the
-gateway port yourself (`443/tcp` by default, or your custom `LISTEN_ADDR` port).
+It requires `libvirt-libs`, `ca-certificates`, `libvirt-daemon-kvm`,
+`libvirt-daemon-driver-nwfilter`, and `qemu-kvm`. The nwfilter driver supplies
+mandatory host-side guest traffic enforcement; its dependencies provide the
+firewall tools. The modular daemons include `virtqemud`, `virtnetworkd`,
+`virtstoraged`, and `virtnwfilterd`. Package installation does not open the
+public gateway port; allow it yourself (`443/tcp` by default, or your custom
+`LISTEN_ADDR` port). The gateway installs its VM network filter at startup.
 
 1. **Install** (let `dnf` pull in the dependencies):
 
@@ -194,7 +200,7 @@ gateway port yourself (`443/tcp` by default, or your custom `LISTEN_ADDR` port).
    so enable the sockets the gateway uses:
 
    ```sh
-   sudo systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
+   sudo systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket virtnwfilterd.socket
    ```
 
    On older distributions with the classic monolithic daemon, use instead:
@@ -253,9 +259,12 @@ audit file at runtime:
 | `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests), registered as a `conffile` so your edits survive upgrades. |
 | `/var/log/devbox-gateway/audit.jsonl`          | Append-only JSON Lines audit log, created when the gateway starts. |
 
-It depends on `libvirt0` and `ca-certificates`, plus `libvirt-daemon-system` and
-`qemu-system-x86` — the local libvirt/KVM stack that hosts the virtual desktops
-(the Debian-named counterparts of the RPM's requires).
+It depends on `libvirt0`, `ca-certificates`, `libvirt-daemon-system`,
+`libvirt-daemon-config-nwfilter`, `iptables`, and `qemu-system-x86`. On Debian
+releases with split drivers, the nwfilter config package pulls in
+`libvirt-daemon-driver-nwfilter`; older releases include that driver in the
+main daemon. `iptables` supplies the ebtables frontend needed for guest traffic
+enforcement.
 
 1. **Install** (let `apt` pull in the dependencies):
 
@@ -610,15 +619,30 @@ There are three supported modes for the front-side certificate:
    and set `ACME_EMAIL`. Optionally set `ACME_CA=staging` while testing. ACME
    state is persisted under `$DATA_ROOT_DIR/acme`.
 
-Backend (VM) TLS certificates are intentionally **not** validated — VMs
-typically present per-host self-signed certs.
+Each new VM receives a unique backend certificate and private key through its
+cloud-init seed ISO. Libvirt metadata stores the public certificate, its internal
+server name, and the domain UUID. The gateway validates certificate trust,
+server name, validity, and the exact leaf certificate before forwarding RDP
+traffic. The public routing SNI is separate from this backend identity. Backend
+TLS session resumption is disabled so every connection verifies the current
+provisioned identity. Certificates are valid for ten years; recreating a VM
+generates a new key and certificate.
+
+The seed configures xrdp to use `/etc/xrdp/devbox-cert.pem` and
+`/etc/xrdp/devbox-key.pem`; the key is installed as `0640 root:xrdp`. Base images
+must include cloud-init, Python 3, xrdp with its `xrdp` group, and a working
+`xrdp.service`. Provisioning forces TLS 1.2 or newer and restarts xrdp. A missing
+identity or a guest that presents a different certificate is rejected without
+forwarding client credentials. See [Libvirt and VM storage](#libvirt-and-vm-storage)
+for the required network isolation and the recreation policy for older VMs.
 
 ### LDAP
 
 For local development, the bundled `glauth` container is configured in
 `testldap/default-config.cfg` and is reachable from the gateway container at
-`ldaps://ldap:389`. For production, point `LDAP_URL` at your own directory and
-adjust `LDAP_BASE_DN`, `LDAP_USER_FILTER`, and `LDAP_USER_DOMAIN` to match.
+`ldaps://127.0.0.1:389` (a host-loopback published port). For production, point
+`LDAP_URL` at your own directory and adjust `LDAP_BASE_DN`, `LDAP_USER_FILTER`,
+and `LDAP_USER_DOMAIN` to match.
 Prefer `ldaps://` or `LDAP_STARTTLS=true`. Certificate verification is on by
 default; only set `LDAP_SKIP_TLS_VERIFY=true` as a stopgap for a directory
 whose CA chain is not yet trusted (the bundled glauth container uses a
@@ -677,16 +701,30 @@ The dashboard manages VMs through libvirt. The gateway expects:
 - A storage pool named by `VIRT_STORAGE_POOL_NAME` (default `desktop`) backed
   by `$DATA_ROOT_DIR/image` on the host. The gateway defines and starts this
   pool automatically if it is missing.
-- The libvirt `default` NAT network (the `virbr0` bridge, `192.168.122.0/24`),
-  which every VDI attaches to. The gateway defines, starts, and sets it to
-  autostart automatically if it is missing — handy on a fresh modular-libvirt
-  host (e.g. Rocky/RHEL 9) that ships without it.
+- The dedicated libvirt `devbox` NAT network (`virbr-devbox`,
+  `192.168.123.0/24`, host gateway `192.168.123.1`). The gateway defines, starts,
+  and enables autostart for it. Reserve this subnet for the gateway and attach
+  only gateway-managed VMs to this bridge.
 - A base image library directory (`BASE_IMAGE_DIR`, default
   `$DATA_ROOT_DIR/baseimages`) containing at least one QCOW2 disk image named
   `.img`, `.qcow2`, or `.raw`.
-- Network reachability from the gateway container to each VM's RDP port over
-  the `virbr0` bridge. The compose file attaches the gateway to a macvlan on
-  `virbr0` with a fixed address of `192.168.122.254`.
+- Host-side libvirt network filtering. The gateway installs the mandatory
+  `devbox-isolated-ipv4` filter and supplies a fixed, persisted MAC/IPv4 binding
+  for every VM. DHCP reservations match these assignments; addresses are never
+  learned from guest traffic. The filter rejects forged MAC/IP/ARP identities,
+  guest DHCP servers, guest-to-guest IPv4 traffic, IPv6, VLAN tags, and unsupported
+  Ethernet protocols. Bridge port isolation remains enabled as an extra layer.
+- Network reachability from the gateway to the VM bridge. Docker Compose uses
+  host networking, so the gateway reaches `virbr-devbox` directly. LDAP and
+  Splunk HEC use their host-loopback published ports.
+
+The gateway fails closed if the required network configuration, filter, or VM
+identity is unavailable or inconsistent. **Recreate VMs created before this
+protection was introduced.** There is no migration or insecure fallback for old
+VM definitions, dynamic address assignments, or unprovisioned RDP certificates.
+Recreation deletes a VM's disk through the normal dashboard removal flow, so
+copy any development files you want to keep before removing it. Existing
+unrelated libvirt networks are not adopted as the gateway network.
 
 Base images can be supplied by placing QCOW2 images in `BASE_IMAGE_DIR` or by
 uploading them from the administrator's **Base Images** modal. The filename may
@@ -864,8 +902,11 @@ Some integration tests (e.g. `ldap_integration_test.go`,
   endpoints, or real Splunk HEC tokens. The files under `testldap/` and
   `testsplunk/`, and the Splunk credentials in `docker-compose.yml`, are
   intended for local development only.
-- Backend TLS verification is disabled by design (VMs typically use self-signed
-  certs). Treat the network between the gateway and its VMs as trusted.
+- Every VM has a host-enforced MAC/IPv4 binding and a unique pinned backend
+  certificate. Network filtering rejects guest spoofing; TLS verification
+  independently rejects a redirected connection to the wrong VM. Root access
+  to the hypervisor and its libvirt socket remains a trusted administrative
+  boundary. Keep unrelated guests off the gateway's dedicated bridge.
 - RDP access is gated by an explicit, single-use authorization rather than a
   standing login: the gateway admits a proxied RDP connection only when the VM's
   owner clicked **Connect** for that VM, from the same client IP, within the last

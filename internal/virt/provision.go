@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/define42/devbox-gateway/internal/backendidentity"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/virt/internal/storage"
@@ -30,8 +31,9 @@ var ErrVMAlreadyExists = errors.New("virt: vm with this name already exists")
 // be restarted between removal's destruction and volume deletion. It is held
 // as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
 // vmCreationMu strictly inside this region, so the lock order is always
-// vmNameLocks then vmCreationMu, and a goroutine never holds two VDI-name locks
-// at once — so neither lock can deadlock. This is process-wide because the
+// vmNameLocks then vmCreationMu. Network changes acquire the reserved NUL-prefixed
+// allocation key inside the VM-name lock; they never acquire another VM-name
+// key. No goroutine holds two VDI-name locks. This is process-wide because the
 // gateway is the single writer of libvirt state.
 var vmNameLocks = newKeyedMutex() //nolint:gochecknoglobals // process-wide per-name serialization for VM create/remove/start/restart
 
@@ -117,20 +119,25 @@ type vmProvisionSpec struct {
 	vcpu          int
 	memoryMiB     int
 	vsock         bool // add the SauronAgent virtio-vsock device
+	network       NetworkIdentity
+	backend       backendidentity.Credentials
 }
 
 // startConfig returns the domain define-and-start step of the plan.
 func (s vmProvisionSpec) startConfig() VMStartConfig {
 	return VMStartConfig{
-		Name:            s.vmName,
-		SeedISO:         s.seedISO,
-		StoragePoolName: s.poolName,
-		VCPU:            s.vcpu,
-		MemoryMiB:       s.memoryMiB,
-		VSock:           s.vsock,
-		Owner:           s.owner,
-		GuestUser:       s.guestUsername,
-		BaseImage:       s.baseImage,
+		Name:               s.vmName,
+		SeedISO:            s.seedISO,
+		StoragePoolName:    s.poolName,
+		VCPU:               s.vcpu,
+		MemoryMiB:          s.memoryMiB,
+		Network:            s.network,
+		BackendCertificate: s.backend.CertificatePEM,
+		BackendServerName:  s.backend.ServerName,
+		VSock:              s.vsock,
+		Owner:              s.owner,
+		GuestUser:          s.guestUsername,
+		BaseImage:          s.baseImage,
 	}
 }
 
@@ -250,6 +257,14 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec 
 			}
 		}
 	}()
+	spec.network, err = reserveNetworkIdentity(conn, spec.vmName)
+	if err != nil {
+		return fmt.Errorf("reserve VM network identity: %w", err)
+	}
+	spec.backend, err = backendidentity.Generate(spec.vmName)
+	if err != nil {
+		return fmt.Errorf("generate VM backend identity: %w", err)
+	}
 	if err := provisionBootVolumes(conn, settings, spec, report); err != nil {
 		return err
 	}
@@ -280,6 +295,9 @@ func RemoveVM(name string, settings *config.Settings) error {
 	if err := DestroyExistingDomain(conn, name); err != nil {
 		return err
 	}
+	if err := releaseNetworkIdentity(conn, name); err != nil {
+		return fmt.Errorf("release VM network identity: %w", err)
+	}
 	seedISO := name + "_seed.iso"
 	if err := storage.RemoveVolumes(conn, poolName, name, seedISO); err != nil {
 		return err
@@ -297,6 +315,9 @@ func RemoveVM(name string, settings *config.Settings) error {
 func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedISO string) error {
 	if err := DestroyExistingDomain(conn, vmName); err != nil {
 		return fmt.Errorf("failed to destroy existing domain: %w", err)
+	}
+	if err := releaseNetworkIdentity(conn, vmName); err != nil {
+		return fmt.Errorf("failed to release VM network identity: %w", err)
 	}
 	if err := storage.RemoveVolumes(conn, poolName, vmName, seedISO); err != nil {
 		return fmt.Errorf("failed to remove existing volumes: %w", err)
@@ -329,6 +350,7 @@ func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec
 		spec.guestUsername,
 		spec.passwordHash,
 		spec.hostname,
+		spec.backend,
 	); err != nil {
 		return fmt.Errorf("failed to create seed iso: %w", err)
 	}

@@ -166,7 +166,7 @@ func TestCovxNegotiateBackendTLSMissingNegotiationRSP(t *testing.T) {
 		_ = server.Close()
 	}()
 
-	if _, err := negotiateBackendTLS(client, "backend:3389", ""); err == nil {
+	if _, err := negotiateBackendTLS(client, "backend:3389", testBackendTLSConfig(t)); err == nil {
 		t.Fatal("expected error when the backend CCF lacks RDP_NEG_RSP")
 	}
 	_ = client.Close()
@@ -184,7 +184,7 @@ func TestCovxNegotiateBackendTLSHandshakeFailure(t *testing.T) {
 		_ = server.Close()
 	}()
 
-	if _, err := negotiateBackendTLS(client, "backend:3389", "vm.example.test"); err == nil {
+	if _, err := negotiateBackendTLS(client, "backend:3389", testBackendTLSConfig(t)); err == nil {
 		t.Fatal("expected TLS handshake error after the backend closes")
 	}
 	_ = client.Close()
@@ -216,7 +216,7 @@ func TestCovxNegotiateBackendTLSTransportErrors(t *testing.T) {
 				tc.server(server)
 			}()
 
-			if _, err := negotiateBackendTLS(client, "backend:3389", ""); err == nil {
+			if _, err := negotiateBackendTLS(client, "backend:3389", testBackendTLSConfig(t)); err == nil {
 				t.Fatalf("expected negotiateBackendTLS error for %s", tc.name)
 			}
 			_ = client.Close()
@@ -412,6 +412,7 @@ func TestCovxHandleNoRouteForVM(t *testing.T) {
 
 func TestCovxHandleBackendDialRefused(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 	name := covxUniqueName("dial")
 	// Nothing listens on this loopback alias, so the dial is refused instantly.
 	stubVMIPs(t, map[string]string{name: "127.0.0.72"})
@@ -421,7 +422,7 @@ func TestCovxHandleBackendDialRefused(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.182:5000", name)
 
-	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182", identity)
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
@@ -436,7 +437,8 @@ func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 	stubVMIPs(t, map[string]string{name: backendHost})
 	covxDefineOwnedDomain(t, name)
 
-	stopBackend := startTLSServingBackend(t, backendHost, func(tlsConn *tls.Conn) {
+	identity, certificate, _ := backendTLSFixture(t)
+	stopBackend := startTLSServingBackend(t, backendHost, certificate, func(tlsConn *tls.Conn) {
 		if _, err := tlsConn.Write([]byte("ready")); err != nil {
 			t.Errorf("send proxy readiness: %v", err)
 			return
@@ -449,7 +451,7 @@ func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.185:5000", name)
 
-	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185", identity)
 	tlsClient := performFrontHandshake(t, client, name+".example.test")
 	defer func() { _ = tlsClient.Close() }()
 

@@ -44,10 +44,11 @@ func TestHandleRejectsConnectionAfterLogoutDuringBackendSetup(t *testing.T) {
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	manager := session.New()
 	issueUserSession(t, manager, "alice", "192.0.2.186:5000", name)
-	requested, negotiated, resume := startPausedRDPBackend(t, backendHost)
+	identity, certificate, _ := backendTLSFixture(t)
+	requested, negotiated, resume := startPausedRDPBackend(t, backendHost, certificate)
 	defer resume()
 
-	client, done := startHandleTestConnection(t, frontTLS, manager, settings, "192.0.2.186")
+	client, done := startHandleTestConnection(t, frontTLS, manager, settings, "192.0.2.186", identity)
 	t.Cleanup(func() {
 		_ = client.Close()
 		waitDone(t, done)
@@ -78,13 +79,12 @@ func TestHandleRejectsConnectionAfterLogoutDuringBackendSetup(t *testing.T) {
 	waitDone(t, done)
 }
 
-func startPausedRDPBackend(t *testing.T, host string) (<-chan struct{}, <-chan struct{}, func()) {
+func startPausedRDPBackend(t *testing.T, host string, certificate tls.Certificate) (<-chan struct{}, <-chan struct{}, func()) {
 	t.Helper()
 	requested := make(chan struct{})
 	negotiated := make(chan struct{})
 	released := make(chan struct{})
 	resume := sync.OnceFunc(func() { close(released) })
-	certificate := backendTLSCert(t)
 	stop := startBackendServer(t, host, func(raw net.Conn) {
 		if err := raw.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			t.Errorf("set backend deadline: %v", err)

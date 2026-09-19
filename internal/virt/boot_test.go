@@ -273,6 +273,7 @@ func TestStartVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to boot new VM %s: %v", vmName, err)
 	}
+	t.Cleanup(func() { _ = virt.RemoveVM(vmName, settings) })
 
 	conn, err := libvirt.NewConnect(virt.LibvirtURI())
 	if err != nil {
@@ -283,6 +284,7 @@ func TestStartVM(t *testing.T) {
 	}()
 
 	waitForRunningVM(t, testUsername, vmName, conn, testTimeout)
+	waitForProvisionedRDPCertificate(t, conn, vmName)
 
 	// Resources are operator-defined only, so the booted VM must carry the
 	// config-resolved vCPU count and memory.

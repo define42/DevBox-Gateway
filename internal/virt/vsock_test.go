@@ -67,7 +67,7 @@ func TestDomainXMLVSockDevice(t *testing.T) {
 		} `xml:"devices"`
 	}
 
-	with := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096, true)
+	with := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096, true, NetworkIdentity{MAC: "52:54:00:00:00:10", IP: "192.168.123.10"})
 	if err := xml.Unmarshal([]byte(with), &parsed); err != nil {
 		t.Fatalf("domain xml with vsock must stay well-formed: %v\n%s", err, with)
 	}
@@ -80,7 +80,7 @@ func TestDomainXMLVSockDevice(t *testing.T) {
 		t.Fatalf("vsock device = %+v, want a virtio device with an auto-assigned cid", device)
 	}
 
-	without := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096, false)
+	without := DomainXML("alice-devbox", "alice-devbox_seed.iso", "desktop", 4, 4096, false, NetworkIdentity{MAC: "52:54:00:00:00:10", IP: "192.168.123.10"})
 	if strings.Contains(without, "<vsock") {
 		t.Fatalf("domain xml without vsock must not add the device:\n%s", without)
 	}
@@ -238,17 +238,22 @@ func TestStartVMWithVSockIsAttributable(t *testing.T) {
 	if err := CopyAndResizeVolume(conn, poolName, vmName, existingBootBaseImagePath(t), 2*1024*1024); err != nil {
 		t.Fatalf("CopyAndResizeVolume disk: %v", err)
 	}
-	if err := CreateSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName); err != nil {
+	credentials := testBackendCredentials(t)
+	network := testNetworkReservation(t, conn, vmName)
+	if err := CreateSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName, credentials); err != nil {
 		t.Fatalf("CreateSeedISOToPool: %v", err)
 	}
 	if err := StartVM(VMStartConfig{
-		Name:            vmName,
-		SeedISO:         seedISO,
-		StoragePoolName: poolName,
-		VCPU:            1,
-		MemoryMiB:       1024,
-		VSock:           true,
-		Owner:           "alice",
+		Network:            network,
+		BackendCertificate: credentials.CertificatePEM,
+		BackendServerName:  credentials.ServerName,
+		Name:               vmName,
+		SeedISO:            seedISO,
+		StoragePoolName:    poolName,
+		VCPU:               1,
+		MemoryMiB:          1024,
+		VSock:              true,
+		Owner:              "alice",
 	}); err != nil {
 		t.Fatalf("StartVM with a vsock device: %v", err)
 	}

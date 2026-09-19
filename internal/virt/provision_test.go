@@ -150,8 +150,7 @@ func newProvisionTestFixture(t *testing.T) provisionTestFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = DestroyExistingDomain(conn, spec.vmName)
-		_ = RemoveVolumes(conn, spec.poolName, spec.vmName, spec.seedISO)
+		_ = RemoveVM(spec.vmName, settings)
 		_ = pool.Free()
 	})
 	return provisionTestFixture{settings: settings, conn: conn, pool: pool, request: request, spec: spec}
@@ -166,6 +165,7 @@ func assertNoProvisionedArtifacts(t *testing.T, fixture provisionTestFixture) {
 	} else if !errors.Is(err, libvirt.ERR_NO_DOMAIN) {
 		t.Errorf("domain lookup error = %v, want ERR_NO_DOMAIN", err)
 	}
+	assertNoNetworkReservation(t, fixture.conn, fixture.spec.vmName)
 	for _, name := range []string{fixture.spec.vmName, fixture.spec.seedISO} {
 		vol, err := fixture.pool.LookupStorageVolByName(name)
 		if err == nil {
@@ -173,6 +173,27 @@ func assertNoProvisionedArtifacts(t *testing.T, fixture provisionTestFixture) {
 			t.Errorf("failed provisioning left volume %s", name)
 		} else if !errors.Is(err, libvirt.ERR_NO_STORAGE_VOL) {
 			t.Errorf("volume %s lookup error = %v, want ERR_NO_STORAGE_VOL", name, err)
+		}
+	}
+}
+
+func assertNoNetworkReservation(t *testing.T, conn *libvirt.Connect, name string) {
+	t.Helper()
+	network, err := conn.LookupNetworkByName(defaultNetworkName)
+	if errors.Is(err, libvirt.ERR_NO_NETWORK) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = network.Free() }()
+	hosts, err := readNetworkReservations(network)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range hosts {
+		if host.Name == networkReservationName(name) {
+			t.Errorf("failed provisioning left network reservation %s", host.IP)
 		}
 	}
 }

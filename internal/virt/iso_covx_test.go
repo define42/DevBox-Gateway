@@ -13,14 +13,14 @@ func TestVbtcovCreateSeedISOToPoolSeedFailure(t *testing.T) {
 	t.Setenv("TMPDIR", missing)
 
 	// The seed ISO build fails before any pool interaction.
-	err := CreateSeedISOToPool(conn, "cvbt-unused-pool", "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
+	err := CreateSeedISOToPool(conn, "cvbt-unused-pool", "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host", testBackendCredentials(t))
 	vbtcovRequireErrContains(t, err, "create iso writer", "CreateSeedISOToPool with broken TMPDIR")
 }
 
 func TestVbtcovCreateSeedISOToPoolMissingPool(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 
-	err := CreateSeedISOToPool(conn, uniquePoolName("cvbt-nopool"), "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host")
+	err := CreateSeedISOToPool(conn, uniquePoolName("cvbt-nopool"), "cvbt-seed.iso", "cvbtguest", "$6$hash", "cvbt-host", testBackendCredentials(t))
 	vbtcovRequireErrContains(t, err, "not found", "CreateSeedISOToPool into missing pool")
 }
 
@@ -37,7 +37,7 @@ func TestVbtcovCreateSeedISOToPoolDuplicateVolume(t *testing.T) {
 	}
 	_ = vol.Free()
 
-	err = CreateSeedISOToPool(conn, poolName, volumeName, "cvbtguest", "$6$hash", "cvbt-host")
+	err = CreateSeedISOToPool(conn, poolName, volumeName, "cvbtguest", "$6$hash", "cvbt-host", testBackendCredentials(t))
 	if err == nil {
 		t.Fatal("expected CreateSeedISOToPool to fail on duplicate volume name")
 	}

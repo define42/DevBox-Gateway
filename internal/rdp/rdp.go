@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/audit"
+	"github.com/define42/devbox-gateway/internal/backendidentity"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/session"
@@ -83,8 +84,14 @@ type frontRDPConnection struct {
 	hostname string
 }
 
+type backendIdentityLookup func(string) (certificatePEM, serverName string, err error)
+
 // Handle handles a single RDP connection over TLS.
 func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) {
+	handleWithBackendIdentity(raw, frontTLS, sessionManager, settings, virt.VMBackendIdentity)
+}
+
+func handleWithBackendIdentity(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, lookup backendIdentityLookup) {
 	started := time.Now()
 	debugf("new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
 
@@ -104,7 +111,7 @@ func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Man
 		return
 	}
 
-	backendTLS, ok := dialBackendRDP(backendAddr, clientConn.sni, settings)
+	backendTLS, ok := dialBackendRDP(backendAddr, clientConn.hostname, settings, lookup)
 	if !ok {
 		_ = clientConn.tlsConn.Close()
 		return
@@ -506,9 +513,8 @@ func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool
 		return "", false
 	}
 	debugf("resolved VM %q to IP %q", hostname, backendIP)
-	// The virt layer only returns an authoritative DHCP-lease address inside the
-	// VM NAT subnet here (see domainDisplayIPs); an empty result means there is no
-	// trusted route, so fail closed rather than dial a guest-supplied address.
+	// The virt layer returns the host-assigned address inside the VM NAT subnet.
+	// An empty result means there is no trusted route, so fail closed.
 	if backendIP == "" {
 		log.Printf("no route for SNI=%q from %s", sni, remoteAddr)
 		return "", false
@@ -519,13 +525,19 @@ func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool
 	return backendAddr, true
 }
 
-func dialBackendRDP(backendAddr, sni string, settings *config.Settings) (*tls.Conn, bool) {
+func dialBackendRDP(backendAddr, hostname string, settings *config.Settings, lookup backendIdentityLookup) (*tls.Conn, bool) {
+	tlsConfig, err := backendTLSConfig(hostname, lookup)
+	if err != nil {
+		log.Printf("get backend TLS identity for VM %s: %v", hostname, err)
+		return nil, false
+	}
+
 	backendRaw, err := dialBackendTCP(backendAddr, settings)
 	if err != nil {
 		return nil, false
 	}
 
-	backendTLS, err := negotiateBackendTLS(backendRaw, backendAddr, sni)
+	backendTLS, err := negotiateBackendTLS(backendRaw, backendAddr, tlsConfig)
 	if err != nil {
 		_ = backendRaw.Close()
 		return nil, false
@@ -548,7 +560,10 @@ func dialBackendTCP(backendAddr string, settings *config.Settings) (net.Conn, er
 	return backendRaw, nil
 }
 
-func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Conn, error) {
+func negotiateBackendTLS(backendRaw net.Conn, backendAddr string, tlsConfig *tls.Config) (*tls.Conn, error) {
+	if tlsConfig == nil {
+		return nil, fmt.Errorf("missing backend TLS identity configuration")
+	}
 	debugf("sending backend CRQ select TLS")
 	if err := writeTPKT(backendRaw, buildClientCRQSelectTLS()); err != nil {
 		log.Printf("write backend CRQ: %v", err)
@@ -572,7 +587,7 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 		return nil, fmt.Errorf("backend did not select tls")
 	}
 
-	backendTLS := tls.Client(backendRaw, backendTLSConfig(sni))
+	backendTLS := tls.Client(backendRaw, tlsConfig)
 	if err := backendTLS.Handshake(); err != nil {
 		log.Printf("backend tls handshake: %v (backend=%s)", err, backendAddr)
 		return nil, err
@@ -588,26 +603,15 @@ func negotiateBackendTLS(backendRaw net.Conn, backendAddr, sni string) (*tls.Con
 	return backendTLS, nil
 }
 
-// backendSessionCache lets backend TLS handshakes resume a prior session
-// instead of running a full handshake every time. Reconnects to the same VM —
-// common during roaming re-relogin — then cost one fewer round-trip to the
-// backend. The cache is keyed by ServerName, so it is shared safely across
-// connections; tls.ClientSessionCache implementations are concurrency-safe.
-//
-//nolint:gochecknoglobals // process-wide TLS resumption cache, set up once
-var backendSessionCache = tls.NewLRUClientSessionCache(0)
-
-func backendTLSConfig(sni string) *tls.Config {
-	// #nosec G402 -- the backend is a gateway-managed VM addressed via its own VM
-	// lookup (never an attacker-chosen host), and per-VM RDP certs are self-signed,
-	// so there is no chain or hostname to verify.
-	backendTLSCfg := &tls.Config{
-		InsecureSkipVerify: true, // ignore backend cert chain + hostname
-		MinVersion:         tls.VersionTLS12,
-		ClientSessionCache: backendSessionCache,
+func backendTLSConfig(hostname string, lookup backendIdentityLookup) (*tls.Config, error) {
+	if lookup == nil {
+		return nil, fmt.Errorf("missing backend identity lookup")
 	}
-	if sni != "" && sni != "*" {
-		backendTLSCfg.ServerName = sni
+	certificatePEM, serverName, err := lookup(hostname)
+	if err != nil {
+		return nil, fmt.Errorf("load provisioned backend identity: %w", err)
 	}
-	return backendTLSCfg
+	// Backend identity comes from host-owned VM metadata, never the client's
+	// public routing SNI. Each connection performs full certificate verification.
+	return backendidentity.TLSConfig(certificatePEM, serverName)
 }

@@ -179,13 +179,11 @@ func WritePackage(p Package) error {
 	return destination.Close()
 }
 
-// packageRequires are the DevBox Gateway RPM's hard requires: the libvirt client
-// library the binary links against, ca-certificates for outbound TLS, and the
-// local KVM stack that hosts the virtual desktops. libvirt-daemon-kvm pulls in
-// the modular libvirt daemons (virtqemud/virtnetworkd/virtstoraged) and
-// qemu-kvm, so a fresh install can provision VMs out of the box.
+// packageRequires are the DevBox Gateway RPM's hard requires. The nwfilter
+// driver and its firewall tools are mandatory alongside the local KVM stack;
+// VM network protection must not depend on optional package recommendations.
 func packageRequires() []string {
-	return []string{"libvirt-libs", "ca-certificates", "libvirt-daemon-kvm", "qemu-kvm"}
+	return []string{"libvirt-libs", "ca-certificates", "libvirt-daemon-kvm", "libvirt-daemon-driver-nwfilter", "qemu-kvm"}
 }
 
 // relations converts plain package names into rpmpack requires.

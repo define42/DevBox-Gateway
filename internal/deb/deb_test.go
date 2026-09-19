@@ -23,7 +23,7 @@ func TestDebArch(t *testing.T) {
 
 func TestPackageRelations(t *testing.T) {
 	deps := packageRelations()
-	want := []string{"libvirt0", "ca-certificates", "libvirt-daemon-system", "qemu-system-x86"}
+	want := []string{"libvirt0", "ca-certificates", "libvirt-daemon-system", "libvirt-daemon-config-nwfilter", "iptables", "qemu-system-x86"}
 	for _, dep := range want {
 		if !strings.Contains(deps, dep) {
 			t.Fatalf("Depends %q missing %q", deps, dep)

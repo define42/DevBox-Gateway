@@ -57,12 +57,16 @@ func TestVbtcovStartVMRejectsInvalidDomainName(t *testing.T) {
 	// any capability checks, so this fails identically with and without KVM and
 	// never defines a domain.
 	name := fmt.Sprintf("cvbt/invalid-%d", time.Now().UnixNano())
+	credentials := testBackendCredentials(t)
 	err := StartVM(VMStartConfig{
-		Name:            name,
-		SeedISO:         "cvbt-seed.iso",
-		StoragePoolName: "cvbt-unused-pool",
-		VCPU:            1,
-		MemoryMiB:       512,
+		Network:            identityForAddress(10),
+		BackendCertificate: credentials.CertificatePEM,
+		BackendServerName:  credentials.ServerName,
+		Name:               name,
+		SeedISO:            "cvbt-seed.iso",
+		StoragePoolName:    "cvbt-unused-pool",
+		VCPU:               1,
+		MemoryMiB:          512,
 	})
 	vbtcovRequireErrContains(t, err, "cannot contain", "StartVM with slash in domain name")
 }
@@ -268,6 +272,7 @@ func TestVbtcovProvisionBootVolumesCopyFailure(t *testing.T) {
 	source := vbtcovWriteTinyFile(t, "base.img")
 
 	err := provisionBootVolumes(conn, nil, vmProvisionSpec{
+		backend:       testBackendCredentials(t),
 		poolName:      uniquePoolName("cvbt-nopool"),
 		vmName:        "cvbt-vm",
 		seedISO:       "cvbt-vm_seed.iso",
@@ -302,6 +307,7 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 
 	source := vbtcovWriteTinyFile(t, "base.img")
 	err = provisionBootVolumes(conn, settings, vmProvisionSpec{
+		backend:       testBackendCredentials(t),
 		poolName:      poolName,
 		vmName:        vmName,
 		seedISO:       seedISO,
@@ -340,6 +346,7 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 
 	source := vbtcovWriteTinyFile(t, "base.img")
 	if err := provisionBootVolumes(conn, settings, vmProvisionSpec{
+		backend:       testBackendCredentials(t),
 		poolName:      poolName,
 		vmName:        vmName,
 		seedISO:       seedISO,
@@ -368,11 +375,10 @@ func TestVbtcovResetExistingVMArtifactsMissingPool(t *testing.T) {
 }
 
 func TestVbtcovEnsureDefaultNetworkLookupFailure(t *testing.T) {
-	// A closed connection fails the network lookup with an error that is not
-	// ERR_NO_NETWORK, so the define fallback (which would touch the shared
-	// 'default' network) is never reached.
+	// A closed connection fails mandatory filter setup before any network can
+	// be defined or started.
 	err := ensureDefaultNetwork(vbtcovClosedConn(t))
-	vbtcovRequireErrContains(t, err, "lookup network", "ensureDefaultNetwork on closed connection")
+	vbtcovRequireErrContains(t, err, "mandatory network filter", "ensureDefaultNetwork on closed connection")
 }
 
 func vbtcovIsolatedNetworkXML(name, bridge string) string {
@@ -424,7 +430,9 @@ func TestVbtcovStartNetworkIfNeededAndAutostart(t *testing.T) {
 
 	// Freshly defined networks have autostart off, so this takes the
 	// SetAutostart(true) branch.
-	configureNetworkAutostart(network)
+	if err := configureNetworkAutostart(network); err != nil {
+		t.Fatalf("enable network autostart: %v", err)
+	}
 	autostart, err := network.GetAutostart()
 	if err != nil {
 		t.Fatalf("get network autostart: %v", err)
@@ -455,8 +463,9 @@ func TestVbtcovStartNetworkIfNeededStaleHandle(t *testing.T) {
 	err := startNetworkIfNeeded(network)
 	vbtcovRequireErrContains(t, err, "is active", "startNetworkIfNeeded on undefined network")
 
-	// GetAutostart fails on the stale handle too; the helper must swallow it.
-	configureNetworkAutostart(network)
+	if err := configureNetworkAutostart(network); err == nil {
+		t.Fatal("expected an autostart error for a stale network handle")
+	}
 }
 
 func TestVbtcovConfigureNetworkAutostartTransient(t *testing.T) {
@@ -478,8 +487,9 @@ func TestVbtcovConfigureNetworkAutostartTransient(t *testing.T) {
 		t.Fatal("expected transient network autostart to be false")
 	}
 
-	// SetAutostart fails for transient networks; the helper must only log it.
-	configureNetworkAutostart(network)
+	if err := configureNetworkAutostart(network); err == nil {
+		t.Fatal("expected an autostart error for a transient network")
+	}
 
 	autostart, err = network.GetAutostart()
 	if err != nil {

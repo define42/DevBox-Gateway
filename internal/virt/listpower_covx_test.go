@@ -64,7 +64,7 @@ func TestViocovStartAndRestartSurfaceCreateFailure(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	name := viocovUniqueName("badboot")
 	missingDisk := filepath.Join(t.TempDir(), "missing.raw")
-	viocovDefineDomain(t, conn, name, viocovRawDiskXML(missingDisk))
+	defineProtectedTestDomain(t, conn, name, viocovRawDiskXML(missingDisk))
 
 	if err := StartExistingVM(name); err == nil || !strings.Contains(err.Error(), "start domain") {
 		t.Fatalf("StartExistingVM: expected start failure, got %v", err)
@@ -85,7 +85,10 @@ func TestViocovStartAndRestartSurfaceCreateFailure(t *testing.T) {
 func TestViocovPowerLifecycleOnRunningDomain(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	name := viocovUniqueName("power")
-	dom := viocovStartDomain(t, conn, name, "")
+	dom := defineProtectedTestDomain(t, conn, name, "")
+	if err := dom.Create(); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := StartExistingVM(name); err != nil {
 		t.Fatalf("StartExistingVM on active domain: %v", err)

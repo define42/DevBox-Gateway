@@ -27,9 +27,9 @@ func newKeyedMutex() *keyedMutex {
 }
 
 // Lock acquires the mutex for key, blocking until it is available, and returns a
-// release function that must be called exactly once to unlock it. Callers that
-// hold one key never acquire a second key, so keyedMutex cannot deadlock against
-// itself regardless of key ordering.
+// release function that must be called exactly once to unlock it. VM lifecycle
+// callers acquire one VM-name key, then optionally the reserved network key.
+// Network operations never acquire a VM-name key, preserving that lock order.
 func (k *keyedMutex) Lock(key string) (release func()) {
 	k.mu.Lock()
 	entry, ok := k.locks[key]

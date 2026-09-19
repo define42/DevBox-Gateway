@@ -90,6 +90,7 @@ func TestDialBackendTCPFailureReturnsError(t *testing.T) {
 }
 
 func TestDialBackendRDPReturnsFalseOnDialFailure(t *testing.T) {
+	identity, _, _ := backendTLSFixture(t)
 	t.Setenv(config.TIMEOUT, "200ms")
 	settings := config.NewSettings(false)
 
@@ -100,7 +101,7 @@ func TestDialBackendRDPReturnsFalseOnDialFailure(t *testing.T) {
 	addr := listener.Addr().String()
 	_ = listener.Close()
 
-	conn, ok := dialBackendRDP(addr, "", settings)
+	conn, ok := dialBackendRDP(addr, "test-backend", settings, testBackendIdentityLookup(identity))
 	if ok {
 		_ = conn.Close()
 		t.Fatal("expected dialBackendRDP to fail when backend is unreachable")
@@ -108,6 +109,7 @@ func TestDialBackendRDPReturnsFalseOnDialFailure(t *testing.T) {
 }
 
 func TestDialBackendRDPReturnsFalseOnTLSNegotiationFailure(t *testing.T) {
+	identity, _, _ := backendTLSFixture(t)
 	InitLogging()
 	t.Setenv(config.TIMEOUT, "2s")
 	settings := config.NewSettings(false)
@@ -131,7 +133,7 @@ func TestDialBackendRDPReturnsFalseOnTLSNegotiationFailure(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		conn, ok := dialBackendRDP(listener.Addr().String(), "", settings)
+		conn, ok := dialBackendRDP(listener.Addr().String(), "test-backend", settings, testBackendIdentityLookup(identity))
 		if ok {
 			_ = conn.Close()
 			t.Fatal("expected dialBackendRDP to fail when backend closes immediately")

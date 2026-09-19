@@ -12,11 +12,21 @@ import (
 
 // UserData is the cloud-init user-data document stored on the seed ISO.
 type UserData struct {
-	Output    *Output   `yaml:"output,omitempty"`
-	Keyboard  *Keyboard `yaml:"keyboard,omitempty"`
-	Users     []User    `yaml:"users,omitempty"`
-	SSHPwAuth bool      `yaml:"ssh_pwauth,omitempty"`
-	RunCmd    []string  `yaml:"runcmd,omitempty"`
+	Output     *Output     `yaml:"output,omitempty"`
+	Keyboard   *Keyboard   `yaml:"keyboard,omitempty"`
+	Users      []User      `yaml:"users,omitempty"`
+	SSHPwAuth  bool        `yaml:"ssh_pwauth,omitempty"`
+	WriteFiles []WriteFile `yaml:"write_files,omitempty"`
+	RunCmd     []string    `yaml:"runcmd,omitempty"`
+}
+
+// WriteFile installs a file, optionally after guest packages and users exist.
+type WriteFile struct {
+	Path        string `yaml:"path"`
+	Owner       string `yaml:"owner"`
+	Permissions string `yaml:"permissions"`
+	Content     string `yaml:"content"`
+	Defer       bool   `yaml:"defer,omitempty"`
 }
 
 // Output configures cloud-init console logging.

@@ -3,6 +3,7 @@ package virt
 import (
 	"io"
 
+	"github.com/define42/devbox-gateway/internal/backendidentity"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/virt/internal/storage"
 
@@ -98,6 +99,7 @@ func CreateSeedISOToPool(
 	username string,
 	cloudInitPasswordHash string,
 	hostname string,
+	credentials backendidentity.Credentials,
 ) error {
 	return storage.CreateSeedISOToPool(
 		conn,
@@ -106,5 +108,6 @@ func CreateSeedISOToPool(
 		username,
 		cloudInitPasswordHash,
 		hostname,
+		credentials,
 	)
 }

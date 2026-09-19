@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/backendidentity"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/virt/internal/storage"
 
@@ -14,7 +15,7 @@ import (
 )
 
 // Init ensures a base image library exists and the libvirt storage pool and
-// 'default' NAT network are ready for VM operations. The base image check runs
+// dedicated NAT network are ready for VM operations. The base image check runs
 // first, before any libvirt connection, so an empty image library fails the boot
 // fast with a clear error.
 func Init(settings *config.Settings) error {
@@ -54,11 +55,14 @@ func Init(settings *config.Settings) error {
 // volumes to attach, the operator-defined sizing, and the gateway metadata to
 // record on the new domain.
 type VMStartConfig struct {
-	Name            string // domain (VDI) name
-	SeedISO         string // cloud-init seed volume name in the storage pool
-	StoragePoolName string
-	VCPU            int
-	MemoryMiB       int
+	Name               string // domain (VDI) name
+	SeedISO            string // cloud-init seed volume name in the storage pool
+	StoragePoolName    string
+	VCPU               int
+	MemoryMiB          int
+	Network            NetworkIdentity
+	BackendCertificate string
+	BackendServerName  string
 	// VSock gives the domain the virtio-vsock device SauronAgent reports
 	// through.
 	VSock bool
@@ -72,6 +76,12 @@ type VMStartConfig struct {
 
 // StartVM defines and starts a VM, attaching the configured gateway metadata.
 func StartVM(cfg VMStartConfig) (err error) {
+	if err := validateNetworkIdentity(cfg.Network); err != nil {
+		return fmt.Errorf("VM network identity: %w", err)
+	}
+	if _, err := backendidentity.TLSConfig(cfg.BackendCertificate, cfg.BackendServerName); err != nil {
+		return fmt.Errorf("VM backend identity: %w", err)
+	}
 	conn, err := connectLibvirt()
 	if err != nil {
 		return err
@@ -82,7 +92,7 @@ func StartVM(cfg VMStartConfig) (err error) {
 
 	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
 	// owns no console sockets.
-	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB, cfg.VSock))
+	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB, cfg.VSock, cfg.Network))
 	if err != nil {
 		return err
 	}
@@ -113,6 +123,9 @@ func StartVM(cfg VMStartConfig) (err error) {
 		return err
 	}
 
+	if err = validateDomainNetwork(conn, dom); err != nil {
+		return fmt.Errorf("validate VM network: %w", err)
+	}
 	if err = dom.Create(); err != nil {
 		return err
 	}
@@ -126,6 +139,9 @@ func StartVM(cfg VMStartConfig) (err error) {
 // domain and returns the recorded last-used time. Owner, guest-user, and
 // base-image are optional and skipped when blank.
 func applyNewDomainMetadata(dom *libvirt.Domain, cfg VMStartConfig) (time.Time, error) {
+	if err := setDomainBackendIdentity(dom, cfg.BackendCertificate, cfg.BackendServerName); err != nil {
+		return time.Time{}, fmt.Errorf("set backend identity for %s: %w", cfg.Name, err)
+	}
 	if strings.TrimSpace(cfg.Owner) != "" {
 		if err := setDomainOwnerMetadata(dom, cfg.Owner); err != nil {
 			return time.Time{}, fmt.Errorf("set owner metadata for %s: %w", cfg.Name, err)

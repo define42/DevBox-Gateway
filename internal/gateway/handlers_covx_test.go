@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -200,6 +201,46 @@ func hcovVirtCreateSettings(t *testing.T, poolName string) (*config.Settings, st
 	t.Cleanup(func() { hcovCleanupPool(poolName) })
 	baseImage := hcovSeedBaseImage(t, config.BaseImageDir(settings))
 	return settings, baseImage
+}
+
+// hcovDefineProtectedDomain uses the real provisioning path so power actions
+// exercise the mandatory network binding and backend certificate checks. Its
+// blank disk needs no OS download and only idles in firmware.
+func hcovDefineProtectedDomain(t *testing.T, owner, shortName string) (string, *config.Settings) {
+	t.Helper()
+	settings, baseImage := hcovVirtCreateSettings(t, hcovUniqueName("hcov-protected-pool"))
+	for name, value := range map[string]int{
+		config.VM_VCPU_COUNT: 1, config.VM_MEMORY_MIB: 128, config.VM_DISK_SIZE_GB: 1,
+	} {
+		if err := settings.OverwriteForTestInt(name, value); err != nil {
+			t.Fatalf("set %s: %v", name, err)
+		}
+	}
+	imagePath := filepath.Join(config.BaseImageDir(settings), baseImage)
+	cmd := exec.CommandContext(t.Context(), "qemu-img", "create", "-f", "qcow2", imagePath, "1M")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create tiny base image: %v: %s", err, output)
+	}
+	user, err := identity.New(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domainName := owner + vmname.Separator + shortName
+	t.Cleanup(func() {
+		if err := virt.RemoveVM(domainName, settings); err != nil {
+			t.Errorf("remove protected test VM %s: %v", domainName, err)
+		}
+	})
+	name, err := virt.BootNewVM(virt.VMCreateRequest{
+		Name: shortName, Owner: user, PasswordHash: testGuestPasswordHash, BaseImage: baseImage,
+	}, settings)
+	if err != nil {
+		t.Fatalf("provision protected test VM: %v", err)
+	}
+	if err := virt.ShutdownVM(name); err != nil {
+		t.Fatalf("stop protected test VM: %v", err)
+	}
+	return name, settings
 }
 
 func hcovCreateForm(shortName, baseImage string) url.Values {
@@ -703,15 +744,7 @@ func TestHcovDashboardLifecycleRejectsAnotherUsersVM(t *testing.T) {
 func TestHcovAdminCanManageAnotherUsersVMLifecycle(t *testing.T) {
 	auditOutput := captureStructuredLogs(t)
 	owner := hcovUniqueName("hcovmanagedowner")
-	domainName := owner + vmname.Separator + "desk"
-	hcovDefineOwnedDomain(t, domainName, owner)
-
-	settings := config.NewSettings(false)
-	poolName := hcovUniqueName("hcov-admin-pool")
-	hcovDefineActivePool(t, poolName, newLibvirtAccessibleTempDir(t, "hcov-admin-pool-"))
-	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName); err != nil {
-		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
-	}
+	domainName, settings := hcovDefineProtectedDomain(t, owner, "desk")
 
 	sessionManager := session.New()
 	router := NewHandler(sessionManager, settings)
@@ -858,16 +891,14 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	}
 }
 
-// TestHcovDashboardStartThenShutdown starts the owned TCG domain through the
-// dashboard action route (it idles in firmware with no disk) and force-stops
-// it through the shutdown route.
+// TestHcovDashboardStartThenShutdown starts a protected domain through the
+// dashboard action route and force-stops it through the shutdown route.
 func TestHcovDashboardStartThenShutdown(t *testing.T) {
 	user := hcovUniqueName("hcovrun")
-	domainName := user + vmname.Separator + "run"
-	hcovDefineOwnedDomain(t, domainName, user)
+	domainName, settings := hcovDefineProtectedDomain(t, user, "run")
 
 	sessionManager := session.New()
-	router := NewHandler(sessionManager, config.NewSettings(false))
+	router := NewHandler(sessionManager, settings)
 	cookie := issueSessionCookie(t, sessionManager, user)
 	nameForm := url.Values{"vm_name": {domainName}}
 
@@ -879,6 +910,21 @@ func TestHcovDashboardStartThenShutdown(t *testing.T) {
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/shutdown", nameForm)
 	hcovAssertAction(t, rec, http.StatusOK, "VM shutdown requested.")
+}
+
+func TestHcovDashboardStartRejectsUnprotectedDomain(t *testing.T) {
+	user := hcovUniqueName("hcovlegacy")
+	domainName := user + vmname.Separator + "legacy"
+	hcovDefineOwnedDomain(t, domainName, user)
+	sessionManager := session.New()
+	router := NewHandler(sessionManager, config.NewSettings(false))
+	cookie := issueSessionCookie(t, sessionManager, user)
+
+	rec := hcovPostForm(t, router, cookie, "/api/dashboard/start", url.Values{"vm_name": {domainName}})
+	hcovAssertAction(t, rec, http.StatusInternalServerError, "Failed to start VM.")
+	if exists, active := hcovDomainState(t, domainName); !exists || active {
+		t.Fatalf("rejected domain was mutated: exists=%v active=%v", exists, active)
+	}
 }
 
 func TestHcovDashboardRemoveFailsWithoutStoragePool(t *testing.T) {

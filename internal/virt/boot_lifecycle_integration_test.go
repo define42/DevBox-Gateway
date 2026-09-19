@@ -242,18 +242,23 @@ func TestStartVMAndRemoveVMManageArtifacts(t *testing.T) {
 	if err := CopyAndResizeVolume(conn, poolName, vmName, sourceImage, 2*1024*1024); err != nil {
 		t.Fatalf("CopyAndResizeVolume disk: %v", err)
 	}
-	if err := CreateSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName); err != nil {
+	credentials := testBackendCredentials(t)
+	network := testNetworkReservation(t, conn, vmName)
+	if err := CreateSeedISOToPool(conn, poolName, seedISO, "bootuser", "$6$hash", vmName, credentials); err != nil {
 		t.Fatalf("CreateSeedISOToPool: %v", err)
 	}
 
 	// VNC socket and serial PTY are both libvirt-managed; the gateway prepares no
 	// console sockets.
 	if err := StartVM(VMStartConfig{
-		Name:            vmName,
-		SeedISO:         seedISO,
-		StoragePoolName: poolName,
-		VCPU:            vcpu,
-		MemoryMiB:       memoryMB,
+		Network:            network,
+		BackendCertificate: credentials.CertificatePEM,
+		BackendServerName:  credentials.ServerName,
+		Name:               vmName,
+		SeedISO:            seedISO,
+		StoragePoolName:    poolName,
+		VCPU:               vcpu,
+		MemoryMiB:          memoryMB,
 	}); err != nil {
 		t.Fatalf("StartVM: %v", err)
 	}
@@ -299,6 +304,8 @@ func TestStartVMRollsBackOnStartFailure(t *testing.T) {
 	vmName := "rollback-start-fail-" + time.Now().Format("150405")
 	seedISO := vmName + "_seed.iso"
 	const owner = "rollbackowner"
+	credentials := testBackendCredentials(t)
+	network := testNetworkReservation(t, conn, vmName)
 
 	// Safety net: force-remove the domain if the rollback under test regresses, so
 	// a leaked orphan cannot block reruns of this test.
@@ -315,14 +322,17 @@ func TestStartVMRollsBackOnStartFailure(t *testing.T) {
 	// then fails to start it. The failure lands after DomainDefineXML but before
 	// the VM is fully created — exactly the window that used to orphan the domain.
 	if err := StartVM(VMStartConfig{
-		Name:            vmName,
-		SeedISO:         seedISO,
-		StoragePoolName: poolName,
-		VCPU:            vcpu,
-		MemoryMiB:       memoryMB,
-		Owner:           owner,
-		GuestUser:       "rollbackguest",
-		BaseImage:       testBaseImageName,
+		Network:            network,
+		BackendCertificate: credentials.CertificatePEM,
+		BackendServerName:  credentials.ServerName,
+		Name:               vmName,
+		SeedISO:            seedISO,
+		StoragePoolName:    poolName,
+		VCPU:               vcpu,
+		MemoryMiB:          memoryMB,
+		Owner:              owner,
+		GuestUser:          "rollbackguest",
+		BaseImage:          testBaseImageName,
 	}); err == nil {
 		t.Fatalf("expected StartVM to fail when backing volumes are missing")
 	}

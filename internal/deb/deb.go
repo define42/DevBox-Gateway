@@ -142,12 +142,10 @@ func WritePackage(p Package) error {
 	return writeArchive(p)
 }
 
-// packageRelations builds the .deb's Depends field: the libvirt client library
-// the binary links against, ca-certificates for outbound TLS, and the local KVM
-// stack that hosts the virtual desktops. libvirt-daemon-system pulls in the
-// modular libvirt daemons and qemu-system-x86 provides qemu-kvm, so a fresh
-// install can provision VMs out of the box. These are the Debian-named
-// counterparts of the RPM requires in internal/rpm.
+// packageRelations builds the .deb's Depends field. The nwfilter config package
+// pulls in the separate driver on newer Debian releases; older releases include
+// that driver in libvirt-daemon, already required by libvirt-daemon-system.
+// iptables also supplies the ebtables frontend required by the host filter.
 func packageRelations() string {
-	return "libvirt0, ca-certificates, libvirt-daemon-system, qemu-system-x86"
+	return "libvirt0, ca-certificates, libvirt-daemon-system, libvirt-daemon-config-nwfilter, iptables, qemu-system-x86"
 }

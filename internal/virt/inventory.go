@@ -4,21 +4,10 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"net"
 	"strings"
 
 	"libvirt.org/go/libvirt"
 )
-
-// defaultNetworkRoutingCIDR is the subnet of the libvirt 'default' NAT network
-// the gateway defines in defaultNetworkXML (192.168.122.1/24). Backend RDP
-// routing is constrained to this range as defense in depth: only an address the
-// gateway's own DHCP server leased inside this subnet is trusted as a dial
-// target. A guest cannot forge such a lease, so a rooted guest cannot steer the
-// proxy at an off-network host (e.g. via a future qemu-guest-agent channel or ARP
-// cache poisoning) and turn the gateway into an SSRF pivot. Keep this in sync
-// with defaultNetworkXML.
-const defaultNetworkRoutingCIDR = "192.168.122.0/24"
 
 // VMInfo describes a VM entry shown in the dashboard and worker cache.
 type VMInfo struct {
@@ -165,16 +154,10 @@ func domainUUIDForInventoryCache(name string, d *libvirt.Domain) string {
 	return strings.TrimSpace(domainUUID)
 }
 
-// domainDisplayIPs returns (display, routing). The display string aggregates
-// the lease- and ARP-reported addresses for the dashboard, while the routing
-// address — the one the RDP proxy actually dials — comes only from the
-// authoritative DHCP lease: it reflects what the gateway's own dnsmasq
-// assigned, which a guest cannot forge, and it must fall inside the default
-// NAT subnet or routing fails closed (empty result) rather than dialing an
-// off-network host. The qemu-guest-agent source is deliberately not queried:
-// agent commands run with an unbounded response timeout by default, so a guest
-// whose agent stops answering would wedge the inventory sweep that calls this
-// for every running domain.
+// domainDisplayIPs returns observed addresses for display and the host-assigned
+// address for routing. Neither DHCP client identity nor guest ARP can choose a
+// backend target. Unprotected domains have no route. The guest agent is never
+// queried because an unresponsive guest could stall the inventory sweep.
 func domainDisplayIPs(d libvirt.Domain, state libvirt.DomainState) (string, string) {
 	if !domainCanReportIPs(state) {
 		return "", ""
@@ -182,34 +165,14 @@ func domainDisplayIPs(d libvirt.Domain, state libvirt.DomainState) (string, stri
 
 	seen := make(map[string]struct{})
 	leaseIPs := appendDomainIPsFromSource(nil, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_LEASE)
-	routingIP := firstRoutableVMIP(leaseIPs)
-	ips := appendDomainIPsFromSource(leaseIPs, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP)
-	return strings.Join(ips, ", "), routingIP
-}
-
-// firstRoutableVMIP returns the first address in ips that is an IPv4 address
-// inside the default NAT subnet, or "" when none qualifies.
-func firstRoutableVMIP(ips []string) string {
-	for _, ip := range ips {
-		if ipInDefaultNetwork(ip) {
-			return ip
+	routingIP := ""
+	if identity, err := domainNetworkIdentity(&d); err == nil {
+		if _, err := domainBackendIdentity(&d); err == nil {
+			routingIP = identity.IP
 		}
 	}
-	return ""
-}
-
-// ipInDefaultNetwork reports whether addr is an IPv4 address within the libvirt
-// default NAT subnet (defaultNetworkRoutingCIDR).
-func ipInDefaultNetwork(addr string) bool {
-	ip := net.ParseIP(strings.TrimSpace(addr))
-	if ip == nil || ip.To4() == nil {
-		return false
-	}
-	_, subnet, err := net.ParseCIDR(defaultNetworkRoutingCIDR)
-	if err != nil {
-		return false
-	}
-	return subnet.Contains(ip)
+	ips := appendDomainIPsFromSource(leaseIPs, seen, d, libvirt.DOMAIN_INTERFACE_ADDRESSES_SRC_ARP)
+	return strings.Join(ips, ", "), routingIP
 }
 
 func domainCanReportIPs(state libvirt.DomainState) bool {

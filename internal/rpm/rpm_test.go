@@ -24,10 +24,11 @@ func TestPackageRelations(t *testing.T) {
 		t.Fatalf("relations: %v", err)
 	}
 	want := map[string]bool{
-		"libvirt-libs":       true,
-		"ca-certificates":    true,
-		"libvirt-daemon-kvm": true,
-		"qemu-kvm":           true,
+		"libvirt-libs":                   true,
+		"ca-certificates":                true,
+		"libvirt-daemon-kvm":             true,
+		"libvirt-daemon-driver-nwfilter": true,
+		"qemu-kvm":                       true,
 	}
 	if len(requires) != len(want) {
 		t.Fatalf("requires = %d, want %d (%v)", len(requires), len(want), want)

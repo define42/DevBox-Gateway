@@ -29,6 +29,9 @@ func StartExistingVM(name string) error {
 		_ = dom.Free()
 	}()
 
+	if err := validateDomainSecurity(conn, dom); err != nil {
+		return err
+	}
 	active, err := dom.IsActive()
 	if err != nil {
 		return fmt.Errorf("check domain active %s: %w", name, err)
@@ -140,6 +143,9 @@ func RestartVM(name string) error {
 		_ = dom.Free()
 	}()
 
+	if err := validateDomainSecurity(conn, dom); err != nil {
+		return err
+	}
 	active, err := dom.IsActive()
 	if err != nil {
 		return fmt.Errorf("check domain active %s: %w", name, err)

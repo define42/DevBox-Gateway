@@ -13,7 +13,7 @@ import (
 func TestDomainXMLEscapesValues(t *testing.T) {
 	const malicious = `evil</name><devices><disk device='disk'/></devices><name>x`
 
-	xmlDoc := DomainXML(malicious, "seed.iso", "pool", 2, 2048, false)
+	xmlDoc := DomainXML(malicious, "seed.iso", "pool", 2, 2048, false, NetworkIdentity{MAC: "52:54:00:db:7b:02", IP: "192.168.123.2"})
 
 	if strings.Contains(xmlDoc, "</name><devices><disk") {
 		t.Fatalf("injected XML must not appear unescaped:\n%s", xmlDoc)

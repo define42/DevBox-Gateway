@@ -10,7 +10,9 @@ services:
     # A stable hostname becomes the Splunk "host" of forwarded audit events;
     # without it every recreated container reports a new container ID.
     hostname: devbox-gateway
-      #    privileged: true
+    # Libvirt creates the dedicated VM bridge during gateway startup. Sharing
+    # the host network lets the gateway reach it without a pre-existing macvlan.
+    network_mode: host
     # The SauronAgent collector (SAURON_ENABLE below) listens on AF_VSOCK,
     # which Docker's default seccomp profile blocks. The container already
     # drives the host's libvirt through its socket, so the syscall filter adds
@@ -29,7 +31,7 @@ services:
       - AUDIT_LOG_FILE=/data/logs/audit.jsonl
       # Also forward every audit event to the bundled Splunk over HEC. The
       # token must match the splunk service's SPLUNK_HEC_TOKEN.
-      - SPLUNK_HEC_ENDPOINT=https://splunk:8088
+      - SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
       - SPLUNK_HEC_INDEX=devbox_audit
       # The bundled Splunk serves HEC with its default self-signed certificate.
@@ -38,30 +40,25 @@ services:
       # them to the bundled Splunk, into their own index.
       - SAURON_ENABLE=true
       - SAURON_EVENT_LOG_FILE=/data/logs/sauron.jsonl
-      - SAURON_SPLUNK_HEC_ENDPOINT=https://splunk:8088
+      - SAURON_SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SAURON_SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
       - SAURON_SPLUNK_HEC_INDEX=devbox_sauron
       - SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=true
       - LDAP_SKIP_TLS_VERIFY=true
+      - LDAP_URL=ldaps://127.0.0.1:389
       - VDI_AUTO_SHUTDOWN_HOURS=2
       - LDAP_REQUIRED_GROUPS=team10_r
       - ADMIN_GROUP=devbox-admins
-    ports:
-      - "443:443"
     volumes:
       - /var/run/libvirt:/var/run/libvirt
       - /data/:/data/
-    networks:
-      virbr0-net:
-        ipv4_address: 192.168.122.254
-      app-net:           # host-access + port publishing
 
   ldap:
     image: glauth/glauth
     container_name: ldap
     restart: always
     ports:
-      - "389:389"
+      - "127.0.0.1:389:389"
     volumes:
       - ./testldap/default-config.cfg:/app/config/config.cfg
       - ./testldap/key.pem:/app/config/key.pem
@@ -70,7 +67,7 @@ services:
       app-net:
 
   # Local Splunk Enterprise receiving the gateway's audit events over HEC
-  # (https://splunk:8088 inside app-net). Splunk Web: http://localhost:8000,
+  # (https://127.0.0.1:8088 on the host). Splunk Web: http://localhost:8000,
   # user admin, password SPLUNK_PASSWORD. The first start takes a few minutes;
   # the gateway queues and retries audit events until HEC is up.
   splunk:
@@ -92,6 +89,7 @@ services:
       - SPLUNK_ANSIBLE_POST_TASKS=file:///tmp/defaults/create_index.yml
     ports:
       - "8000:8000"      # Splunk Web
+      - "127.0.0.1:8088:8088" # HEC for the gateway in the host network
     volumes:
       - ./testsplunk/create_index.yml:/tmp/defaults/create_index.yml:ro
       - splunk-etc:/opt/splunk/etc
@@ -104,13 +102,5 @@ volumes:
   splunk-var:
 
 networks:
-  virbr0-net:
-    driver: macvlan
-    driver_opts:
-      parent: virbr0
-    ipam:
-      config:
-        - subnet: 192.168.122.0/24
-          gateway: 192.168.122.1
   app-net:
     driver: bridge

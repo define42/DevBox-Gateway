@@ -43,14 +43,16 @@ const domainXMLTemplate = `<domain type='kvm'>
       <readonly/>
     </disk>
 
-    <!-- Network: shared NAT bridge (libvirt 'default'). port isolated='yes'
-         enforces VDI-to-VDI isolation on the host bridge so guests cannot reach
-         each other, while still allowing DHCP/DNS from the gateway and NAT to
-         the internet. -->
+    <!-- Host-assigned identity, enforced before bridge learning. -->
 <interface type='network'>
-  <source network='default'/>
+  <mac address='%s'/>
+  <source network='devbox'/>
   <model type='virtio'/>
   <port isolated='yes'/>
+  <filterref filter='devbox-isolated-ipv4'>
+    <parameter name='IP' value='%s'/>
+    <parameter name='CTRL_IP_LEARNING' value='none'/>
+  </filterref>
 </interface>
 
     <!-- Graphics: libvirt manages the VNC unix socket (it allocates the path
@@ -105,7 +107,7 @@ const vsockDeviceXML = `
 // through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
 // Every interpolated value is XML-escaped so a name can never alter the document.
 // vsock adds the virtio-vsock device SauronAgent needs (see SAURON_ENABLE).
-func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int, vsock bool) string {
+func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int, vsock bool, identity NetworkIdentity) string {
 	vsockDevice := ""
 	if vsock {
 		vsockDevice = vsockDeviceXML
@@ -115,6 +117,7 @@ func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int, v
 		xmlValue(name), memoryMiB, memoryMiB, vcpu,
 		xmlValue(storagePoolName), xmlValue(name),
 		xmlValue(storagePoolName), xmlValue(seedISO),
+		xmlValue(identity.MAC), xmlValue(identity.IP),
 		vsockDevice,
 	)
 }

@@ -14,7 +14,7 @@ const (
 
 type rdpReadinessProbe func(context.Context, string) bool
 
-// rdpReadinessJob always carries PrimaryIP from the trusted DHCP-derived
+// rdpReadinessJob always carries PrimaryIP from the host-assigned
 // routing cache. Dashboard clients never provide probe targets.
 type rdpReadinessJob struct {
 	name       string

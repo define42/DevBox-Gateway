@@ -78,7 +78,7 @@ func TestCreateSeedISOToPool(t *testing.T) {
 		_ = RemoveVolumes(conn, poolName, volumeName)
 	})
 
-	if err := CreateSeedISOToPool(conn, poolName, volumeName, "alice", "$6$hash", "alice-devbox"); err != nil {
+	if err := CreateSeedISOToPool(conn, poolName, volumeName, "alice", "$6$hash", "alice-devbox", testBackendCredentials(t)); err != nil {
 		t.Fatalf("CreateSeedISOToPool: %v", err)
 	}
 

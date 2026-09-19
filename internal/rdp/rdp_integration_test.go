@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/audit"
+	"github.com/define42/devbox-gateway/internal/backendidentity"
 	"github.com/define42/devbox-gateway/internal/cert"
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/identity"
@@ -324,17 +325,6 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	return frontTLS, settings
 }
 
-func backendTLSCert(t *testing.T) tls.Certificate {
-	t.Helper()
-
-	settings := config.NewSettings(false)
-	certificate, err := cert.LoadOrGenerateCert(settings)
-	if err != nil {
-		t.Fatalf("load backend certificate: %v", err)
-	}
-	return certificate
-}
-
 func performFrontHandshake(t *testing.T, client net.Conn, serverName string) *tls.Conn {
 	t.Helper()
 
@@ -360,7 +350,7 @@ func performFrontHandshake(t *testing.T, client net.Conn, serverName string) *tl
 	return tlsClient
 }
 
-func startTLSServingBackend(t *testing.T, host string, handler func(*tls.Conn)) func() {
+func startTLSServingBackend(t *testing.T, host string, certificate tls.Certificate, handler func(*tls.Conn)) func() {
 	t.Helper()
 
 	return startBackendServer(t, host, func(raw net.Conn) {
@@ -373,7 +363,7 @@ func startTLSServingBackend(t *testing.T, host string, handler func(*tls.Conn)) 
 		}
 
 		tlsConn := tls.Server(raw, &tls.Config{
-			Certificates: []tls.Certificate{backendTLSCert(t)},
+			Certificates: []tls.Certificate{certificate},
 			MinVersion:   tls.VersionTLS10,
 		})
 		if err := tlsConn.Handshake(); err != nil {
@@ -401,7 +391,7 @@ func expectTLSOnlyBackendCRQ(t *testing.T, raw net.Conn) bool {
 	return true
 }
 
-func startHandleTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, remoteIP string) (net.Conn, <-chan struct{}) {
+func startHandleTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, remoteIP string, identities ...backendidentity.Credentials) (net.Conn, <-chan struct{}) {
 	t.Helper()
 
 	client, server := net.Pipe()
@@ -410,10 +400,14 @@ func startHandleTestConnection(t *testing.T, frontTLS *cert.TLSManager, sessionM
 		_ = server.Close()
 	})
 	server = newServerConnWithRemoteIP(server, remoteIP)
+	var lookup backendIdentityLookup
+	if len(identities) > 0 {
+		lookup = testBackendIdentityLookup(identities[0])
+	}
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, lookup)
 		close(done)
 	}()
 
@@ -492,7 +486,8 @@ func TestHandleSuccessfulProxy(t *testing.T) {
 	stubVMIPs(t, map[string]string{"vm1": backendHost})
 	defineOwnedRDPTestDomains(t, map[string]string{"vm1": "alice"})
 
-	stopBackend := startTLSServingBackend(t, backendHost, func(tlsConn *tls.Conn) {
+	identity, certificate, _ := backendTLSFixture(t)
+	stopBackend := startTLSServingBackend(t, backendHost, certificate, func(tlsConn *tls.Conn) {
 		buf := make([]byte, 4)
 		if _, err := io.ReadFull(tlsConn, buf); err != nil {
 			t.Errorf("backend read proxied bytes: %v", err)
@@ -512,7 +507,7 @@ func TestHandleSuccessfulProxy(t *testing.T) {
 	sessionManager := session.New()
 	issueUserSession(t, sessionManager, "alice", "192.0.2.100:5000", "vm1")
 
-	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100", identity)
 	tlsClient := performFrontHandshake(t, client, "vm1.example.test")
 	defer func() { _ = tlsClient.Close() }()
 
@@ -598,6 +593,7 @@ func TestHandleRejectsMissingRoute(t *testing.T) {
 
 func TestHandleBackendDialFailure(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 
 	stubVMIPs(t, map[string]string{"vmdial": "127.0.0.43"})
 	defineOwnedRDPTestDomains(t, map[string]string{"vmdial": "alice"})
@@ -611,7 +607,7 @@ func TestHandleBackendDialFailure(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
@@ -626,6 +622,7 @@ func TestHandleBackendDialFailure(t *testing.T) {
 
 func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 	auditRecords := captureRDPAuditRecords(t)
 
 	backendHost := "127.0.0.44"
@@ -653,7 +650,7 @@ func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
@@ -821,7 +818,8 @@ func TestHandleAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	stubVMIPs(t, map[string]string{"vmmulti": backendHost})
 	defineOwnedRDPTestDomains(t, map[string]string{"vmmulti": "alice"})
 
-	stopBackend := startTLSServingBackend(t, backendHost, func(tlsConn *tls.Conn) {
+	identity, certificate, _ := backendTLSFixture(t)
+	stopBackend := startTLSServingBackend(t, backendHost, certificate, func(tlsConn *tls.Conn) {
 		if _, err := tlsConn.Write([]byte("ok")); err != nil {
 			t.Errorf("backend write proxied bytes: %v", err)
 		}
@@ -835,7 +833,7 @@ func TestHandleAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	issueUserSession(t, sessionManager, "alice", "192.0.2.201:5000")
 	issueUserSession(t, sessionManager, "alice", "192.0.2.107:5001", "vmmulti")
 
-	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.107")
+	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.107", identity)
 	tlsClient := performFrontHandshake(t, client, "vmmulti.example.test")
 	defer func() { _ = tlsClient.Close() }()
 
