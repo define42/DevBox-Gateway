@@ -16,12 +16,6 @@ import (
 	"time"
 )
 
-type debFile struct {
-	source      string
-	destination string
-	mode        int64
-}
-
 type tarEntry struct {
 	name     string
 	body     []byte
@@ -30,16 +24,11 @@ type tarEntry struct {
 	typeFlag byte
 }
 
-func writeArchive(o Options) error {
-	files, err := packageFiles(o)
-	if err != nil {
-		return err
-	}
-
-	dataEntries := make([]tarEntry, 0, len(files))
+func writeArchive(p Package) error {
+	dataEntries := make([]tarEntry, 0, len(p.Files))
 	var md5sums strings.Builder
 	var installedBytes int64
-	for _, file := range files {
+	for _, file := range p.Files {
 		entry, err := readPackageFile(file)
 		if err != nil {
 			return err
@@ -56,7 +45,7 @@ func writeArchive(o Options) error {
 	if err != nil {
 		return fmt.Errorf("create data archive: %w", err)
 	}
-	controlArchive, err := makeTarGzip(controlEntries(o, md5sums.String(), installedBytes, now))
+	controlArchive, err := makeTarGzip(controlEntries(p, md5sums.String(), installedBytes, now))
 	if err != nil {
 		return fmt.Errorf("create control archive: %w", err)
 	}
@@ -76,7 +65,7 @@ func writeArchive(o Options) error {
 		}
 		members = append(members, arEntry)
 	}
-	return writePackageFile(o.Output, writeAr(members))
+	return writePackageFile(p.Output, writeAr(members))
 }
 
 func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
@@ -105,74 +94,92 @@ func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 	return directoryEntries
 }
 
-// packageFiles returns the install manifest. Modes are fixed here rather than
-// copied from the source files so the package is deterministic regardless of the
-// build checkout's umask. The config file is installed 0640 (root read/write, no
-// group or world read) because it can hold secrets such as SNI_HASH_SECRET.
-// The data archive owns every entry as root:root
-// (uid/gid 0), so 0640 keeps the file readable only by root. The other files
-// carry no secrets and use the conventional world-readable modes.
-func packageFiles(o Options) ([]debFile, error) {
-	files := []debFile{
-		{o.BinarySource, o.BinaryDestination, 0o755},
-		{o.UnitSource, unitDestination, 0o644},
-		{o.ConfigSource, confDestination, 0o640},
+// packageFiles returns the DevBox Gateway install manifest. The config file is
+// installed 0640 (root read/write, no group or world read) because it can hold
+// secrets such as SNI_HASH_SECRET. The data archive owns every entry as
+// root:root (uid/gid 0), so 0640 keeps the file readable only by root. The
+// other files carry no secrets and use the conventional world-readable modes.
+func packageFiles(o Options) ([]File, error) {
+	files := []File{
+		{Source: o.BinarySource, Destination: o.BinaryDestination, Mode: 0o755},
+		{Source: o.UnitSource, Destination: unitDestination, Mode: 0o644},
+		{Source: o.ConfigSource, Destination: confDestination, Mode: 0o640, Conffile: true},
 	}
 	if _, err := os.Stat(o.LicenseSource); err == nil {
-		files = append(files, debFile{o.LicenseSource, licenseDest, 0o644})
+		files = append(files, File{Source: o.LicenseSource, Destination: licenseDest, Mode: 0o644})
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat license: %w", err)
 	}
 	return files, nil
 }
 
-func readPackageFile(file debFile) (tarEntry, error) {
-	cleanDestination := filepath.ToSlash(filepath.Clean(file.destination))
+func readPackageFile(file File) (tarEntry, error) {
+	cleanDestination := filepath.ToSlash(filepath.Clean(file.Destination))
 	if !strings.HasPrefix(cleanDestination, "/") || cleanDestination == "/" {
-		return tarEntry{}, fmt.Errorf("package destination must be an absolute file path: %q", file.destination)
+		return tarEntry{}, fmt.Errorf("package destination must be an absolute file path: %q", file.Destination)
 	}
 
-	source, err := os.Open(file.source) //nolint:gosec // Sources are explicitly supplied packaging inputs.
+	source, err := os.Open(file.Source) //nolint:gosec // Sources are explicitly supplied packaging inputs.
 	if err != nil {
-		return tarEntry{}, fmt.Errorf("open %s: %w", file.source, err)
+		return tarEntry{}, fmt.Errorf("open %s: %w", file.Source, err)
 	}
 	defer source.Close()
 	info, err := source.Stat()
 	if err != nil {
-		return tarEntry{}, fmt.Errorf("stat %s: %w", file.source, err)
+		return tarEntry{}, fmt.Errorf("stat %s: %w", file.Source, err)
 	}
 	if !info.Mode().IsRegular() {
-		return tarEntry{}, fmt.Errorf("package source is not a regular file: %s", file.source)
+		return tarEntry{}, fmt.Errorf("package source is not a regular file: %s", file.Source)
 	}
 	body, err := io.ReadAll(source)
 	if err != nil {
-		return tarEntry{}, fmt.Errorf("read %s: %w", file.source, err)
+		return tarEntry{}, fmt.Errorf("read %s: %w", file.Source, err)
 	}
 	return tarEntry{
 		name:    strings.TrimPrefix(cleanDestination, "/"),
 		body:    body,
-		mode:    file.mode,
+		mode:    file.Mode,
 		modTime: info.ModTime(),
 	}, nil
 }
 
-func controlEntries(o Options, md5sums string, installedBytes int64, now time.Time) []tarEntry {
+// controlEntries renders control.tar.gz: the control file itself, md5sums, the
+// conffiles list, and whichever maintainer scripts p defines.
+func controlEntries(p Package, md5sums string, installedBytes int64, now time.Time) []tarEntry {
 	installedSize := (installedBytes + 1023) / 1024
-	control := fmt.Sprintf(
-		"Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s <%s>\n"+
-			"Installed-Size: %d\nSection: %s\nHomepage: %s\nDepends: %s\n"+
-			"Description: %s\n %s\n",
-		packageName, o.Version, o.Arch, maintainer, maintainerEmail, installedSize, section, url,
-		packageRelations(), summary, strings.ReplaceAll(description, "\n", "\n "),
-	)
-	return []tarEntry{
-		{name: "postinst", body: []byte(postinstScript), mode: 0o755, modTime: now},
-		{name: "prerm", body: []byte(prermScript), mode: 0o755, modTime: now},
-		{name: "postrm", body: []byte(postrmScript), mode: 0o755, modTime: now},
-		{name: "conffiles", body: []byte(confDestination + "\n"), mode: 0o644, modTime: now},
-		{name: "control", body: []byte(control), mode: 0o644, modTime: now},
-		{name: "md5sums", body: []byte(md5sums), mode: 0o644, modTime: now},
+	var control strings.Builder
+	fmt.Fprintf(&control, "Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\n"+
+		"Installed-Size: %d\nSection: %s\nHomepage: %s\n",
+		p.Name, p.Version, p.Arch, p.Maintainer, installedSize, p.Section, p.Homepage)
+	if p.Depends != "" {
+		fmt.Fprintf(&control, "Depends: %s\n", p.Depends)
 	}
+	fmt.Fprintf(&control, "Description: %s\n %s\n", p.Summary, strings.ReplaceAll(p.Description, "\n", "\n "))
+
+	var conffiles strings.Builder
+	for _, file := range p.Files {
+		if file.Conffile {
+			conffiles.WriteString(filepath.ToSlash(filepath.Clean(file.Destination)) + "\n")
+		}
+	}
+
+	var entries []tarEntry
+	for _, script := range []struct{ name, body string }{
+		{"postinst", p.Postinst},
+		{"prerm", p.Prerm},
+		{"postrm", p.Postrm},
+	} {
+		if script.body != "" {
+			entries = append(entries, tarEntry{name: script.name, body: []byte(script.body), mode: 0o755, modTime: now})
+		}
+	}
+	if conffiles.Len() > 0 {
+		entries = append(entries, tarEntry{name: "conffiles", body: []byte(conffiles.String()), mode: 0o644, modTime: now})
+	}
+	return append(entries,
+		tarEntry{name: "control", body: []byte(control.String()), mode: 0o644, modTime: now},
+		tarEntry{name: "md5sums", body: []byte(md5sums), mode: 0o644, modTime: now},
+	)
 }
 
 func makeTarGzip(entries []tarEntry) ([]byte, error) {

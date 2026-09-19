@@ -1,4 +1,6 @@
-// Package rpm builds RPM packages for the DevBox Gateway executable.
+// Package rpm builds RPM packages. Write builds the DevBox Gateway package from
+// Options; WritePackage builds any other package in this repository (such as
+// SauronAgent, see cmd/mksauronagent) from a Package description.
 package rpm
 
 import (
@@ -77,37 +79,96 @@ func Arch(goarch string) string {
 	}
 }
 
-// Write builds an RPM package from the supplied options.
+// Package describes an RPM to build: its metadata, payload, and scriptlets.
+// Scriptlets follow rpm conventions ($1 is the number of package instances left
+// after the transaction) and are omitted from the package when empty.
+type Package struct {
+	Name        string
+	Version     string
+	Release     string
+	Arch        string
+	Summary     string
+	Description string
+	URL         string
+	License     string
+	Requires    []string
+	// Files is the payload. Every file is stamped with the mtime of Files[0]
+	// (the main binary), so the package is reproducible for a given build
+	// artifact.
+	Files  []File
+	PostIn string
+	PreUn  string
+	PostUn string
+	Output string
+}
+
+// File is one payload entry: its source path on the build host, absolute
+// install destination, permission bits, and rpmpack file classification
+// (%config(noreplace), %doc, %license, ...). Files are always owned root:root.
+type File struct {
+	Source      string
+	Destination string
+	Mode        uint
+	Type        rpmpack.FileType
+}
+
+// Write builds the DevBox Gateway RPM from the supplied options.
 func Write(o Options) error {
-	requires, err := packageRelations()
+	return WritePackage(Package{
+		Name:        packageName,
+		Version:     o.Version,
+		Release:     o.Release,
+		Arch:        o.Arch,
+		Summary:     summary,
+		Description: description,
+		URL:         url,
+		License:     o.License,
+		Requires:    packageRequires(),
+		Files:       packageFiles(o),
+		PostIn:      postinScript,
+		PreUn:       preunScript,
+		PostUn:      postunScript,
+		Output:      o.Output,
+	})
+}
+
+// WritePackage builds an RPM package from p.
+func WritePackage(p Package) error {
+	requires, err := relations(p.Requires)
 	if err != nil {
 		return err
 	}
 
 	packageRPM, err := rpmpack.NewRPM(rpmpack.RPMMetaData{
-		Name:        packageName,
-		Summary:     summary,
-		Description: description,
-		Version:     o.Version,
-		Release:     o.Release,
-		Arch:        o.Arch,
-		URL:         url,
-		Licence:     o.License,
+		Name:        p.Name,
+		Summary:     p.Summary,
+		Description: p.Description,
+		Version:     p.Version,
+		Release:     p.Release,
+		Arch:        p.Arch,
+		URL:         p.URL,
+		Licence:     p.License,
 		Requires:    requires,
 	})
 	if err != nil {
 		return err
 	}
 
-	if err := addPackageFiles(packageRPM, o); err != nil {
+	if err := addFiles(packageRPM, p.Files); err != nil {
 		return err
 	}
 
-	packageRPM.AddPostin(postinScript)
-	packageRPM.AddPreun(preunScript)
-	packageRPM.AddPostun(postunScript)
+	if p.PostIn != "" {
+		packageRPM.AddPostin(p.PostIn)
+	}
+	if p.PreUn != "" {
+		packageRPM.AddPreun(p.PreUn)
+	}
+	if p.PostUn != "" {
+		packageRPM.AddPostun(p.PostUn)
+	}
 
-	destination, err := os.Create(o.Output)
+	destination, err := os.Create(p.Output)
 	if err != nil {
 		return err
 	}
@@ -118,13 +179,18 @@ func Write(o Options) error {
 	return destination.Close()
 }
 
-// packageRelations builds the RPM's hard requires: the libvirt client library
-// the binary links against, ca-certificates for outbound TLS, and the local KVM
-// stack that hosts the virtual desktops. libvirt-daemon-kvm pulls in the modular
-// libvirt daemons (virtqemud/virtnetworkd/virtstoraged) and qemu-kvm, so a fresh
-// install can provision VMs out of the box.
-func packageRelations() (requires rpmpack.Relations, err error) {
-	for _, dependency := range []string{"libvirt-libs", "ca-certificates", "libvirt-daemon-kvm", "qemu-kvm"} {
+// packageRequires are the DevBox Gateway RPM's hard requires: the libvirt client
+// library the binary links against, ca-certificates for outbound TLS, and the
+// local KVM stack that hosts the virtual desktops. libvirt-daemon-kvm pulls in
+// the modular libvirt daemons (virtqemud/virtnetworkd/virtstoraged) and
+// qemu-kvm, so a fresh install can provision VMs out of the box.
+func packageRequires() []string {
+	return []string{"libvirt-libs", "ca-certificates", "libvirt-daemon-kvm", "qemu-kvm"}
+}
+
+// relations converts plain package names into rpmpack requires.
+func relations(names []string) (requires rpmpack.Relations, err error) {
+	for _, dependency := range names {
 		if err := requires.Set(dependency); err != nil {
 			return nil, fmt.Errorf("add require %q: %w", dependency, err)
 		}
@@ -132,40 +198,34 @@ func packageRelations() (requires rpmpack.Relations, err error) {
 	return requires, nil
 }
 
-// packageFile describes one file in the RPM: its source path, install
-// destination, permission bits, and rpmpack file classification.
-type packageFile struct {
-	source      string
-	destination string
-	mode        uint
-	typeFlags   rpmpack.FileType
-}
-
 // packageFiles returns the install manifest. The config file is installed 0640
 // (root read/write, no group or world read) because it can hold secrets such as
 // SNI_HASH_SECRET. Combined with the root:root
-// owner set in addPackageFiles, that keeps the file readable only by root. The
+// owner set in addFiles, that keeps the file readable only by root. The
 // remaining files carry no secrets and use the conventional world-readable
 // modes. The LICENSE file is bundled when present; packaging tolerates its
 // absence (e.g. out-of-tree builds) rather than failing.
-func packageFiles(o Options) []packageFile {
-	files := []packageFile{
+func packageFiles(o Options) []File {
+	files := []File{
 		{o.BinarySource, o.BinaryDestination, 0o755, rpmpack.GenericFile},
 		{o.UnitSource, unitDestination, 0o644, rpmpack.GenericFile},
 		{o.ConfigSource, confDestination, 0o640, rpmpack.ConfigFile | rpmpack.NoReplaceFile},
 	}
 	if _, err := os.Stat(o.LicenseSource); err == nil {
-		files = append(files, packageFile{o.LicenseSource, licenseDest, 0o644, rpmpack.LicenceFile})
+		files = append(files, File{o.LicenseSource, licenseDest, 0o644, rpmpack.LicenceFile})
 	}
 	return files
 }
 
-// addPackageFiles adds the binary, systemd unit, sample config file, and (when
-// present) the license to the RPM, all stamped with the binary's mtime so the
-// package is reproducible for a given build artifact. The config file is marked
+// addFiles adds the payload to the RPM, all owned root:root and stamped with
+// the mtime of files[0] (the main binary) so the package is reproducible for a
+// given build artifact. Config files are marked through their Type, e.g.
 // %config(noreplace) so operator edits survive upgrades.
-func addPackageFiles(packageRPM *rpmpack.RPM, o Options) error {
-	info, err := os.Stat(o.BinarySource)
+func addFiles(packageRPM *rpmpack.RPM, files []File) error {
+	if len(files) == 0 {
+		return fmt.Errorf("rpm payload is empty")
+	}
+	info, err := os.Stat(files[0].Source)
 	if err != nil {
 		return err
 	}
@@ -177,19 +237,19 @@ func addPackageFiles(packageRPM *rpmpack.RPM, o Options) error {
 	}
 	mtime := uint32(unixMTime)
 
-	for _, file := range packageFiles(o) {
-		body, err := os.ReadFile(file.source)
+	for _, file := range files {
+		body, err := os.ReadFile(file.Source)
 		if err != nil {
 			return err
 		}
 		packageRPM.AddFile(rpmpack.RPMFile{
-			Name:  file.destination,
+			Name:  file.Destination,
 			Body:  body,
-			Mode:  file.mode,
+			Mode:  file.Mode,
 			Owner: "root",
 			Group: "root",
 			MTime: mtime,
-			Type:  file.typeFlags,
+			Type:  file.Type,
 		})
 	}
 	return nil

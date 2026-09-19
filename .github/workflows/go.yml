@@ -93,6 +93,16 @@ jobs:
           fail_ci_if_error: true
 
       # -------------------------------
+      # SauronAgent vet & test. SauronAgent/ is its own Go module and requires a
+      # newer Go than the gateway, so its steps run with GOTOOLCHAIN=auto: the go
+      # command fetches exactly the toolchain SauronAgent/go.mod asks for
+      # (checksum-verified via the Go module proxy) without changing the Go that
+      # builds the gateway.
+      # -------------------------------
+      - name: Vet and test SauronAgent
+        run: GOTOOLCHAIN=auto make -C SauronAgent lint test
+
+      # -------------------------------
       # Versioning & Release (main only)
       # -------------------------------
       - name: Bump version and create tag
@@ -129,6 +139,19 @@ jobs:
       - name: Build deb package
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
         run: make deb VERSION=${{ steps.tag.outputs.new_version }}
+
+      # -------------------------------
+      # SauronAgent packages (main only, when a new tag is cut). Same version and
+      # release as the gateway packages above; the version is also stamped into
+      # both SauronAgent binaries.
+      # -------------------------------
+      - name: Build SauronAgent RPM package
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        run: GOTOOLCHAIN=auto make sauron-rpm VERSION=${{ steps.tag.outputs.new_version }}
+
+      - name: Build SauronAgent deb package
+        if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
+        run: GOTOOLCHAIN=auto make sauron-deb VERSION=${{ steps.tag.outputs.new_version }}
 
       - name: Create GitHub release
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''

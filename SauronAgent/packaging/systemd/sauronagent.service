@@ -1,0 +1,175 @@
+# SauronAgent -- guest-side audit collector.
+#
+# Install into /usr/lib/systemd/system/ (or /etc/systemd/system/ for a local
+# override) together with sauronagent.sysusers.conf and
+# sauronagent.tmpfiles.conf.
+#
+# Every hardening directive below was chosen against what this program
+# actually does: read NETLINK_AUDIT, append to /var/lib/sauronagent/spool and
+# write to one AF_VSOCK stream. Directives whose absence or tightening would
+# break it are marked; do not "harden further" past those without testing that
+# events still arrive at the collector.
+
+[Unit]
+Description=SauronAgent guest audit and security telemetry agent
+Documentation=https://github.com/define42/SauronAgent
+Documentation=file:/usr/share/doc/sauronagent/deployment.md
+
+# No network dependency on purpose: audit records come from the kernel and
+# events leave over VSOCK, so this agent must start and keep working on a guest
+# with no IP configuration at all.
+After=local-fs.target
+Wants=local-fs.target
+
+# An agent that systemd has given up on restarting is an audit stream that
+# stopped without anyone being told. Rate limiting is disabled so a crash loop
+# keeps retrying (bounded by RestartSec) and keeps producing the journal
+# entries that make the loop visible, instead of going quiet after five tries.
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
+
+Restart=always
+RestartSec=5s
+
+# Dedicated unprivileged system user, created by sauronagent.sysusers.conf.
+# Running as root would give an attacker who finds a bug in the audit parser
+# the whole guest; CAP_AUDIT_READ is all this program needs.
+User=sauronagent
+Group=sauronagent
+
+# --- capabilities -----------------------------------------------------------
+#
+# CAP_AUDIT_READ is what lets a process join the NETLINK_AUDIT read-log
+# multicast group. It is deliberately *not* CAP_AUDIT_CONTROL: the agent is a
+# consumer, it never becomes the audit daemon, and a standard auditd keeps
+# running alongside it. Without the ambient capability the netlink socket
+# fails with EPERM at startup.
+#
+# The bounding set is the ceiling: even a successful exploit of this process
+# cannot acquire a capability that is not listed here.
+CapabilityBoundingSet=CAP_AUDIT_READ
+AmbientCapabilities=CAP_AUDIT_READ
+
+# NoNewPrivileges keeps the ambient capability (ambient caps survive execve);
+# what it removes is any path to *more* privilege through a setuid or
+# file-capability binary.
+NoNewPrivileges=true
+
+# PrivateUsers is deliberately NOT set. In a user namespace CAP_AUDIT_READ
+# would only be a capability over that namespace, and the kernel checks audit
+# access against the initial user namespace -- the agent would start and then
+# receive nothing.
+#
+# PrivateNetwork is deliberately NOT set either. It is tempting, because the
+# agent uses no IP at all, but audit multicast is delivered in the initial
+# network namespace and AF_VSOCK namespace semantics vary between kernels. The
+# equivalent protection without those risks is IPAddressDeny below.
+
+# --- filesystem -------------------------------------------------------------
+#
+# StateDirectory is what makes the spool work while ProtectSystem=strict has
+# made the rest of the filesystem read-only: systemd creates
+# /var/lib/sauronagent, owns it to User= and adds it to the writable set.
+# Removing this line turns every spool write into EROFS.
+StateDirectory=sauronagent
+StateDirectoryMode=0700
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateMounts=true
+UMask=0077
+
+# The spool holds command lines, file paths and usernames taken from every
+# process on the guest. Nothing outside this service has any business reading
+# it, which is why the state directory is 0700 and the umask 0077.
+
+# --- kernel and device surface ---------------------------------------------
+ProtectKernelModules=true
+# Read-only /proc/sys. The agent only ever reads it -- notably
+# /proc/sys/kernel/random/boot_id, which scopes the event sequence numbers the
+# collector deduplicates on.
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+# PrivateDevices is safe here: this agent opens no device node. Its VSOCK
+# socket comes from socket(AF_VSOCK) and connect(), not from /dev/vsock --
+# that node is only needed to *query* the local context ID, which the agent
+# never does (the guest does not need to know its own CID; the host reads it
+# from the connection). Note that the manual verification commands in
+# examples/qemu-vsock.md do use /dev/vsock, so run those outside this unit.
+PrivateDevices=true
+
+# ProtectProc hides other users' processes. ProcSubset=pid is deliberately NOT
+# set: it would mount /proc with subset=pid and hide /proc/sys entirely,
+# taking /proc/sys/kernel/random/boot_id with it. An agent without a boot id
+# still runs, but its sequence numbers lose the scope that lets the host tell
+# a reboot from a replay.
+ProtectProc=invisible
+
+# --- process and memory -----------------------------------------------------
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RemoveIPC=true
+KeyringMode=private
+
+# --- sockets ----------------------------------------------------------------
+#
+# AF_NETLINK  -- the audit source. Without it there are no events at all.
+# AF_VSOCK    -- the only way out of the guest. Omitting it does not produce
+#                an obvious error: socket(AF_VSOCK) fails with EAFNOSUPPORT,
+#                which is exactly what a VM with no virtio-vsock device
+#                reports, so the agent will report a missing vsock device and
+#                an operator will go looking at the hypervisor for a fault
+#                that is in this file.
+# AF_UNIX     -- local sockets used by the journal and by NSS lookups.
+RestrictAddressFamilies=AF_NETLINK AF_VSOCK AF_UNIX
+
+# The agent never speaks IP. Denying it outright means a compromised agent
+# cannot be turned into an exfiltration path over the guest's network, and it
+# costs nothing to a VSOCK deployment. Set transport.kind: tcp for development
+# only, and then this line must be removed.
+IPAddressDeny=any
+
+# --- system calls -----------------------------------------------------------
+#
+# @system-service is the standard allow-list for long-running daemons;
+# subtracting @privileged and @resources removes the calls a process with
+# CAP_AUDIT_READ has no use for. One consequence worth knowing: @resources
+# includes setrlimit, which the Go runtime attempts at startup to raise
+# RLIMIT_NOFILE. The failure is ignored by the runtime, so the limit is set
+# explicitly below instead of being raised by the process.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallArchitectures=native
+
+# One netlink socket, one VSOCK stream and a handful of spool segments.
+LimitNOFILE=4096
+
+# Under guest memory pressure the OOM killer must not silence the audit trail
+# before it touches the workload that is actually consuming memory. The agent's
+# own footprint is bounded by queue.capacity and spool.segment_size, so this
+# protects a small process rather than hiding a leak.
+OOMScoreAdjust=-250
+
+# --- verifying this unit ----------------------------------------------------
+#
+#   systemd-analyze security --offline=true sauronagent.service
+#
+# scores this unit at exposure level 1.2 ("OK"). Everything it still flags is
+# required by the design and is explained above: the ambient CAP_AUDIT_READ and
+# the audit capability itself, AF_NETLINK, AF_UNIX and AF_VSOCK ("exotic"),
+# ProcSubset, PrivateNetwork and PrivateUsers. If a future change makes that
+# list longer, the addition needs a reason written next to it.
+
+[Install]
+WantedBy=multi-user.target

@@ -327,3 +327,74 @@ func TestWriteDebOutputCreateError(t *testing.T) {
 		t.Fatal("expected error creating output under a regular file")
 	}
 }
+
+// A Package without dependencies, conffiles, or maintainer scripts must omit
+// the Depends field and those control members instead of writing empty ones.
+func TestWritePackageOmitsEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	bin, _, _ := stageInputs(t, dir)
+	out := filepath.Join(dir, "out.deb")
+	p := Package{
+		Name:        "minimal",
+		Version:     "1.0.0",
+		Arch:        "amd64",
+		Maintainer:  Maintainer,
+		Section:     "admin",
+		Homepage:    "https://example.invalid",
+		Summary:     "minimal package",
+		Description: "A package with a single static binary.",
+		Files:       []File{{Source: bin, Destination: "/usr/bin/minimal", Mode: 0o755}},
+		Output:      out,
+	}
+	if err := WritePackage(p); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read deb: %v", err)
+	}
+	control := readControlFile(t, data)
+	if strings.Contains(control, "Depends:") {
+		t.Errorf("control must not carry an empty Depends field:\n%s", control)
+	}
+
+	if got := strings.Join(controlMemberNames(t, data), " "); got != "control md5sums" {
+		t.Errorf("control.tar.gz members = %q, want only control and md5sums", got)
+	}
+}
+
+// controlMemberNames lists the entries of a .deb's control.tar.gz in order.
+func controlMemberNames(t *testing.T, deb []byte) []string {
+	t.Helper()
+	members, err := parseAr(deb)
+	if err != nil {
+		t.Fatalf("parseAr: %v", err)
+	}
+	for i := range members {
+		if members[i].name() == "control.tar.gz" {
+			return tarEntryNames(t, members[i].data)
+		}
+	}
+	t.Fatal("control.tar.gz not found")
+	return nil
+}
+
+func tarEntryNames(t *testing.T, gz []byte) []string {
+	t.Helper()
+	gzipReader, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		t.Fatalf("gzip: %v", err)
+	}
+	tarReader := tar.NewReader(gzipReader)
+	var names []string
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			return names
+		}
+		if err != nil {
+			t.Fatalf("tar: %v", err)
+		}
+		names = append(names, header.Name)
+	}
+}

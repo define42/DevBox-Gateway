@@ -1,0 +1,158 @@
+# SauronAgent -- guest agent configuration.
+#
+# Install as /etc/sauronagent/sauronagent.yaml and start with
+#   sauronagent -config /etc/sauronagent/sauronagent.yaml
+#
+# Every value below is the built-in default, so this file is equivalent to an
+# empty one. Delete anything you do not want to pin: a setting left out follows
+# the default, a setting spelled wrong is a startup failure. The loader rejects
+# unknown keys on purpose -- a typo in "preserve_raw" must not quietly disable
+# forensic evidence.
+#
+# Sizes accept "8MiB", "256MB" or a plain byte count. Durations accept Go
+# duration strings ("2s", "1m30s") or a bare number of seconds.
+#
+# Settings marked SECURITY change what evidence survives or who can reach the
+# agent. Review those before changing them.
+
+agent:
+  # Local name for this agent, used in its own diagnostic logs only. The host
+  # collector ignores it: a VM's identity is the VSOCK CID it connects from,
+  # never anything the guest says about itself.
+  name: sauronagent
+
+audit:
+  # Read the NETLINK_AUDIT multicast stream. Disabling it leaves the transport
+  # running with nothing to send, which is only useful when testing the link.
+  enabled: true
+
+  # SECURITY. Keep the kernel's original record text on every event. The
+  # normalized fields are an interpretation; the raw records are the evidence
+  # that interpretation was derived from, and they are what a forensic review,
+  # a parser bug report or a compliance audit needs. Turning this off roughly
+  # halves event size and permanently discards that evidence.
+  preserve_raw: true
+
+  # How long a partially assembled event waits for more records before being
+  # emitted anyway. The kernel closes most events with an EOE marker, but not
+  # all of them, so this timeout is what guarantees an event is never held
+  # forever. Raising it delays every incomplete event; lowering it splits busy
+  # events across two normalized events.
+  correlation_timeout: 2s
+
+  # Upper bound on partially assembled events held at once. Reaching it forces
+  # the oldest out early instead of growing without limit.
+  max_pending_events: 4096
+
+  # SO_RCVBUF requested on the netlink socket. Audit traffic is bursty and the
+  # kernel DROPS multicast records that do not fit -- that loss happens inside
+  # the kernel, where the agent can only count it, not recover it. Treat this
+  # as a correctness floor rather than a tuning knob on busy guests.
+  # Values above net.core.rmem_max are clamped unless the agent holds
+  # CAP_NET_ADMIN, which the shipped unit deliberately does not grant.
+  socket_receive_buffer: 8MiB
+
+  # Canonical record type names dropped before correlation. Anything listed
+  # here never reaches the host and leaves no trace that it existed, so use it
+  # only for high-volume types you have decided are not security relevant.
+  # Example: ["NETFILTER_PKT"]
+  exclude_types: []
+
+transport:
+  # SECURITY. "vsock" is the production transport: it needs no IP address,
+  # route, gateway or DNS in the guest and leaves no listening socket on the VM
+  # network. "tcp" exists for development and integration tests only; it
+  # reintroduces exactly the guest networking dependency VSOCK removes, and the
+  # collector cannot derive a trustworthy VM identity from a TCP peer address.
+  kind: vsock
+
+  # host:port used when kind is "tcp". Ignored for vsock.
+  tcp_address: ""
+
+  # Largest single protocol frame. Both ends enforce a limit; the host
+  # announces its own in READY and will close a connection that exceeds it.
+  max_payload_size: 1MiB
+
+  # Bounds one frame write, so a host that stops reading cannot wedge the
+  # sender indefinitely.
+  write_timeout: 10s
+
+  # How long the sender waits for acknowledgement progress before treating the
+  # connection as dead and reconnecting. Must be comfortably larger than the
+  # collector's limits.ack_max_delay.
+  ack_timeout: 60s
+
+  # Events allowed in flight without acknowledgement before the sender pauses.
+  # This is the guest-side flow control: a smaller value bounds what a host
+  # crash can lose from the network buffers, a larger one keeps a high-latency
+  # link busy.
+  max_unacked: 1024
+
+vsock:
+  # Destination context ID. 2 is VMADDR_CID_HOST, which Linux reserves for the
+  # hypervisor. There is normally no reason to change it.
+  cid: 2
+  # Collector port. Must match listen.port in the host configuration.
+  port: 9000
+
+queue:
+  # In-memory events between collection and transport. The netlink reader must
+  # never block on the host, so when this fills the OLDEST events are dropped
+  # and a sauron.queue.overflow event naming the exact missing sequence range
+  # is generated. Size it for the longest burst you expect to outrun the link,
+  # not for a host outage -- that is what the spool is for.
+  capacity: 10000
+
+spool:
+  # Disk-backed buffer that survives an agent restart and a host outage.
+  # Disabling it means the queue is the only buffer and a restart loses
+  # everything not yet acknowledged.
+  enabled: true
+  path: /var/lib/sauronagent/spool
+
+  # Total spool size on disk. On reaching it the agent emits sauron.spool.full
+  # and discards the oldest unsent data, recording which sequence numbers went.
+  # 1GiB holds roughly a day of a quiet server or an hour of a busy one.
+  max_size: 1GiB
+
+  # Size at which a segment file is rolled. Acknowledged data is reclaimed a
+  # whole segment at a time, so smaller segments return disk space sooner and
+  # cost more file handles. Must not exceed max_size.
+  segment_size: 16MiB
+
+  # SECURITY. fsync every appended record. This is the difference between
+  # surviving an agent crash (false is enough) and surviving a guest power
+  # loss or a host reset (needs true), and it costs a great deal of
+  # throughput. Turn it on for guests whose last seconds of audit trail are
+  # the interesting part -- which, after an attacker triggers a reboot, they
+  # are.
+  sync_on_write: false
+
+  # Periodic fsync when sync_on_write is false. This is the window of events
+  # an unclean guest shutdown can lose.
+  sync_interval: 1s
+
+heartbeat:
+  # PING carrying uptime and the loss counters. The host uses its arrival to
+  # tell a quiet guest from a dead agent, so this must be well below the
+  # collector's monitor.timeout.
+  interval: 30s
+  # How long to wait for a PONG before assuming the link is dead.
+  timeout: 90s
+
+reconnect:
+  # Exponential backoff after a transport failure. The agent keeps reading
+  # audit records and spooling them throughout an outage.
+  initial_delay: 100ms
+  max_delay: 10s
+  multiplier: 2.0
+  # Fraction of each delay randomised, in [0,1). It stops a fleet of guests
+  # from reconnecting to a restarted collector in lockstep.
+  jitter: 0.2
+
+logging:
+  # The agent's own diagnostic log. This is NOT the audit stream: audit events
+  # go to the host, where an intruder in the guest cannot edit them.
+  level: info      # debug, info, warn, error
+  format: text     # text or json
+  output: stderr   # stderr, stdout or an absolute file path

@@ -113,13 +113,13 @@ func TestReadPackageFileErrors(t *testing.T) {
 	}
 	cases := []struct {
 		name    string
-		file    debFile
+		file    File
 		wantErr string
 	}{
-		{"relative destination", debFile{source: regular, destination: "usr/bin/tool", mode: 0o755}, "absolute"},
-		{"root destination", debFile{source: regular, destination: "/", mode: 0o755}, "absolute"},
-		{"directory source", debFile{source: t.TempDir(), destination: "/usr/bin/tool", mode: 0o755}, "not a regular file"},
-		{"unreadable pseudo file", debFile{source: "/proc/self/mem", destination: "/usr/bin/tool", mode: 0o755}, "read /proc/self/mem"},
+		{"relative destination", File{Source: regular, Destination: "usr/bin/tool", Mode: 0o755}, "absolute"},
+		{"root destination", File{Source: regular, Destination: "/", Mode: 0o755}, "absolute"},
+		{"directory source", File{Source: t.TempDir(), Destination: "/usr/bin/tool", Mode: 0o755}, "not a regular file"},
+		{"unreadable pseudo file", File{Source: "/proc/self/mem", Destination: "/usr/bin/tool", Mode: 0o755}, "read /proc/self/mem"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

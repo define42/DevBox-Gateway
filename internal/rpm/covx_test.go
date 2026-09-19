@@ -7,10 +7,10 @@ import (
 	"github.com/google/rpmpack"
 )
 
-// TestAddPackageFilesReadError uses a directory as the binary source: os.Stat
+// TestAddFilesReadError uses a directory as the binary source: os.Stat
 // succeeds (so the mtime lookup passes) but os.ReadFile fails with EISDIR, the
 // same way for root and for the unprivileged CI runner.
-func TestAddPackageFilesReadError(t *testing.T) {
+func TestAddFilesReadError(t *testing.T) {
 	rpm, err := rpmpack.NewRPM(rpmpack.RPMMetaData{
 		Name:    packageName,
 		Version: "1.0.0",
@@ -20,12 +20,36 @@ func TestAddPackageFilesReadError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRPM: %v", err)
 	}
-	o := Options{
-		BinarySource:      t.TempDir(),
-		BinaryDestination: "/usr/bin/devbox-gateway",
-	}
-	if err := addPackageFiles(rpm, o); err == nil {
+	files := []File{{Source: t.TempDir(), Destination: "/usr/bin/devbox-gateway", Mode: 0o755}}
+	if err := addFiles(rpm, files); err == nil {
 		t.Fatal("expected error when the binary source is a directory")
+	}
+}
+
+func TestWritePackageEmptyPayload(t *testing.T) {
+	p := Package{
+		Name:    "empty",
+		Version: "1.0.0",
+		Release: "1",
+		Arch:    "noarch",
+		Output:  filepath.Join(t.TempDir(), "out.rpm"),
+	}
+	if err := WritePackage(p); err == nil {
+		t.Fatal("expected error for a package with no files")
+	}
+}
+
+func TestWritePackageInvalidRequire(t *testing.T) {
+	p := Package{
+		Name:     "bad-require",
+		Version:  "1.0.0",
+		Release:  "1",
+		Arch:     "noarch",
+		Requires: []string{"foo >< 1.0"}, // "><" is not an rpm sense
+		Output:   filepath.Join(t.TempDir(), "out.rpm"),
+	}
+	if err := WritePackage(p); err == nil {
+		t.Fatal("expected error for an unparseable require")
 	}
 }
 

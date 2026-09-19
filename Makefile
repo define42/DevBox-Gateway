@@ -26,6 +26,24 @@ rpm: build
 deb: build
 	go run ./cmd/mkdeb -version $(VERSION) -arch $(DEB_ARCH)
 
+# sauron-build compiles SauronAgent's static guest agent and hypervisor collector
+# with SauronAgent's own Makefile (into SauronAgent/bin), stamping VERSION into
+# both binaries so the version a guest reports matches the package it came from.
+sauron-build:
+	$(MAKE) -C SauronAgent build VERSION=$(VERSION)
+
+# sauron-rpm / sauron-deb package those binaries with their units, sysusers and
+# tmpfiles entries, example configs, and docs into a single sauronagent package
+# via the pure-Go cmd/mksauronagent helper, using the same VERSION/RELEASE/ARCH
+# as the devbox-gateway packages.
+sauron-rpm: sauron-build
+	mkdir -p dist
+	go run ./cmd/mksauronagent -format rpm -version $(VERSION) -release $(RELEASE) -arch $(ARCH)
+
+sauron-deb: sauron-build
+	mkdir -p dist
+	go run ./cmd/mksauronagent -format deb -version $(VERSION) -arch $(DEB_ARCH)
+
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run 
 lint2:

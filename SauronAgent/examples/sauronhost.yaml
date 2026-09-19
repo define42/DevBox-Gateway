@@ -1,0 +1,202 @@
+# SauronHost -- hypervisor-side collector configuration.
+#
+# Install as /etc/sauronhost/sauronhost.yaml and start with
+#   sauronhost -config /etc/sauronhost/sauronhost.yaml
+#
+# Every value below except the "vms" list is the built-in default. The loader
+# rejects unknown keys, so a misspelled setting fails at startup instead of
+# silently keeping a default you did not intend.
+#
+# Settings marked SECURITY decide what the collector trusts or how much a
+# hostile guest can consume. Review those before changing them.
+
+host:
+  # This hypervisor's name. It is attached to every event as trusted metadata,
+  # because unlike anything in the guest's HELLO it is configured here.
+  # Defaults to the machine's hostname.
+  name: hypervisor-01
+
+listen:
+  # SECURITY. "vsock" is the production listener. "tcp" is for development and
+  # integration tests only: a TCP peer address is not an authenticated VM
+  # identity, so every guest reaching a TCP collector is effectively unknown.
+  kind: vsock
+
+  # Local context ID to bind. 4294967295 is VMADDR_CID_ANY, which accepts
+  # connections from every guest on this hypervisor. Binding a specific CID
+  # here would make the collector deaf to all the others.
+  cid: 4294967295
+
+  # VSOCK port guests dial. Must match vsock.port in the agent configuration.
+  # Ports below 1024 would require CAP_NET_BIND_SERVICE; 9000 does not.
+  port: 9000
+
+  # host:port used when kind is "tcp". Ignored for vsock.
+  tcp_address: ""
+
+# SECURITY. The CID-to-VM mapping. This is the only authoritative statement of
+# which VM an event came from: the hypervisor assigns the CID, the kernel
+# writes it into the connection's address, and a compromised guest cannot dial
+# from a CID that is not its own. Everything the guest claims about itself
+# arrives separately under source.reported and is never used to identify it.
+#
+# Keep this list in step with the guest-cid= values in your QEMU command lines
+# or libvirt <vsock> elements -- see examples/qemu-vsock.md. A CID may appear
+# only once; a duplicate is a startup error, because two VMs sharing a CID
+# would make every event from either of them unattributable.
+vms:
+  - cid: 100
+    name: web-frontend-01
+    uuid: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+    environment: production
+    security_domain: dmz
+    vlan: "120"
+    labels:
+      owner: platform-team
+      compliance: pci
+    # expected: an audit stream from this VM must always be present. If it
+    # stops for monitor.timeout the collector emits sauron.stream.lost, which
+    # is the whole point of the design: silencing the agent is the first thing
+    # an intruder does, and a missing stream must be louder than a quiet one.
+    expected: true
+
+  - cid: 101
+    name: web-frontend-02
+    uuid: 7a2f1c44-2f3d-4a0e-9d55-2c1b7f0a91e2
+    environment: production
+    security_domain: dmz
+    vlan: "120"
+    labels:
+      owner: platform-team
+      compliance: pci
+    expected: true
+
+  - cid: 102
+    name: transfer-vm-03
+    uuid: b1c4e0d2-55a7-42c9-8f31-9d0e4c6a7b18
+    environment: production
+    security_domain: restricted
+    vlan: "310"
+    labels:
+      owner: data-team
+      compliance: pci
+    expected: true
+
+  - cid: 103
+    name: db-primary-01
+    uuid: 2d8e1f90-6c3b-4b77-a0e2-5f9c8d1a4b63
+    environment: production
+    security_domain: internal
+    vlan: "200"
+    labels:
+      owner: dba-team
+    expected: true
+
+  - cid: 200
+    name: build-runner-07
+    uuid: 91ab33cd-7e64-4f12-8c05-3ab7d9e02f45
+    environment: staging
+    security_domain: internal
+    vlan: "400"
+    labels:
+      owner: ci-team
+      ephemeral: "true"
+    # Not expected: this VM is rebuilt several times a day, so a gap in its
+    # stream is routine and would only train operators to ignore the alert.
+    expected: false
+
+output:
+  # Newline-delimited JSON on standard output. Under systemd that lands in the
+  # journal, which is the simplest working configuration and the default.
+  stdout:
+    enabled: true
+    # Indented JSON, for reading by hand. Never enable it for a log shipper
+    # that expects one event per line.
+    pretty: false
+
+  # Newline-delimited JSON to a file, for a forwarder to tail.
+  file:
+    enabled: false
+    path: /var/log/sauronhost/events.json
+    # Roll the file past this size. 0 disables rotation and leaves it to
+    # logrotate.
+    max_size: 256MiB
+    max_files: 8
+    # fsync after every event. The collector only acknowledges an event to the
+    # guest once every sink has accepted it, so with this off a host crash can
+    # lose events the guest has already been told are safe and deleted from
+    # its spool.
+    sync_on_write: false
+
+  # Forward to a syslog daemon such as rsyslog.
+  syslog:
+    enabled: false
+    # "" uses the local syslog socket (/dev/log). Otherwise "tcp", "udp" or
+    # "unix" -- note that tcp/udp send audit records over the network in
+    # plaintext unless the daemon is configured for TLS.
+    network: ""
+    address: ""
+    tag: sauronhost
+    facility: authpriv
+
+monitor:
+  # Stream-health tracking. A VM marked expected that goes silent produces
+  # sauron.stream.lost. Disabling this removes the only detection this design
+  # has for an agent that was killed inside a compromised guest.
+  enabled: true
+  # Silence tolerated from an expected VM before reporting it lost. Must be
+  # larger than the agent's heartbeat.interval (30s by default) plus a margin
+  # for a reconnect with backoff.
+  timeout: 90s
+  # How often stream health is evaluated.
+  check_interval: 15s
+
+# Bounds on what a connected guest may consume. A guest is untrusted, so these
+# are defences against a hostile or malfunctioning agent rather than tuning.
+limits:
+  # Largest frame payload accepted. Announced to the agent in READY. The
+  # length is read before the payload, so this is what stops a 20-byte header
+  # from dictating an allocation.
+  max_payload_size: 1MiB
+
+  # Concurrent connections from one CID, and in total. They stop one guest
+  # from exhausting the collector by connecting in a loop.
+  max_connections_per_cid: 4
+  max_connections: 1024
+
+  # How long a connection may stay silent before completing HELLO/READY.
+  handshake_timeout: 10s
+
+  # A connection that sends nothing at all, not even heartbeats, is closed
+  # after this long. Keep it above the agent's heartbeat.interval.
+  idle_timeout: 5m
+
+  # Acknowledge every N events. Larger batches cost fewer frames but leave
+  # more in the guest's spool, and more to re-send after a reconnect. 0
+  # acknowledges every event.
+  ack_interval: 64
+
+  # Acknowledge after this long even if ack_interval events have not arrived,
+  # so a slow trickle is still released from the guest's spool promptly.
+  ack_max_delay: 2s
+
+  # Recent sequence numbers remembered per (CID, boot ID) for duplicate
+  # suppression. Delivery is at-least-once, so a reconnect legitimately
+  # replays events; this window is what keeps them from being written twice.
+  # It must exceed the agent's transport.max_unacked (1024 by default) by a
+  # wide margin.
+  dedup_window: 65536
+
+  # SECURITY. Accept guests with no entry in the vms list above. They are
+  # recorded under a synthetic name with source.known=false rather than
+  # dropped, because an unexpected VM connecting to the collector is itself
+  # something an analyst must see. Set it to false only if you would rather
+  # refuse an unmapped guest outright -- and understand that you are then
+  # choosing to have no record of it at all.
+  allow_unknown_cids: true
+
+logging:
+  # The collector's own diagnostic log, separate from the event stream.
+  level: info      # debug, info, warn, error
+  format: text     # text or json
+  output: stderr   # stderr, stdout or an absolute file path

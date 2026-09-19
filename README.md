@@ -31,6 +31,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Quick start (Docker Compose)](#quick-start-docker-compose)
 - [Installing the RPM](#installing-the-rpm)
 - [Installing the deb](#installing-the-deb)
+- [Installing SauronAgent](#installing-sauronagent)
 - [Login flow](#login-flow)
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
@@ -262,6 +263,50 @@ It depends on `libvirt0` and `ca-certificates`, plus `libvirt-daemon-system` and
    `sudo systemctl enable --now devbox-gateway`. Installation enables the unit
    per systemd preset policy but does not start it; an upgrade preserves your
    config and restarts the service.
+
+## Installing SauronAgent
+
+[SauronAgent](SauronAgent/README.md) streams Linux audit events from inside the
+guest VMs to the hypervisor over virtio-vsock. Each tagged release also publishes
+a `sauronagent-<version>-1.x86_64.rpm` and a `sauronagent_<version>_amd64.deb`
+built from [`SauronAgent/`](SauronAgent), with the same version as the gateway
+packages (the version is also compiled into the binaries, so a guest reports the
+release it runs).
+
+One package carries both components, laid out like SauronAgent's own
+`make install PREFIX=/usr`. Install it on the hypervisor and in each guest, then
+enable the component that machine runs:
+
+| Path                                               | Purpose                                                   |
+|----------------------------------------------------|-----------------------------------------------------------|
+| `/usr/bin/sauronagent`, `sauronagent.service`     | Guest audit agent (run it inside each VM).                |
+| `/usr/bin/sauronhost`, `sauronhost.service`       | Hypervisor collector (run it on the KVM host).            |
+| `/etc/sauronagent/sauronagent.yaml.example`       | Example agent config; copy to `sauronagent.yaml`.         |
+| `/etc/sauronhost/sauronhost.yaml.example`         | Example collector config; copy to `sauronhost.yaml` and fill in the `vms:` CID map. |
+| `/usr/lib/sysusers.d/sauronagent.conf`, `/usr/lib/tmpfiles.d/sauronagent.conf` | The `sauronagent` / `sauronhost` system users and their directories. |
+| `/usr/share/doc/sauronagent/`                     | README, deployment, protocol, security, and vsock docs.   |
+
+The binaries are static, so the packages have no dependencies. Installing
+creates the users and directories (`systemd-sysusers`, `systemd-tmpfiles`) but
+enables and starts **neither** unit: only you know whether a machine is a guest
+or the hypervisor. Upgrades restart whichever unit is running; removal stops and
+disables both but never deletes the agent spool or the collector's output.
+
+```sh
+sudo dnf install ./sauronagent-<version>-1.x86_64.rpm    # or: sudo apt install ./sauronagent_<version>_amd64.deb
+
+# on the hypervisor
+sudo cp /etc/sauronhost/sauronhost.yaml.example /etc/sauronhost/sauronhost.yaml
+sudoedit /etc/sauronhost/sauronhost.yaml                  # fill in the vms: CID map
+sudo systemctl enable --now sauronhost
+
+# in each guest
+sudo cp /etc/sauronagent/sauronagent.yaml.example /etc/sauronagent/sauronagent.yaml
+sudo systemctl enable --now sauronagent
+```
+
+See the [SauronAgent deployment guide](SauronAgent/docs/deployment.md) for the
+vsock device each VM needs, audit rules, and sizing.
 
 To remove it: `sudo apt remove devbox-gateway` (add `--purge` to also delete the
 config file).
@@ -637,6 +682,26 @@ This packages the same `dist/` artifacts into
 `go run ./cmd/mkdeb -h` to see the available packaging flags. Override
 `DEB_ARCH` for a non-`amd64` target.
 
+### Building the SauronAgent packages
+
+To produce the same SauronAgent packages the
+[release workflow](#installing-sauronagent) publishes, run (overriding `VERSION`
+as needed):
+
+```sh
+make sauron-rpm VERSION=1.4.0
+make sauron-deb VERSION=1.4.0
+```
+
+This builds the static `sauronagent` and `sauronhost` binaries with
+SauronAgent's own Makefile into `SauronAgent/bin/`, then packages them into
+`dist/sauronagent-<version>-1.x86_64.rpm` / `dist/sauronagent_<version>_amd64.deb`
+through the [`cmd/mksauronagent`](cmd/mksauronagent) command, which reuses the
+pure-Go `internal/rpm` and `internal/deb` writers. SauronAgent is a separate Go
+module that needs a newer Go than the gateway (see `SauronAgent/go.mod`); with
+an older local toolchain, prefix the commands with `GOTOOLCHAIN=auto` as the
+release workflow does.
+
 ### UI (TypeScript)
 
 The dashboard UI source lives in `ui/dashboard.ts`. Rebuild the embedded asset
@@ -669,7 +734,8 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 ├── cmd/
 │   ├── devbox-gateway/  Minimal gateway process entrypoint.
 │   ├── mkdeb/           Debian packaging CLI adapter.
-│   └── mkrpm/           RPM packaging CLI adapter.
+│   ├── mkrpm/           RPM packaging CLI adapter.
+│   └── mksauronagent/   SauronAgent RPM/deb packaging CLI adapter.
 ├── internal/
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
 │   ├── cloudinit/   NoCloud document and seed ISO generation.
@@ -683,11 +749,13 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── rpm/         RPM package construction and manifests.
+│   ├── sauronpkg/   SauronAgent package manifest and maintainer scripts.
 │   ├── session/     Cookie session manager and middleware.
 │   ├── types/       Shared types (e.g. authenticated user).
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 │   ├── vmname/      VM name construction and validation.
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
+├── SauronAgent/     Guest audit agent and hypervisor collector (separate Go module).
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
 ├── testsplunk/      Post-setup task creating the local Splunk's audit index.

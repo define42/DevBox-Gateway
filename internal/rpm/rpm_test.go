@@ -19,9 +19,9 @@ func TestRPMArch(t *testing.T) {
 }
 
 func TestPackageRelations(t *testing.T) {
-	requires, err := packageRelations()
+	requires, err := relations(packageRequires())
 	if err != nil {
-		t.Fatalf("packageRelations: %v", err)
+		t.Fatalf("relations: %v", err)
 	}
 	want := map[string]bool{
 		"libvirt-libs":       true,
@@ -58,10 +58,10 @@ func TestPackageFileModes(t *testing.T) {
 
 	files := packageFiles(o)
 	modes := map[string]uint{}
-	var conf *packageFile
+	var conf *File
 	for i := range files {
-		modes[files[i].destination] = files[i].mode
-		if files[i].destination == confDestination {
+		modes[files[i].Destination] = files[i].Mode
+		if files[i].Destination == confDestination {
 			conf = &files[i]
 		}
 	}
@@ -87,8 +87,8 @@ func TestPackageFileModes(t *testing.T) {
 	if conf == nil {
 		t.Fatalf("config file %s not in the install manifest", confDestination)
 	}
-	if conf.typeFlags&rpmpack.ConfigFile == 0 || conf.typeFlags&rpmpack.NoReplaceFile == 0 {
-		t.Errorf("config file must stay %%config(noreplace); got type %v", conf.typeFlags)
+	if conf.Type&rpmpack.ConfigFile == 0 || conf.Type&rpmpack.NoReplaceFile == 0 {
+		t.Errorf("config file must stay %%config(noreplace); got type %v", conf.Type)
 	}
 }
 
