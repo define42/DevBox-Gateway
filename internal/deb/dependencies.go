@@ -31,6 +31,7 @@ func binaryDependencies(binary string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// #nosec G204 -- Fixed build tool; the private staged path is one -e argument, never shell input.
 	cmd := exec.Command("dpkg-shlibdeps", "--warnings=1", "-O", "-e"+staged)
 	cmd.Dir = dir
 	var stderr bytes.Buffer

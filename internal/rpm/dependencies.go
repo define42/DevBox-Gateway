@@ -22,6 +22,7 @@ func binaryDependencies(binary string) ([]string, error) {
 		// Distribution packages install this helper outside PATH by default.
 		scanner = "/usr/lib/rpm/elfdeps"
 	}
+	// #nosec G204 -- Scanner is only elfdeps from the build PATH or the fixed fallback; the absolute binary path is one argument, with no shell.
 	cmd := exec.Command(scanner, "--requires", binary)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
