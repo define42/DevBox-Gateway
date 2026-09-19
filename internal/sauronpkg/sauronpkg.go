@@ -254,9 +254,15 @@ func Write(format string, o Options) (string, error) {
 	switch format {
 	case "rpm":
 		p := RPM(o)
+		if err := validateBinaries(o, p.Arch); err != nil {
+			return "", err
+		}
 		return p.Output, rpm.WritePackage(p)
 	case "deb":
 		p := Deb(o)
+		if err := validateBinaries(o, p.Arch); err != nil {
+			return "", err
+		}
 		return p.Output, deb.WritePackage(p)
 	default:
 		return "", fmt.Errorf("unknown package format %q (want rpm or deb)", format)

@@ -193,10 +193,16 @@ func (s *session) handshake() error {
 	// more: the agent has already discarded them and the host never got them.
 	// That is the difference between "100-200 were lost" and "100-200 were
 	// acknowledged and deleted", and it is only detectable here.
-	if resume > 0 && hello.FirstSequence > resume+1 {
-		first, last := resume+1, hello.FirstSequence-1
-		s.srv.dedup.NoteMissing(s.key, first, last)
-		s.reportGap(first, last, "agent cannot replay below its first_sequence")
+	missing := s.srv.dedup.CheckReplay(s.key, hello.FirstSequence)
+	if missing.Gap {
+		reason := "sequence numbers skipped before reconnect"
+		if hello.FirstSequence > missing.GapLast {
+			reason = "agent cannot replay below its first_sequence"
+		}
+		s.reportGap(missing.GapFirst, missing.GapLast, reason)
+	}
+	if missing.Blocked {
+		return fmt.Errorf("pending gap evidence limit reached for stream %q", s.key.boot)
 	}
 	return nil
 }
@@ -281,8 +287,17 @@ func (s *session) handleEvent(f *protocol.Frame) error {
 	s.srv.monitor.seen(s.peer, s.srv.now())
 
 	res := s.srv.dedup.Check(s.key, ev.Sequence)
+	if res.Blocked && !res.Gap {
+		// A reboot can leave every remembered stream pinned by failed gap
+		// reports. Recover old evidence without requiring those boots to return.
+		s.srv.retryPendingGaps(s.writeCtx)
+		res = s.srv.dedup.Check(s.key, ev.Sequence)
+	}
 	if res.Gap {
 		s.reportGap(res.GapFirst, res.GapLast, "sequence numbers skipped")
+	}
+	if res.Blocked {
+		return fmt.Errorf("pending gap evidence limit reached for stream %q", s.key.boot)
 	}
 	if res.Duplicate {
 		// A replay after a reconnect is normal: delivery is at-least-once. It
@@ -549,15 +564,26 @@ func (s *session) report(ev *event.Event) {
 // hole, which is what makes advancing over it defensible: the events are gone
 // either way, and the record of their absence is written first.
 func (s *session) reportGap(first, last uint64, reason string) {
+	src := s.srv.dedup.rememberGapSource(s.key, s.src)
+	s.srv.publishGap(s.writeCtx, s.key, src, first, last, reason)
+}
+
+func (s *Server) publishGap(ctx context.Context, key streamKey, src output.Source, first, last uint64, reason string) bool {
 	missing := last - first + 1
 	s.log.Warn("gap in guest sequence numbers",
 		"first_missing_sequence", first, "last_missing_sequence", last,
-		"events_missing", missing, "boot_id", s.key.boot, "reason", reason)
-	s.report(event.NewInternal(typeStreamGap, event.SeverityCritical, map[string]any{
+		"events_missing", missing, "boot_id", key.boot, "vm", src.VM, "cid", src.CID, "reason", reason)
+	err := s.report.publish(ctx, src, event.NewInternal(typeStreamGap, event.SeverityCritical, map[string]any{
 		"first_missing_sequence": first,
 		"last_missing_sequence":  last,
 		"events_missing":         missing,
-		"boot_id":                s.key.boot,
+		"boot_id":                key.boot,
 		"reason":                 reason,
 	}))
+	if err != nil {
+		s.metrics.OutputErrors.Add(1)
+		return false
+	}
+	s.dedup.NoteMissing(key, first, last)
+	return true
 }

@@ -92,7 +92,7 @@ type spool struct {
 	appended   uint64         // records appended so far
 	synced     uint64         // records known to be on stable storage
 	committed  spoolPosition  // everything before it is on stable storage
-	checkpoint spoolPosition  // as loaded at open
+	checkpoint spoolPosition  // latest successfully recorded delivery position
 	full       bool           // the last Append was refused for lack of space
 	closed     bool
 
@@ -134,7 +134,9 @@ func openSpool(dir string, maxBytes int64) (*spool, error) {
 	last := s.segments[len(s.segments)-1]
 	s.committed = spoolPosition{Segment: last.id, Offset: last.size}
 	s.checkpoint = s.loadCheckpoint()
-	s.removeSegmentsBefore(s.checkpoint.Segment)
+	if err := s.removeDeliveredSegmentsLocked(); err != nil {
+		log.Printf("sauron: %v", err)
+	}
 	return s, nil
 }
 
@@ -248,20 +250,48 @@ func (s *spool) loadCheckpoint() spoolPosition {
 	if position.before(oldest) {
 		return oldest
 	}
-	for _, segment := range s.segments {
-		switch {
-		case segment.id < position.Segment:
-			continue
-		case segment.id > position.Segment:
-			// The checkpoint's segment was already deleted.
-			return spoolPosition{Segment: segment.id}
-		case position.Offset <= segment.size:
-			return position
-		}
-		break
+	if err := s.validateCheckpointLocked(position); err != nil {
+		log.Printf("sauron: spool checkpoint %s is invalid (%v); delivering every spooled event again", position, err)
+		return oldest
 	}
-	log.Printf("sauron: spool checkpoint %s lies beyond the spooled data; delivering every spooled event again", position)
-	return oldest
+	return position
+}
+
+// validateCheckpointLocked accepts only boundaries of committed records in a
+// known segment. A corrupt offset must never authorize deleting pending data.
+func (s *spool) validateCheckpointLocked(position spoolPosition) error {
+	if position.Offset < 0 || s.committed.before(position) {
+		return errors.New("position lies outside committed data")
+	}
+	for _, segment := range s.segments {
+		if segment.id != position.Segment {
+			continue
+		}
+		if position.Offset > segment.size {
+			return errors.New("offset exceeds segment size")
+		}
+		if position.Offset == 0 {
+			return nil
+		}
+		return s.validateRecordBoundary(position)
+	}
+	return errors.New("segment is missing")
+}
+
+func (s *spool) validateRecordBoundary(position spoolPosition) error {
+	file, err := os.Open(s.segmentPath(position.Segment))
+	if err != nil {
+		return fmt.Errorf("open checkpoint segment: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	var previous [1]byte
+	if _, err := file.ReadAt(previous[:], position.Offset-1); err != nil {
+		return fmt.Errorf("read checkpoint boundary: %w", err)
+	}
+	if previous[0] != '\n' {
+		return errors.New("offset does not end a record")
+	}
+	return nil
 }
 
 // Append durably adds one record. When it returns nil the record is on
@@ -285,16 +315,8 @@ func (s *spool) appendLocked(line []byte) (uint64, error) {
 		return 0, errSpoolClosed
 	}
 	size := int64(len(line))
-	if s.total+size > s.maxBytes {
-		if !s.full {
-			s.full = true
-			log.Printf("sauron: the splunk hec spool in %s is full (%d MiB); guest events are no longer acknowledged and wait in the guests' own spools until Splunk takes the backlog", s.dir, s.maxBytes>>20)
-		}
-		return 0, errSpoolFull
-	}
-	if s.full {
-		s.full = false
-		log.Printf("sauron: the splunk hec spool has room again; acknowledging guest events")
+	if err := s.ensureCapacityLocked(size); err != nil {
+		return 0, err
 	}
 
 	last := &s.segments[len(s.segments)-1]
@@ -317,6 +339,39 @@ func (s *spool) appendLocked(line []byte) (uint64, error) {
 	s.total += int64(n)
 	s.appended++
 	return s.appended, nil
+}
+
+func (s *spool) ensureCapacityLocked(size int64) error {
+	if size <= s.maxBytes && size > s.maxBytes-s.total {
+		if err := s.reclaimDeliveredLocked(); err != nil {
+			return err
+		}
+	}
+	if size > s.maxBytes-s.total {
+		if !s.full {
+			s.full = true
+			log.Printf("sauron: the splunk hec spool in %s is full (%d MiB); guest events are no longer acknowledged and wait in the guests' own spools until Splunk takes the backlog", s.dir, s.maxBytes>>20)
+		}
+		return errSpoolFull
+	}
+	if s.full {
+		s.full = false
+		log.Printf("sauron: the splunk hec spool has room again; acknowledging guest events")
+	}
+	return nil
+}
+
+// reclaimDeliveredLocked rotates a fully delivered active segment before the
+// capacity check. Its empty successor is durable before any file is deleted,
+// so a restart always preserves increasing segment IDs and pending records.
+func (s *spool) reclaimDeliveredLocked() error {
+	last := s.segments[len(s.segments)-1]
+	if last.size > 0 && s.checkpoint == (spoolPosition{Segment: last.id, Offset: last.size}) {
+		if err := s.rotateLocked(); err != nil {
+			return err
+		}
+	}
+	return s.removeDeliveredSegmentsLocked()
 }
 
 // rotateLocked makes the active segment durable, closes it, and starts the
@@ -501,6 +556,20 @@ func (s *spool) readSegment(position spoolPosition, limit int64, maxRecords, max
 // atomically but not fsynced: losing its latest update to a power cut only
 // delivers some events twice.
 func (s *spool) acknowledge(position spoolPosition) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errSpoolClosed
+	}
+	if position == s.checkpoint {
+		return s.removeDeliveredSegmentsLocked()
+	}
+	if position.before(s.checkpoint) {
+		return errors.New("sauron spool checkpoint cannot move backwards")
+	}
+	if err := s.validateCheckpointLocked(position); err != nil {
+		return fmt.Errorf("invalid sauron spool checkpoint %s: %w", position, err)
+	}
 	data, err := json.Marshal(position)
 	if err != nil {
 		return fmt.Errorf("encode sauron spool checkpoint: %w", err)
@@ -512,26 +581,25 @@ func (s *spool) acknowledge(position spoolPosition) error {
 	if err := os.Rename(temporary, filepath.Join(s.dir, spoolCheckpointName)); err != nil {
 		return fmt.Errorf("replace sauron spool checkpoint: %w", err)
 	}
-	s.removeSegmentsBefore(position.Segment)
-	return nil
+	s.checkpoint = position
+	return s.removeDeliveredSegmentsLocked()
 }
 
-// removeSegmentsBefore deletes every segment older than id, never the one
-// being appended to.
-func (s *spool) removeSegmentsBefore(id uint64) {
-	s.mu.Lock()
-	var stale []uint64
-	for len(s.segments) > 1 && s.segments[0].id < id {
-		stale = append(stale, s.segments[0].id)
-		s.total -= s.segments[0].size
+// removeDeliveredSegmentsLocked deletes fully delivered segments, never the
+// active one. Failed deletions still count toward the capacity limit.
+func (s *spool) removeDeliveredSegmentsLocked() error {
+	for len(s.segments) > 1 {
+		segment := s.segments[0]
+		if s.checkpoint.before(spoolPosition{Segment: segment.id, Offset: segment.size}) {
+			break
+		}
+		if err := os.Remove(s.segmentPath(segment.id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("delete delivered spool segment: %w", err)
+		}
+		s.total -= segment.size
 		s.segments = s.segments[1:]
 	}
-	s.mu.Unlock()
-	for _, segment := range stale {
-		if err := os.Remove(s.segmentPath(segment)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Printf("sauron: delete delivered spool segment: %v", err)
-		}
-	}
+	return nil
 }
 
 // usage is the disk space the spool's segments take.

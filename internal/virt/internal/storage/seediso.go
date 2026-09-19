@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -38,12 +39,36 @@ func CreateSeedISOToPoolWithSettings(
 	hostname string,
 	credentials backendidentity.Credentials,
 ) error {
+	return CreateSeedISOToPoolWithContext(context.Background(), settings, conn, storagePoolName, volumeName, username, cloudInitPasswordHash, hostname, credentials)
+}
+
+// CreateSeedISOToPoolWithContext builds and uploads a seed ISO with cancellation.
+func CreateSeedISOToPoolWithContext(
+	ctx context.Context,
+	settings *config.Settings,
+	conn *libvirt.Connect,
+	storagePoolName string,
+	volumeName string,
+	username string,
+	cloudInitPasswordHash string,
+	hostname string,
+	credentials backendidentity.Credentials,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	userData, metaData, networkConfig, err := cloudInitSeedData(username, cloudInitPasswordHash, hostname, credentials)
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	seedISOData, err := cloudinit.CreateSeedISO(userData, metaData, networkConfig)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -70,7 +95,7 @@ func CreateSeedISOToPoolWithSettings(
 		_ = vol.Free()
 	}()
 
-	if err := UploadSeedISO(conn, vol, seedISOData); err != nil {
+	if err := uploadSeedISOWithContext(ctx, conn, vol, seedISOData); err != nil {
 		return err
 	}
 
@@ -184,6 +209,13 @@ systemctl restart xrdp.service
 
 // UploadSeedISO uploads seedISOData into vol.
 func UploadSeedISO(conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData []byte) error {
+	return uploadSeedISOWithContext(context.Background(), conn, vol, seedISOData)
+}
+
+func uploadSeedISOWithContext(ctx context.Context, conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	stream, err := conn.NewStream(0)
 	if err != nil {
 		return err
@@ -196,10 +228,5 @@ func UploadSeedISO(conn *libvirt.Connect, vol *libvirt.StorageVol, seedISOData [
 		return err
 	}
 
-	if err := stream.SendAll(StreamReaderChunks(bytes.NewReader(seedISOData))); err != nil {
-		_ = stream.Abort()
-		return err
-	}
-
-	return stream.Finish()
+	return sendStreamWithContext(ctx, stream, StreamReaderChunks(bytes.NewReader(seedISOData)))
 }

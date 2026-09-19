@@ -9,6 +9,8 @@ ARCH     ?= x86_64
 DEB_ARCH ?= amd64
 BINARY   := dist/devbox-gateway
 GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
+SAURON_RPM_GOARCH = $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(patsubst i686,386,$(patsubst armhfp,arm,$(patsubst loongarch64,loong64,$(ARCH))))))
+SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,ppc64le,$(DEB_ARCH))))
 
 .PHONY: all build rpm deb sauron-build sauron-rpm sauron-deb lint lint2 gosec test run ui
 
@@ -41,15 +43,17 @@ sauron-build:
 
 # sauron-rpm / sauron-deb package those binaries with their units, sysusers and
 # tmpfiles entries, example configs, and docs into a single sauronagent package
-# via the pure-Go cmd/mksauronagent helper, using the same VERSION/RELEASE/ARCH
-# as the devbox-gateway packages.
-sauron-rpm: sauron-build
+# via the pure-Go cmd/mksauronagent helper. Derive GOARCH from package metadata
+# and isolate outputs by format/architecture so parallel builds cannot mix them.
+sauron-rpm:
+	$(MAKE) -C SauronAgent build VERSION=$(VERSION) GOOS=linux GOARCH=$(SAURON_RPM_GOARCH) GOARM=7 BINDIR=bin/rpm-$(ARCH)
 	mkdir -p dist
-	go run ./cmd/mksauronagent -format rpm -version $(VERSION) -release $(RELEASE) -arch $(ARCH)
+	go run ./cmd/mksauronagent -format rpm -version $(VERSION) -release $(RELEASE) -arch $(ARCH) -bindir SauronAgent/bin/rpm-$(ARCH)
 
-sauron-deb: sauron-build
+sauron-deb:
+	$(MAKE) -C SauronAgent build VERSION=$(VERSION) GOOS=linux GOARCH=$(SAURON_DEB_GOARCH) GOARM=7 BINDIR=bin/deb-$(DEB_ARCH)
 	mkdir -p dist
-	go run ./cmd/mksauronagent -format deb -version $(VERSION) -arch $(DEB_ARCH)
+	go run ./cmd/mksauronagent -format deb -version $(VERSION) -arch $(DEB_ARCH) -bindir SauronAgent/bin/deb-$(DEB_ARCH)
 
 lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run 

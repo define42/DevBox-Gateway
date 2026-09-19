@@ -215,18 +215,19 @@ type reporter struct {
 
 // publish delivers one internal event.
 //
-// A failure to write an internal event is logged and dropped rather than
-// reported as another internal event: the most likely reason for it is that the
-// sink itself is broken, and reporting the failure of a report is how a
-// collector turns one broken output into an infinite loop.
-func (r *reporter) publish(ctx context.Context, src output.Source, ev *event.Event) *output.Envelope {
+// A failed write is logged rather than reported recursively. Callers that use
+// the event as durable evidence, such as gap accounting, must retry the returned
+// error before acknowledging the corresponding guest data. onEvent remains a
+// best-effort observation callback, not proof that the sink accepted the event.
+func (r *reporter) publish(ctx context.Context, src output.Source, ev *event.Event) error {
 	env := envelopeFor(r.now(), src, ev)
-	if err := r.sink.Write(ctx, env); err != nil {
+	err := r.sink.Write(ctx, env)
+	if err != nil {
 		r.log.Error("writing internal event failed",
 			"type", ev.Type, "vm", src.VM, "cid", src.CID, "error", err)
 	}
 	if r.onEvent != nil {
 		r.onEvent(env)
 	}
-	return env
+	return err
 }

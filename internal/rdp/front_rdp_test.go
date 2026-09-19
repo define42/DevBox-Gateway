@@ -168,9 +168,7 @@ func TestValidateFrontSNIRequiresSubdomain(t *testing.T) {
 }
 
 func TestValidateFrontSNIAcceptsValidSubdomain(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	t.Setenv(config.SNI_HASH_SECRET, "test-secret")
-	settings := config.NewSettings(false)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
 	label := hash.RoutingLabel([]byte("test-secret"), "vm")
@@ -183,12 +181,20 @@ func TestValidateFrontSNIAcceptsValidSubdomain(t *testing.T) {
 		return "vm", true
 	}
 
-	got, ok := validateFrontSNI(label+".example.test", addr, settings)
-	if !ok {
-		t.Fatal("expected valid routing label to be accepted")
-	}
-	if got != "vm" {
-		t.Fatalf("expected hostname %q, got %q", "vm", got)
+	for _, domain := range []string{"example.test", "Example.Test", "EXAMPLE.TEST", " Example.Test "} {
+		t.Run(domain, func(t *testing.T) {
+			t.Setenv(config.FRONT_DOMAIN, domain)
+			settings := config.NewSettings(false)
+			got, ok := validateFrontSNI(label+".example.test", addr, settings)
+			if !ok || got != "vm" {
+				t.Fatalf("routing with FRONT_DOMAIN=%q returned %q, %v; want vm, true", domain, got, ok)
+			}
+			for _, badSNI := range []string{"example.test", label + ".notexample.test", label + ".example.test.attacker.test"} {
+				if _, ok := validateFrontSNI(badSNI, addr, settings); ok {
+					t.Fatalf("routing with FRONT_DOMAIN=%q accepted %q outside its subdomain", domain, badSNI)
+				}
+			}
+		})
 	}
 }
 

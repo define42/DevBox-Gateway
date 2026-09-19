@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -198,8 +199,21 @@ func BootNewVM(req VMCreateRequest, settings *config.Settings) (vmName string, e
 // reporting. The callback is observational: callers should return promptly and
 // must not call back into VM create/remove operations.
 func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, report DiskCopyProgressFunc) (vmName string, err error) {
+	return BootNewVMWithContext(context.Background(), req, settings, report)
+}
+
+// BootNewVMWithContext creates a VM while observing request cancellation. Any
+// partially created domain, volumes and network reservation are rolled back
+// before returning an error. report has the same contract as BootNewVMWithProgress.
+func BootNewVMWithContext(ctx context.Context, req VMCreateRequest, settings *config.Settings, report DiskCopyProgressFunc) (vmName string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	spec, err := prepareVMCreation(req, settings)
 	if err != nil {
+		return spec.vmName, err
+	}
+	if err := ctx.Err(); err != nil {
 		return spec.vmName, err
 	}
 
@@ -211,6 +225,9 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, repor
 		_, _ = conn.Close()
 	}()
 
+	if err := ctx.Err(); err != nil {
+		return spec.vmName, err
+	}
 	if err := storage.EnsureBootPool(conn, spec.poolName, spec.poolPath); err != nil {
 		return spec.vmName, err
 	}
@@ -218,9 +235,12 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, repor
 	// check, the destroy of any leftover artifacts, the disk/seed provisioning,
 	// and the domain definition must be atomic with respect to another create or
 	// remove of the same VDI name. Held until the boot finishes.
+	if err := ctx.Err(); err != nil {
+		return spec.vmName, err
+	}
 	unlockName := vmNameLocks.Lock(spec.vmName)
 	defer unlockName()
-	if err := provisionAndStartVM(conn, settings, spec, report); err != nil {
+	if err := provisionAndStartVM(ctx, conn, settings, spec, report); err != nil {
 		return spec.vmName, err
 	}
 
@@ -232,7 +252,10 @@ func BootNewVMWithProgress(req VMCreateRequest, settings *config.Settings, repor
 // free, reserves the owner's quota slot, clears leftover artifacts, provisions
 // the disk and seed volumes, and starts the domain. Failures roll back the
 // domain and storage before releasing the quota reservation or the name lock.
-func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) (err error) {
+func provisionAndStartVM(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ensureVMNameAvailable(conn, spec.vmName); err != nil {
 		return err
 	}
@@ -244,6 +267,9 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec 
 		return err
 	}
 	defer releaseVMSlot()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); err != nil {
 		return err
 	}
@@ -257,21 +283,35 @@ func provisionAndStartVM(conn *libvirt.Connect, settings *config.Settings, spec 
 			}
 		}
 	}()
+	return provisionVMResources(ctx, conn, settings, spec, report)
+}
+
+func provisionVMResources(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var err error
 	spec.network, err = reserveNetworkIdentity(conn, spec.vmName)
 	if err != nil {
 		return fmt.Errorf("reserve VM network identity: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	spec.backend, err = backendidentity.Generate(spec.vmName)
 	if err != nil {
 		return fmt.Errorf("generate VM backend identity: %w", err)
 	}
-	if err := provisionBootVolumes(conn, settings, spec, report); err != nil {
+	if err := provisionBootVolumes(ctx, conn, settings, spec, report); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := StartVM(spec.startConfig()); err != nil {
 		return fmt.Errorf("failed to start vm: %w", err)
 	}
-	return nil
+	return ctx.Err()
 }
 
 // RemoveVM deletes the named VM, its disks, and any leftover console sockets.
@@ -330,8 +370,9 @@ func resetExistingVMArtifacts(conn *libvirt.Connect, poolName, vmName, seedISO s
 // provisionBootVolumes creates the VM's disk (cloned from the resolved base
 // image) and its cloud-init seed ISO in the storage pool. A nil report
 // disables disk-copy progress reporting.
-func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
-	if err := storage.CopyAndResizeVolumeWithSettingsAndProgress(
+func provisionBootVolumes(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
+	if err := storage.CopyAndResizeVolumeWithContext(
+		ctx,
 		conn,
 		settings,
 		spec.poolName,
@@ -342,7 +383,8 @@ func provisionBootVolumes(conn *libvirt.Connect, settings *config.Settings, spec
 	); err != nil {
 		return fmt.Errorf("failed to copy and resize base image: %w", err)
 	}
-	if err := storage.CreateSeedISOToPoolWithSettings(
+	if err := storage.CreateSeedISOToPoolWithContext(
+		ctx,
 		settings,
 		conn,
 		spec.poolName,

@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -35,7 +36,7 @@ func TestProvisionAndStartVMRollsBackCopyFailure(t *testing.T) {
 	unlock := vmNameLocks.Lock(fixture.spec.vmName)
 	defer unlock()
 
-	err := provisionAndStartVM(fixture.conn, fixture.settings, fixture.spec, nil)
+	err := provisionAndStartVM(context.Background(), fixture.conn, fixture.settings, fixture.spec, nil)
 	if err == nil || !strings.Contains(err.Error(), "open source image") {
 		t.Fatalf("expected disk upload failure after volume creation, got %v", err)
 	}

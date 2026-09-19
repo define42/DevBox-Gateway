@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -94,6 +95,24 @@ func CopyAndResizeVolumeWithSettingsAndProgress(
 	capacityBytes uint64,
 	report DiskCopyProgressFunc,
 ) error {
+	return CopyAndResizeVolumeWithContext(context.Background(), conn, settings, storagePoolName, volumeName, sourceImagePath, capacityBytes, report)
+}
+
+// CopyAndResizeVolumeWithContext copies a volume with interruptible upload.
+// The provisioning caller owns removal of any partially created volume.
+func CopyAndResizeVolumeWithContext(
+	ctx context.Context,
+	conn *libvirt.Connect,
+	settings *config.Settings,
+	storagePoolName string,
+	volumeName string,
+	sourceImagePath string,
+	capacityBytes uint64,
+	report DiskCopyProgressFunc,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	pool, err := conn.LookupStoragePoolByName(storagePoolName)
 	if err != nil {
 		return fmt.Errorf("lookup pool %s: %w", storagePoolName, err)
@@ -104,6 +123,9 @@ func CopyAndResizeVolumeWithSettingsAndProgress(
 		}
 	}()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	vol, err := CreateQCOW2Volume(settings, pool, volumeName, capacityBytes)
 	if err != nil {
 		return err
@@ -112,10 +134,13 @@ func CopyAndResizeVolumeWithSettingsAndProgress(
 		_ = vol.Free()
 	}()
 
-	if err := uploadFileToVolumeWithProgress(conn, vol, sourceImagePath, report); err != nil {
+	if err := uploadFileToVolumeWithContext(ctx, conn, vol, sourceImagePath, report); err != nil {
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ResizeVolumeIfNeeded(vol, capacityBytes); err != nil {
 		return err
 	}
@@ -143,6 +168,13 @@ func UploadFileToVolume(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceIm
 }
 
 func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string, report DiskCopyProgressFunc) error {
+	return uploadFileToVolumeWithContext(context.Background(), conn, vol, sourceImagePath, report)
+}
+
+func uploadFileToVolumeWithContext(ctx context.Context, conn *libvirt.Connect, vol *libvirt.StorageVol, sourceImagePath string, report DiskCopyProgressFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	src, srcSize, err := openSourceImage(sourceImagePath)
 	if err != nil {
 		return err
@@ -171,15 +203,11 @@ func uploadFileToVolumeWithProgress(conn *libvirt.Connect, vol *libvirt.StorageV
 			ReportProgress(report, copiedBytes, srcSize)
 		}
 	})
-	if err := stream.SendAll(chunks); err != nil {
-		_ = stream.Abort()
-		return fmt.Errorf("stream send: %w", err)
-	}
-	if err := stream.Finish(); err != nil {
-		return fmt.Errorf("stream finish: %w", err)
+	if err := sendStreamWithContext(ctx, stream, chunks); err != nil {
+		return err
 	}
 	ReportProgress(report, copiedBytes, srcSize)
-	return nil
+	return ctx.Err()
 }
 
 // StreamReaderChunks adapts an io.Reader to libvirt's stream callback shape.

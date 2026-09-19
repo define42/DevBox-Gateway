@@ -14,6 +14,11 @@ import (
 func stageTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	// Minimal ELF64 amd64 executable header, keeping archive fixtures small.
+	binary := make([]byte, 64)
+	copy(binary, "\x7fELF\x02\x01\x01")
+	binary[16], binary[18], binary[20] = 2, 62, 1 // ET_EXEC, EM_X86_64, EV_CURRENT
+	binary[52], binary[54], binary[58] = 64, 56, 64
 	for _, name := range []string{
 		"bin/sauronagent",
 		"bin/sauronhost",
@@ -33,7 +38,11 @@ func stageTree(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("mkdir for %s: %v", name, err)
 		}
-		if err := os.WriteFile(path, []byte("content of "+name), 0o600); err != nil {
+		content := []byte("content of " + name)
+		if name == "bin/sauronagent" || name == "bin/sauronhost" {
+			content = binary
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}
@@ -64,7 +73,11 @@ func TestMainWritesBothFormats(t *testing.T) {
 	dir := t.TempDir()
 	for _, format := range []string{"rpm", "deb"} {
 		output := filepath.Join(dir, "from-main."+format)
-		runMain(t, "-format", format, "-version", "2.0.0", "-release", "3", "-src", root, "-out", output)
+		arch := "amd64"
+		if format == "rpm" {
+			arch = "x86_64"
+		}
+		runMain(t, "-format", format, "-version", "2.0.0", "-release", "3", "-arch", arch, "-src", root, "-out", output)
 		if info, err := os.Stat(output); err != nil || info.Size() == 0 {
 			t.Fatalf("%s output stat = %v, %v", format, info, err)
 		}

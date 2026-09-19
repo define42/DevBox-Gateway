@@ -26,20 +26,24 @@ const testTimeout = 5 * time.Second
 // fakeSink records envelopes and can be made to reject chosen sequences, which
 // is how the "never acknowledge what the outputs refused" rule is tested.
 type fakeSink struct {
-	mu      sync.Mutex
-	envs    []*output.Envelope
-	failSeq map[uint64]bool
-	closes  int
-	flushes int
+	mu       sync.Mutex
+	envs     []*output.Envelope
+	failSeq  map[uint64]bool
+	failType map[string]bool
+	closes   int
+	flushes  int
 }
 
 func newFakeSink() *fakeSink {
-	return &fakeSink{failSeq: make(map[uint64]bool)}
+	return &fakeSink{failSeq: make(map[uint64]bool), failType: make(map[string]bool)}
 }
 
 func (f *fakeSink) Write(_ context.Context, env *output.Envelope) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if env.Event != nil && f.failType[env.Event.Type] {
+		return errors.New("fake sink: internal event rejected")
+	}
 	if env.Event != nil && !event.IsInternal(env.Event.Type) && f.failSeq[env.Event.Sequence] {
 		return errors.New("fake sink: disk is on fire")
 	}
@@ -68,6 +72,12 @@ func (f *fakeSink) fail(seq uint64, on bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failSeq[seq] = on
+}
+
+func (f *fakeSink) failInternal(eventType string, on bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failType[eventType] = on
 }
 
 // events returns the guest events written, in order, excluding the collector's

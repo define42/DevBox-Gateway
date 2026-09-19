@@ -59,6 +59,7 @@ type gatewayRuntime struct {
 	listener       net.Listener
 	frontTLS       *cert.TLSManager
 	profiler       *pprofRuntime
+	httpServers    *httpServerRegistry
 	sessionManager *session.Manager
 	auditSink      io.Closer
 	// sauron is the SauronAgent guest event collector; nil when SAURON_ENABLE
@@ -94,6 +95,7 @@ func (g *gatewayRuntime) close() error {
 
 	return errors.Join(
 		g.closeListener(),
+		g.drainHTTP(),
 		g.drainConnections(),
 		g.closeSauron(),
 		g.closeProfiler(),
@@ -130,6 +132,18 @@ func (g *gatewayRuntime) closeListener() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func (g *gatewayRuntime) drainHTTP() error {
+	if g.httpServers == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gatewayShutdownTimeout)
+	defer cancel()
+	if err := g.httpServers.shutdown(ctx); err != nil {
+		return fmt.Errorf("drain HTTP requests: %w", err)
+	}
+	return nil
 }
 
 func (g *gatewayRuntime) drainConnections() error {
@@ -295,13 +309,14 @@ func startGatewayRuntime(
 		listener:       ln,
 		frontTLS:       frontTLS,
 		profiler:       profiler,
+		httpServers:    newHTTPServerRegistry(),
 		sessionManager: sessionManager,
 		auditSink:      auditSink,
 		done:           done,
 	}
 	mux := NewHandler(sessionManager, settings)
 	go func() {
-		runtime.serveErr = serveListener(ln, mux, frontTLS, sessionManager, settings)
+		runtime.serveErr = serveListenerWithHTTPServers(ln, mux, frontTLS, sessionManager, settings, runtime.httpServers)
 		close(done)
 	}()
 

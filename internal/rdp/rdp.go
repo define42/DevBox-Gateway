@@ -453,7 +453,7 @@ func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Tim
 }
 
 func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.Settings) (string, bool) {
-	frontDomain := strings.TrimSpace(settings.Get(config.FRONT_DOMAIN))
+	frontDomain := strings.ToLower(strings.TrimSpace(settings.Get(config.FRONT_DOMAIN)))
 	if frontDomain != "" {
 		debugf("enforcing front domain %q", frontDomain)
 	}

@@ -774,7 +774,7 @@ func registerDashboardCreateRoute(group huma.API, sessionManager *session.Manage
 			reportProgress = creationStream.ReportDiskCopy
 		}
 
-		vmName, err := virt.BootNewVMWithProgress(input, settings, reportProgress)
+		vmName, err := virt.BootNewVMWithContext(req.Context(), input, settings, reportProgress)
 		auditResult := audit.ResultSuccess
 		if err != nil {
 			auditResult = audit.ResultFailure

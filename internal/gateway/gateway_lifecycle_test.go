@@ -25,6 +25,11 @@ import (
 const (
 	gatewayRequestTimeout = 30 * time.Second
 	gatewayTestTimeout    = 60 * time.Second
+
+	// The real desktop fixture is about 1.75 GB, and libvirt's Go SendAll
+	// callback copies every byte. Race instrumentation and concurrent libvirt
+	// integration tests can push that upload beyond two minutes despite progress.
+	gatewayVMCreateTimeout = 5 * time.Minute
 )
 
 type gatewayTestServer struct {
@@ -192,7 +197,7 @@ func waitForDashboardVMRemoval(t *testing.T, client *http.Client, baseURL, vmNam
 }
 
 func TestGatewayRejectsDuplicateVMCreate(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), gatewayVMCreateTimeout)
 	defer cancel()
 
 	ldapURL, cleanupLDAP := startGlauth(ctx, t, "")
@@ -218,7 +223,7 @@ func TestGatewayRejectsDuplicateVMCreate(t *testing.T) {
 
 func TestGatewayHTTPSLifecycle(t *testing.T) {
 	auditOutput := captureStructuredLogs(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), gatewayVMCreateTimeout)
 	defer cancel()
 
 	ldapURL, cleanupLDAP := startGlauth(ctx, t, "")

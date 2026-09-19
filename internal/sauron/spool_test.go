@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func openTestSpool(t *testing.T, dir string, maxBytes int64) *spool {
@@ -204,6 +206,239 @@ func TestSpoolRefusesRecordsOnceFull(t *testing.T) {
 	if err := s.Append([]byte(record)); err != nil {
 		t.Fatalf("Append() after delivery error = %v", err)
 	}
+}
+
+func TestSpoolReclaimsDeliveredActiveSegmentWhenFull(t *testing.T) {
+	for _, reopen := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reopen=%t", reopen), func(t *testing.T) {
+			testSpoolReclaimsDeliveredActiveSegmentWhenFull(t, reopen)
+		})
+	}
+}
+
+func testSpoolReclaimsDeliveredActiveSegmentWhenFull(t *testing.T, reopen bool) {
+	t.Helper()
+	dir := t.TempDir()
+	s := openTestSpool(t, dir, 1<<20)
+	large := paddedSpoolRecord((1 << 20) - 100)
+	next := paddedSpoolRecord(1024)
+	appendRecords(t, s, large)
+	if err := s.Append([]byte(next)); !errors.Is(err, errSpoolFull) {
+		t.Fatalf("Append() before delivery = %v, want errSpoolFull", err)
+	}
+	_, delivered := readAll(t, s, s.checkpoint)
+	if err := s.acknowledge(delivered); err != nil {
+		t.Fatal(err)
+	}
+	if reopen {
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		s = openTestSpool(t, dir, 1<<20)
+	}
+	if err := s.Append([]byte(next)); err != nil {
+		t.Fatalf("Append() after delivery = %v", err)
+	}
+	if got := s.usage(); got != int64(len(next)+1) {
+		t.Fatalf("usage = %d, want only the pending record (%d)", got, len(next)+1)
+	}
+	segments, err := listSpoolSegments(dir)
+	if err != nil || len(segments) != 1 || segments[0].id <= delivered.Segment {
+		t.Fatalf("segments after reclamation = %v, %v; want a single successor", segments, err)
+	}
+	got, _ := readAll(t, s, delivered)
+	assertRecords(t, got, []string{next})
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestSpool(t, dir, 1<<20)
+	got, _ = readAll(t, reopened, reopened.checkpoint)
+	assertRecords(t, got, []string{next})
+}
+
+func paddedSpoolRecord(size int) string {
+	const prefix, suffix = `{"data":"`, `"}`
+	return prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+}
+
+func TestSpoolKeepsUndeliveredActiveTailAfterCheckpoint(t *testing.T) {
+	dir := t.TempDir()
+	s := openTestSpool(t, dir, 1<<20)
+	s.segmentSize = 1 << 20
+	first := `{"n":1}`
+	pending := paddedSpoolRecord((1 << 20) - len(first) - 2)
+	appendRecords(t, s, first, pending)
+	if err := s.acknowledge(spoolPosition{Segment: 1, Offset: int64(len(first) + 1)}); err != nil {
+		t.Fatal(err)
+	}
+	assertFullSpoolRecord(t, s, pending)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestSpool(t, dir, 1<<20)
+	assertFullSpoolRecord(t, reopened, pending)
+	_, end := readAll(t, reopened, reopened.checkpoint)
+	if err := reopened.acknowledge(end); err != nil {
+		t.Fatal(err)
+	}
+	appendRecords(t, reopened, `{"n":3}`)
+}
+
+func assertFullSpoolRecord(t *testing.T, s *spool, pending string) {
+	t.Helper()
+	if err := s.Append([]byte(`{"n":3}`)); !errors.Is(err, errSpoolFull) {
+		t.Fatalf("Append() with pending data = %v, want errSpoolFull", err)
+	}
+	if got := s.usage(); got != 1<<20 {
+		t.Fatalf("full spool usage = %d, want %d", got, 1<<20)
+	}
+	got, _ := readAll(t, s, s.checkpoint)
+	assertRecords(t, got, []string{pending})
+}
+
+func TestSpoolInvalidCheckpointsCannotReclaimPendingRecords(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		position spoolPosition
+	}{
+		{name: "negative offset", position: spoolPosition{Segment: 2, Offset: -1}},
+		{name: "inside a record", position: spoolPosition{Segment: 2, Offset: 1}},
+		{name: "beyond segment", position: spoolPosition{Segment: 2, Offset: 301}},
+		{name: "future segment", position: spoolPosition{Segment: 3}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testSpoolInvalidCheckpointCannotReclaimPendingRecords(t, test.position)
+		})
+	}
+}
+
+func testSpoolInvalidCheckpointCannotReclaimPendingRecords(t *testing.T, position spoolPosition) {
+	t.Helper()
+	dir := t.TempDir()
+	s := openTestSpool(t, dir, 400)
+	want := []string{paddedSpoolRecord(99), paddedSpoolRecord(299)}
+	appendRecords(t, s, want...)
+	if err := s.acknowledge(position); err == nil {
+		t.Fatal("acknowledge() accepted an invalid checkpoint")
+	}
+	if _, err := os.Stat(filepath.Join(dir, spoolCheckpointName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid checkpoint persisted: %v", err)
+	}
+	assertPendingSpoolIsFull(t, s, want)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A corrupt on-disk checkpoint must also retain all pending data.
+	data, err := json.Marshal(position)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, spoolCheckpointName), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestSpool(t, dir, 400)
+	assertPendingSpoolIsFull(t, reopened, want)
+}
+
+func assertPendingSpoolIsFull(t *testing.T, s *spool, want []string) {
+	t.Helper()
+	if err := s.Append([]byte(`{}`)); !errors.Is(err, errSpoolFull) {
+		t.Fatalf("Append() with unconfirmed records = %v, want errSpoolFull", err)
+	}
+	got, _ := readAll(t, s, s.checkpoint)
+	assertRecords(t, got, want)
+	var size int64
+	for _, record := range want {
+		size += int64(len(record) + 1)
+	}
+	if got := s.usage(); got != size {
+		t.Fatalf("usage = %d, want %d pending bytes", got, size)
+	}
+}
+
+func TestSpoolCannotAcknowledgeUncommittedRecords(t *testing.T) {
+	s := openTestSpool(t, t.TempDir(), 400)
+	want := []string{paddedSpoolRecord(99), paddedSpoolRecord(299)}
+	appendRecords(t, s, want[0])
+	s.mu.Lock()
+	generation, err := s.appendLocked(append([]byte(want[1]), '\n'))
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.acknowledge(spoolPosition{Segment: 2, Offset: 300}); err == nil {
+		t.Fatal("acknowledge() accepted a record before its fsync completed")
+	}
+	if err := s.syncThrough(generation); err != nil {
+		t.Fatal(err)
+	}
+	assertPendingSpoolIsFull(t, s, want)
+}
+
+func TestSpoolReclamationKeepsAnAppendWaitingForSync(t *testing.T) {
+	s := openTestSpool(t, t.TempDir(), 1<<20)
+	large := paddedSpoolRecord((1 << 20) - 100)
+	appendRecords(t, s, large)
+	_, delivered := readAll(t, s, s.checkpoint)
+	if err := s.acknowledge(delivered); err != nil {
+		t.Fatal(err)
+	}
+	<-s.ready // Consume the initial append's commit notification.
+
+	// Hold fsync back after the next append reclaims the delivered segment.
+	// The rotation notification establishes when that append has run.
+	s.syncMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			s.syncMu.Unlock()
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- s.Append([]byte(large)) }()
+	select {
+	case <-s.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("append did not rotate the delivered segment")
+	}
+	if err := s.Append([]byte(paddedSpoolRecord(1024))); !errors.Is(err, errSpoolFull) {
+		t.Fatalf("Append() while another record waits for fsync = %v, want errSpoolFull", err)
+	}
+	s.syncMu.Unlock()
+	locked = false
+	if err := <-done; err != nil {
+		t.Fatalf("Append() after reclamation and fsync = %v", err)
+	}
+	got, _ := readAll(t, s, delivered)
+	assertRecords(t, got, []string{large})
+}
+
+func TestSpoolReclamationRequiresADurableSuccessor(t *testing.T) {
+	s := openTestSpool(t, t.TempDir(), 1<<20)
+	large := paddedSpoolRecord((1 << 20) - 100)
+	appendRecords(t, s, large)
+	_, delivered := readAll(t, s, s.checkpoint)
+	if err := s.acknowledge(delivered); err != nil {
+		t.Fatal(err)
+	}
+	successor := s.segmentPath(delivered.Segment + 1)
+	if err := os.Mkdir(successor, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	next := paddedSpoolRecord(1024)
+	if err := s.Append([]byte(next)); err == nil {
+		t.Fatal("Append() succeeded despite failing to create its successor segment")
+	}
+	info, err := os.Stat(s.segmentPath(delivered.Segment))
+	if err != nil || info.Size() != int64(len(large)+1) || s.usage() != int64(len(large)+1) {
+		t.Fatalf("failed rotation changed the delivered segment or its accounting: %v", err)
+	}
+	if err := os.Remove(successor); err != nil {
+		t.Fatal(err)
+	}
+	appendRecords(t, s, next)
+	got, _ := readAll(t, s, delivered)
+	assertRecords(t, got, []string{next})
 }
 
 func TestSpoolDeliversEverythingAgainAfterABadCheckpoint(t *testing.T) {

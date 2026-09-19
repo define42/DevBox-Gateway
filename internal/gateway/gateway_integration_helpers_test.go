@@ -75,7 +75,7 @@ func createGatewayVM(t *testing.T, server gatewayTestServer, shortName string) s
 	// the same way instead of hard-coding the separator.
 	fullName := "johndoe" + vmname.Separator + shortName
 	createClient := *server.client
-	createClient.Timeout = 2 * time.Minute
+	createClient.Timeout = gatewayVMCreateTimeout
 
 	// No password fields: the gateway seeds the guest account with the hash of
 	// the login password held in the session established by the test's login.

@@ -104,6 +104,13 @@ The RDP flow on the front side is:
 8. Verify the backend certificate and its provisioned server name during TLS.
 9. Splice bytes between client TLS and backend TLS for the rest of the session.
 
+On shutdown, the gateway stops accepting HTTP requests and gives active handlers
+up to 5 seconds to finish. It then cancels remaining requests and closes their
+connections, allowing up to another 5 seconds for cleanup before closing the
+audit sink. Cancelled VM creation rolls back its partially created resources;
+interrupted image uploads remove their temporary files. RDP and WebSocket
+sessions are drained separately.
+
 ## Quick start (Docker Compose)
 
 Requirements on the host:
@@ -850,7 +857,8 @@ make sauron-deb VERSION=1.4.0
 ```
 
 This builds the static `sauronagent` and `sauronhost` binaries with
-SauronAgent's own Makefile into `SauronAgent/bin/`, then packages them into
+SauronAgent's own Makefile into separate directories under `SauronAgent/bin/`
+for each package format and architecture, then packages them into
 `dist/sauronagent-<version>-1.x86_64.rpm` / `dist/sauronagent_<version>_amd64.deb`
 through the [`cmd/mksauronagent`](cmd/mksauronagent) command, which reuses the
 pure-Go `internal/rpm` and `internal/deb` writers. SauronAgent is a separate Go
@@ -858,6 +866,11 @@ module; the gateway also compiles in its host collector (package
 `SauronAgent/collector`, through a `replace` directive in `go.mod`), so both need
 Go 1.27.1 or newer. With an older local toolchain, prefix the commands with
 `GOTOOLCHAIN=auto` as the release workflow does.
+
+For ARM64, use `make sauron-rpm ARCH=aarch64` or
+`make sauron-deb DEB_ARCH=arm64`. The package targets select the matching Go
+architecture automatically. The packaging command checks both executable ELF
+headers and rejects binaries that do not match the requested architecture.
 
 ### UI (TypeScript)
 

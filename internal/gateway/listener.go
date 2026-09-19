@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -265,6 +266,10 @@ func nextAcceptRetryDelay(err error, current time.Duration) (time.Duration, bool
 // permanent Accept failure, so the caller can take the process down and let
 // systemd restart it instead of leaving a zombie holding a dead listener.
 func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) error {
+	return serveListenerWithHTTPServers(ln, mux, frontTLS, sessionManager, settings, nil)
+}
+
+func serveListenerWithHTTPServers(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry) error {
 	var retryDelay time.Duration
 	for {
 		c, err := ln.Accept()
@@ -284,11 +289,15 @@ func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager,
 			continue
 		}
 		retryDelay = 0
-		go handleSharedConn(c, frontTLS, mux, sessionManager, settings)
+		go handleSharedConnWithHTTPServers(c, frontTLS, mux, sessionManager, settings, httpServers)
 	}
 }
 
 func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.Settings) {
+	handleSharedConnWithHTTPServers(raw, frontTLS, mux, sessionManager, settings, nil)
+}
+
+func handleSharedConnWithHTTPServers(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry) {
 	defer func() { _ = raw.Close() }()
 
 	// Defense in depth: this goroutine parses attacker-controlled bytes (the RDP
@@ -319,7 +328,7 @@ func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler,
 		if settings.Bool(config.DEBUG_CONNECTIONS) {
 			log.Printf("debug-conn: accepted TLS/HTTPS connection from %s", raw.RemoteAddr())
 		}
-		handleHTTPS(conn, frontTLS, mux, settings)
+		handleHTTPSWithHTTPServers(conn, frontTLS, mux, settings, httpServers)
 		return
 	}
 	if settings.Bool(config.DEBUG_CONNECTIONS) {
@@ -377,6 +386,10 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.Settings) {
+	handleHTTPSWithHTTPServers(raw, frontTLS, mux, settings, nil)
+}
+
+func handleHTTPSWithHTTPServers(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, settings *config.Settings, httpServers *httpServerRegistry) {
 	// TLS handshake with client; get SNI
 	clientTLS := tls.Server(raw, frontTLS.TLSConfig())
 	if err := clientTLS.Handshake(); err != nil {
@@ -394,6 +407,8 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 	log.Printf("https client %s SNI=%q -> https page", raw.RemoteAddr(), sni)
 
 	_ = clientTLS.SetDeadline(time.Time{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	srv := &http.Server{
 		Handler:           withRequestScheme(mux, "https"),
@@ -401,14 +416,38 @@ func handleHTTPS(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sett
 		ReadHeaderTimeout: settings.Duration(config.TIMEOUT),
 		WriteTimeout:      httpWriteTimeout(settings),
 		IdleTimeout:       httpIdleTimeout,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
 		// VM creation and authenticated uploads renew their response deadlines
 		// around writes so processing can outlast this ordinary response limit.
 		// WebSocket handlers hijack the connection and manage their own deadlines.
 	}
-	ln := newSingleConnListener(clientTLS)
+	var registration *httpServerRegistration
+	if httpServers != nil {
+		var admitted bool
+		registration, admitted = httpServers.register(srv, cancel, func() { _ = raw.Close() })
+		if !admitted {
+			_ = raw.Close()
+			return
+		}
+	}
+	serveHTTPConnection(srv, clientTLS, registration)
+}
+
+func serveHTTPConnection(srv *http.Server, conn net.Conn, registration *httpServerRegistration) {
+	ln := newSingleConnListener(conn)
 	if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("https serve: %v", err)
 	}
+	if !ln.wasAccepted() {
+		_ = ln.Close()
+		if registration != nil {
+			registration.finish()
+		}
+	}
+	// Shutdown closes the listener and returns from Serve before active
+	// requests finish. Keep the outer handler's raw.Close defer from aborting
+	// their responses; hijacked connections likewise remain session-owned.
+	<-ln.connectionDone
 }
 
 func withRequestScheme(next http.Handler, scheme string) http.Handler {
@@ -420,38 +459,58 @@ func withRequestScheme(next http.Handler, scheme string) http.Handler {
 }
 
 type singleConnListener struct {
-	conn net.Conn
-	addr net.Addr
-	done chan struct{}
-	once sync.Once
+	mu             sync.Mutex
+	conn           net.Conn
+	accepted       bool
+	addr           net.Addr
+	done           chan struct{}
+	once           sync.Once
+	connectionDone chan struct{}
 }
 
 func newSingleConnListener(conn net.Conn) *singleConnListener {
 	l := &singleConnListener{
-		addr: conn.LocalAddr(),
-		done: make(chan struct{}),
+		addr:           conn.LocalAddr(),
+		done:           make(chan struct{}),
+		connectionDone: make(chan struct{}),
 	}
-	l.conn = &closeNotifyConn{Conn: conn, done: l.done, once: &l.once}
+	l.conn = &closeNotifyConn{Conn: conn, notify: func() {
+		l.once.Do(func() { close(l.done) })
+		close(l.connectionDone)
+	}}
 	return l
 }
 
 func (l *singleConnListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
 	if l.conn != nil {
 		c := l.conn
 		l.conn = nil
+		l.accepted = true
+		l.mu.Unlock()
 		return c, nil
 	}
+	l.mu.Unlock()
 	<-l.done
 	return nil, net.ErrClosed
 }
 
 func (l *singleConnListener) Close() error {
-	if l.conn != nil {
-		_ = l.conn.Close()
-		l.conn = nil
-	}
+	l.mu.Lock()
+	conn := l.conn
+	l.conn = nil
+	l.mu.Unlock()
 	l.once.Do(func() { close(l.done) })
+	if conn != nil {
+		_ = conn.Close()
+	}
 	return nil
+}
+
+func (l *singleConnListener) wasAccepted() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.accepted
 }
 
 func (l *singleConnListener) Addr() net.Addr {
@@ -461,12 +520,12 @@ func (l *singleConnListener) Addr() net.Addr {
 type closeNotifyConn struct {
 	net.Conn
 
-	done chan struct{}
-	once *sync.Once
+	once   sync.Once
+	notify func()
 }
 
 func (c *closeNotifyConn) Close() error {
 	err := c.Conn.Close()
-	c.once.Do(func() { close(c.done) })
+	c.once.Do(c.notify)
 	return err
 }

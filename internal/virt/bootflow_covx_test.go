@@ -1,6 +1,7 @@
 package virt
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -271,7 +272,7 @@ func TestVbtcovProvisionBootVolumesCopyFailure(t *testing.T) {
 	conn := newTestLibvirtConn(t)
 	source := vbtcovWriteTinyFile(t, "base.img")
 
-	err := provisionBootVolumes(conn, nil, vmProvisionSpec{
+	err := provisionBootVolumes(context.Background(), conn, nil, vmProvisionSpec{
 		backend:       testBackendCredentials(t),
 		poolName:      uniquePoolName("cvbt-nopool"),
 		vmName:        "cvbt-vm",
@@ -306,7 +307,7 @@ func TestVbtcovProvisionBootVolumesSeedISOFailure(t *testing.T) {
 	_ = vol.Free()
 
 	source := vbtcovWriteTinyFile(t, "base.img")
-	err = provisionBootVolumes(conn, settings, vmProvisionSpec{
+	err = provisionBootVolumes(context.Background(), conn, settings, vmProvisionSpec{
 		backend:       testBackendCredentials(t),
 		poolName:      poolName,
 		vmName:        vmName,
@@ -345,7 +346,7 @@ func TestVbtcovProvisionBootVolumesSucceeds(t *testing.T) {
 	t.Cleanup(func() { _ = RemoveVolumes(conn, poolName, vmName, seedISO) })
 
 	source := vbtcovWriteTinyFile(t, "base.img")
-	if err := provisionBootVolumes(conn, settings, vmProvisionSpec{
+	if err := provisionBootVolumes(context.Background(), conn, settings, vmProvisionSpec{
 		backend:       testBackendCredentials(t),
 		poolName:      poolName,
 		vmName:        vmName,

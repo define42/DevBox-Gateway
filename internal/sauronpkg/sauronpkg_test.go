@@ -23,11 +23,21 @@ import (
 func stageTree(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
+	// Minimal ELF64 executable header for amd64. Archive tests need the CPU
+	// metadata, not a full executable payload; real packages are built separately.
+	binary := make([]byte, 64)
+	copy(binary, "\x7fELF\x02\x01\x01")
+	binary[16], binary[18], binary[20] = 2, 62, 1 // ET_EXEC, EM_X86_64, EV_CURRENT
+	binary[52], binary[54], binary[58] = 64, 56, 64
 	for _, f := range manifest(Options{Source: root}, "/unused") {
 		if err := os.MkdirAll(filepath.Dir(f.source), 0o750); err != nil {
 			t.Fatalf("mkdir for %s: %v", f.source, err)
 		}
-		if err := os.WriteFile(f.source, []byte("content of "+filepath.Base(f.source)), 0o600); err != nil {
+		content := []byte("content of " + filepath.Base(f.source))
+		if strings.HasPrefix(f.destination, "/usr/bin/") {
+			content = binary
+		}
+		if err := os.WriteFile(f.source, content, 0o600); err != nil {
 			t.Fatalf("seed %s: %v", f.source, err)
 		}
 	}

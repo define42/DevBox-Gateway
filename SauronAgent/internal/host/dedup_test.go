@@ -9,6 +9,12 @@ var testStream = streamKey{peer: "cid:102", boot: "boot-a"}
 func accept(t *testing.T, d *dedup, k streamKey, seq uint64) (dedupResult, uint64) {
 	t.Helper()
 	res := d.Check(k, seq)
+	if res.Blocked {
+		t.Fatal("accept: unresolved gap evidence exceeded the configured bounds")
+	}
+	if res.Gap {
+		d.NoteMissing(k, res.GapFirst, res.GapLast)
+	}
 	if res.Duplicate {
 		return res, d.ResumeFrom(k)
 	}
