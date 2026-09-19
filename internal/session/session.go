@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -118,6 +119,8 @@ func newSessionManager() *scs.SessionManager {
 	manager := scs.New()
 	manager.Store = memstore.New()
 	manager.Lifetime = sessionTTL
+	// Keep IdleTimeout disabled: an automatic snapshot save on authenticated
+	// requests could overwrite the atomic grant updates made directly in Store.
 	manager.Cookie.Name = "cv_session"
 	manager.Cookie.Path = "/"
 	manager.Cookie.HttpOnly = true
@@ -175,22 +178,53 @@ func (m *Manager) CreateSession(ctx context.Context, u *identity.User, clientIP,
 
 // GrantRDPConnect opens a short-lived RDP authorization window for vmName on the
 // caller's own session, recording that the user explicitly clicked "Connect".
-// The grant is checked by ConsumeRDPConnectGrant when an RDP connection arrives. It
-// must be called within an authenticated request so the session is loaded; the
-// grant is persisted when the session is committed (via the LoadAndSave
-// middleware) before the response — and therefore before the RDP client dials.
+// It requires an already-persisted authenticated session and commits the grant
+// before returning, under the same lock as consumption and revocation. It leaves
+// the request snapshot unmodified so LoadAndSave cannot later overwrite the
+// latest stored grants or recreate a session deleted by logout.
 func (m *Manager) GrantRDPConnect(ctx context.Context, vmName string) error {
 	vmName = strings.TrimSpace(vmName)
 	if vmName == "" {
 		return errors.New("vm name is required")
 	}
 
-	sess, ok := m.Get(ctx, sessionKey).(sessionData)
-	if !ok || sess.User == nil {
+	caller, ok := m.Get(ctx, sessionKey).(sessionData)
+	if !ok || caller.User == nil {
 		return errors.New("no authenticated session")
+	}
+	token := m.Token(ctx)
+	if token == "" {
+		return errors.New("no persisted session")
+	}
+	return m.grantStoredRDPConnect(token, caller, vmName)
+}
+
+func (m *Manager) grantStoredRDPConnect(token string, caller sessionData, vmName string) error {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
+	raw, found, err := m.Store.Find(token)
+	if err != nil {
+		return fmt.Errorf("load session for RDP grant: %w", err)
+	}
+	if !found {
+		return errors.New("session is no longer active")
+	}
+	deadline, values, err := m.Codec.Decode(raw)
+	if err != nil {
+		return fmt.Errorf("decode session for RDP grant: %w", err)
 	}
 
 	now := time.Now()
+	if !now.Before(deadline) {
+		return errors.New("session has expired")
+	}
+	sess, ok := values[sessionKey].(sessionData)
+	if !ok || sess.User == nil || *sess.User != *caller.User ||
+		sess.ClientIP != caller.ClientIP || !sess.CreatedAt.Equal(caller.CreatedAt) {
+		return errors.New("authenticated session has changed")
+	}
+
 	grants := make(map[string]time.Time, len(sess.RDPConnectGrants)+1)
 	// Carry over only still-valid grants so the map cannot grow unbounded with
 	// expired entries for VMs the user connected to earlier.
@@ -202,7 +236,14 @@ func (m *Manager) GrantRDPConnect(ctx context.Context, vmName string) error {
 	grants[vmName] = now.Add(rdpConnectWindow)
 
 	sess.RDPConnectGrants = grants
-	m.Put(ctx, sessionKey, sess)
+	values[sessionKey] = sess
+	encoded, err := m.Codec.Encode(deadline, values)
+	if err != nil {
+		return fmt.Errorf("encode RDP grant: %w", err)
+	}
+	if err := m.Store.Commit(token, encoded, deadline); err != nil {
+		return fmt.Errorf("persist RDP grant: %w", err)
+	}
 	return nil
 }
 

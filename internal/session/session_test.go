@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/identity"
 
+	"github.com/alexedwards/scs/v2"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 )
@@ -945,6 +947,165 @@ func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
 	if noSessionErr == nil {
 		t.Fatal("expected an error granting without an authenticated session")
 	}
+}
+
+func TestGrantRDPConnectRejectsUncommittedSession(t *testing.T) {
+	m := New()
+	withLoadedSession(t, m, testSessionRemoteAddr, nil, func(r *http.Request) {
+		if err := m.CreateSession(r.Context(), &identity.User{Name: "alice"}, r.RemoteAddr, testLoginPasswordHash); err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+			t.Fatal("expected an uncommitted session to be rejected")
+		}
+	})
+	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("failed Connect must not issue a grant when login is later committed")
+	}
+}
+
+func TestGrantRDPConnectRejectsDeletedSession(t *testing.T) {
+	m := New()
+	cookie := issueSession(t, m, &identity.User{Name: "alice"}, testSessionRemoteAddr)
+	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+		if err := m.Store.Delete(cookie.Value); err != nil {
+			t.Fatalf("delete stored session: %v", err)
+		}
+		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+			t.Fatal("expected a deleted session to be rejected")
+		}
+	})
+	if _, found, err := m.Store.Find(cookie.Value); err != nil || found {
+		t.Fatalf("deleted session was restored: found=%v err=%v", found, err)
+	}
+}
+
+func TestGrantRDPConnectRejectsReplacedOrExpiredSession(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*sessionData, *time.Time)
+	}{
+		{name: "user", mutate: func(sess *sessionData, _ *time.Time) { sess.User.Name = "bob" }},
+		{name: "privileges", mutate: func(sess *sessionData, _ *time.Time) { sess.User.IsAdmin = true }},
+		{name: "client IP", mutate: func(sess *sessionData, _ *time.Time) { sess.ClientIP = "192.0.2.11" }},
+		{name: "creation time", mutate: func(sess *sessionData, _ *time.Time) { sess.CreatedAt = sess.CreatedAt.Add(time.Second) }},
+		{name: "no identity", mutate: func(sess *sessionData, _ *time.Time) { sess.User = nil }},
+		{name: "expired", mutate: func(_ *sessionData, deadline *time.Time) { *deadline = time.Now().Add(-time.Minute) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkConnectRejectsChangedSession(t, tt.mutate)
+		})
+	}
+}
+
+func checkConnectRejectsChangedSession(t *testing.T, mutate func(*sessionData, *time.Time)) {
+	t.Helper()
+	m := New()
+	cookie := issueSession(t, m, &identity.User{Name: "alice"}, testSessionRemoteAddr)
+	var replacement []byte
+	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+		deadline, values := storedSessionValues(t, m, cookie.Value)
+		sess := values[sessionKey].(sessionData)
+		mutate(&sess, &deadline)
+		values[sessionKey] = sess
+		var err error
+		replacement, err = m.Codec.Encode(deadline, values)
+		if err != nil {
+			t.Fatalf("encode replacement session: %v", err)
+		}
+		// Retain expired bytes in the store to check the encoded deadline too.
+		if err := m.Store.Commit(cookie.Value, replacement, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("commit replacement session: %v", err)
+		}
+		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+			t.Fatal("expected the stale request's Connect grant to be rejected")
+		}
+	})
+	raw, found, err := m.Store.Find(cookie.Value)
+	if err != nil || !found || !bytes.Equal(raw, replacement) {
+		t.Fatalf("rejected Connect changed stored session: found=%v err=%v", found, err)
+	}
+}
+
+func TestGrantRDPConnectPreservesSessionDeadlineAndValues(t *testing.T) {
+	m := New()
+	cookie := issueSession(t, m, &identity.User{Name: "alice", IsAdmin: true}, testSessionRemoteAddr)
+	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+		m.Put(r.Context(), "other-session-value", "retain-me")
+	})
+	originalDeadline, originalValues := storedSessionValues(t, m, cookie.Value)
+	originalSession := originalValues[sessionKey].(sessionData)
+
+	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err != nil {
+			t.Fatalf("grant RDP connect: %v", err)
+		}
+		deadline, values := storedSessionValues(t, m, cookie.Value)
+		if !deadline.Equal(originalDeadline) {
+			t.Fatalf("Connect extended session deadline: got %v want %v", deadline, originalDeadline)
+		}
+		if values["other-session-value"] != "retain-me" {
+			t.Fatal("Connect discarded unrelated session data")
+		}
+		sess := values[sessionKey].(sessionData)
+		if *sess.User != *originalSession.User || sess.ClientIP != originalSession.ClientIP ||
+			!sess.CreatedAt.Equal(originalSession.CreatedAt) || sess.LoginPasswordHash != originalSession.LoginPasswordHash {
+			t.Fatal("Connect changed the authenticated session identity")
+		}
+		if !time.Now().Before(sess.RDPConnectGrants["alice-desk"]) {
+			t.Fatal("Connect grant was not persisted before the response")
+		}
+	})
+}
+
+func TestGrantRDPConnectFailsClosedOnPersistenceError(t *testing.T) {
+	tests := []struct {
+		name string
+		fail func(*Manager)
+	}{
+		{
+			name: "encode",
+			fail: func(m *Manager) { m.Codec = grantEncodeFailingCodec{Codec: m.Codec} },
+		},
+		{
+			name: "commit",
+			fail: func(m *Manager) {
+				m.Store = grantCommitFailingStore{Store: m.Store, IterableStore: m.Store.(scs.IterableStore)}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New()
+			cookie := issueSession(t, m, &identity.User{Name: "alice"}, testSessionRemoteAddr)
+			withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
+				store, codec := m.Store, m.Codec
+				tt.fail(m)
+				err := m.GrantRDPConnect(r.Context(), "alice-desk")
+				m.Store, m.Codec = store, codec
+				if err == nil {
+					t.Fatal("Connect succeeded despite failing to persist its grant")
+				}
+			})
+			if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
+				t.Fatal("failed Connect persisted its grant when writing the response")
+			}
+		})
+	}
+}
+
+func storedSessionValues(t *testing.T, m *Manager, token string) (time.Time, map[string]interface{}) {
+	t.Helper()
+	raw, found, err := m.Store.Find(token)
+	if err != nil || !found {
+		t.Fatalf("find stored session: found=%v err=%v", found, err)
+	}
+	deadline, values, err := m.Codec.Decode(raw)
+	if err != nil {
+		t.Fatalf("decode stored session: %v", err)
+	}
+	return deadline, values
 }
 
 func TestConsumeRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {

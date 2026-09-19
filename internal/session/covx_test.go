@@ -188,11 +188,20 @@ func TestCovxGrantRDPConnectPrunesExpiredGrants(t *testing.T) {
 			"stale-vm": time.Now().Add(-time.Minute),
 		}
 		m.Put(r.Context(), sessionKey, sess)
+	})
+	withLoadedSession(t, m, covxRemoteAddr, cookie, func(r *http.Request) {
 		if err := m.GrantRDPConnect(r.Context(), "new-vm"); err != nil {
 			t.Fatalf("grant rdp connect: %v", err)
 		}
 	})
 
+	stored, ok := m.getSessionFromUserName("nora")
+	if !ok {
+		t.Fatal("expected the authenticated session to remain stored")
+	}
+	if _, exists := stored.RDPConnectGrants["stale-vm"]; exists {
+		t.Fatal("expected the expired grant to be removed from storage")
+	}
 	if m.ConsumeRDPConnectGrant("nora", "192.0.2.99", "stale-vm") {
 		t.Fatal("expected the expired grant to be pruned by a new grant")
 	}

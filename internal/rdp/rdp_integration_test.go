@@ -74,6 +74,21 @@ func issueUserSession(t *testing.T, sessionManager *session.Manager, username, r
 		if err := sessionManager.CreateSession(r.Context(), user, r.RemoteAddr, ""); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	handler.ServeHTTP(rec, req)
+	if len(grantVMs) == 0 {
+		return
+	}
+
+	response := rec.Result()
+	defer func() { _ = response.Body.Close() }()
+	connectRequest := httptest.NewRequest(http.MethodPost, "/api/dashboard/rdp", nil)
+	connectRequest.RemoteAddr = remoteAddr
+	for _, cookie := range response.Cookies() {
+		connectRequest.AddCookie(cookie)
+	}
+	connectHandler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, vm := range grantVMs {
 			if err := sessionManager.GrantRDPConnect(r.Context(), vm); err != nil {
 				t.Fatalf("grant rdp connect for %q: %v", vm, err)
@@ -81,7 +96,7 @@ func issueUserSession(t *testing.T, sessionManager *session.Manager, username, r
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	handler.ServeHTTP(rec, req)
+	connectHandler.ServeHTTP(httptest.NewRecorder(), connectRequest)
 }
 
 const (
