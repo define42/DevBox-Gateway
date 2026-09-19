@@ -178,6 +178,55 @@ func TestSinkFailureStopsAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestFirstSinkFailureStopsAcknowledgementAcrossReconnect(t *testing.T) {
+	cases := []struct {
+		name  string
+		first uint64
+	}{
+		{name: "sequence one", first: 1},
+		{name: "late stream", first: 184213},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(c *config.Host) { c.Limits.AckInterval = 2 })
+			h.sink.fail(tc.first, true)
+			hello := &protocol.Hello{AgentVersion: "test", BootID: "boot-a", FirstSequence: tc.first}
+
+			first := h.dial(102, true)
+			first.handshake(hello)
+			first.sendEvent(tc.first, "boot-a")
+			first.sendEvent(tc.first+1, "boot-a")
+			first.ping() // both writes have completed before reconnecting
+			first.close()
+
+			second := h.dial(102, true)
+			ready := second.handshake(hello)
+			if ready.ResumeFrom >= tc.first {
+				t.Fatalf("ResumeFrom = %d, must stay below unwritten sequence %d", ready.ResumeFrom, tc.first)
+			}
+
+			// The failed first event must be written on replay; the next event
+			// was already saved and must only contribute to the cumulative ACK.
+			h.sink.fail(tc.first, false)
+			second.sendEvent(tc.first, "boot-a")
+			second.sendEvent(tc.first+1, "boot-a")
+			if ack := second.expectAck(); ack != tc.first+1 {
+				t.Fatalf("ACK = %d, want %d after replay", ack, tc.first+1)
+			}
+			envs := h.sink.events()
+			if len(envs) != 2 || envs[0].Event.Sequence != tc.first+1 || envs[1].Event.Sequence != tc.first {
+				t.Fatalf("sink must contain the later event followed by the retried first event: %+v", envs)
+			}
+			if got := h.counters.EventsDuplicate.Load(); got != 1 {
+				t.Errorf("EventsDuplicate = %d, want 1", got)
+			}
+			if got := h.counters.OutputErrors.Load(); got != 1 {
+				t.Errorf("OutputErrors = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestDuplicateSuppressionAcrossReconnect(t *testing.T) {
 	h := newHarness(t, func(c *config.Host) { c.Limits.AckInterval = 3 })
 

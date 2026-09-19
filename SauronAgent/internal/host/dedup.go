@@ -78,6 +78,9 @@ type dedup struct {
 type dedupStream struct {
 	// written is the watermark: every sequence up to and including it is
 	// accounted for, meaning it was durably written or it was reported missing.
+	// A new stream starts immediately before its first received sequence:
+	// earlier events may predate the collector, but this first event must be
+	// committed before the watermark can advance past it.
 	// It is what the host acknowledges and what it offers as ResumeFrom.
 	written uint64
 
@@ -137,6 +140,12 @@ func (d *dedup) Check(k streamKey, seq uint64) dedupResult {
 	s := d.stream(k)
 	var r dedupResult
 
+	// Anchor the stream on arrival, not on its first successful sink write.
+	// Otherwise a later successful write could acknowledge a failed first one.
+	if s.highest == 0 && seq > 0 {
+		s.written = seq - 1
+	}
+
 	// A sequence more than one above the highest ever received means events are
 	// missing. The first sequence on a brand-new stream is not a gap: the
 	// collector simply started after the guest did.
@@ -172,17 +181,10 @@ func (d *dedup) Commit(k streamKey, seq uint64) (ack uint64, forgotten uint64) {
 	defer d.mu.Unlock()
 
 	s := d.stream(k)
-	switch {
-	case s.written == 0 && len(s.missing) == 0:
-		// First event ever held for this stream. Sequences below it were never
-		// promised to anyone -- an agent that has been running for a week
-		// legitimately starts at 184213 -- so the watermark starts here.
-		s.written = seq
-	case seq <= s.written:
+	if seq <= s.written {
 		return s.written, 0
-	default:
-		s.ahead[seq] = struct{}{}
 	}
+	s.ahead[seq] = struct{}{}
 	s.absorb()
 	return s.written, s.trim(d.window)
 }

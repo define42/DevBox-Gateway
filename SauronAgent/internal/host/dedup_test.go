@@ -115,6 +115,56 @@ func TestDedupHoldsAcknowledgementBehindAnUncommittedSequence(t *testing.T) {
 	}
 }
 
+func TestDedupFirstWriteFailureBlocksAcknowledgement(t *testing.T) {
+	cases := []struct {
+		name  string
+		first uint64
+		step  uint64
+	}{
+		{name: "sequence one", first: 1, step: 1},
+		{name: "late stream", first: 184213, step: 1},
+		{name: "sequence one with gap", first: 1, step: 3},
+		{name: "late stream with gap", first: 184213, step: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDedup(1024, 16)
+			// The first event arrived, but its sink write failed.
+			if res := d.Check(testStream, tc.first); res.Duplicate || res.Gap {
+				t.Fatalf("first event = %+v, want neither duplicate nor gap", res)
+			}
+
+			later := tc.first + tc.step
+			res, ack := accept(t, d, testStream, later)
+			if res.Gap != (tc.step > 1) {
+				t.Fatalf("later event = %+v, want gap=%t", res, tc.step > 1)
+			}
+			if res.Gap && (res.GapFirst != tc.first+1 || res.GapLast != later-1) {
+				t.Fatalf("gap = %+v, must exclude the failed first event", res)
+			}
+			if ack >= tc.first {
+				t.Fatalf("ack = %d, must stay below unwritten sequence %d", ack, tc.first)
+			}
+			if got := d.ResumeFrom(testStream); got >= tc.first {
+				t.Fatalf("ResumeFrom = %d, must stay below unwritten sequence %d", got, tc.first)
+			}
+			if res, ack := accept(t, d, testStream, later); !res.Duplicate || ack >= tc.first {
+				t.Fatalf("replay = %+v, ack = %d, want duplicate without advancing past the failure", res, ack)
+			}
+
+			// Retrying the failed first write closes the barrier, including any
+			// later successful write and explicitly detected gap.
+			res, ack = accept(t, d, testStream, tc.first)
+			if res.Duplicate || res.Gap || ack != later {
+				t.Fatalf("retry = %+v, ack = %d, want accepted with ack %d", res, ack, later)
+			}
+			if res := d.Check(testStream, tc.first); !res.Duplicate {
+				t.Fatal("successfully retried event was not remembered")
+			}
+		})
+	}
+}
+
 func TestDedupDetectsGapOnceAndMovesPastIt(t *testing.T) {
 	d := newDedup(1024, 16)
 	accept(t, d, testStream, 1)
@@ -153,6 +203,35 @@ func TestDedupNoteMissingClearsAHoleTheAgentCannotReplay(t *testing.T) {
 	}
 	if ack != 10 {
 		t.Fatalf("ack = %d, want 10", ack)
+	}
+}
+
+func TestDedupNoteMissingClearsFirstWriteFailure(t *testing.T) {
+	cases := []struct {
+		name  string
+		first uint64
+	}{
+		{name: "sequence one", first: 1},
+		{name: "late stream", first: 184213},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newDedup(1024, 16)
+			d.Check(testStream, tc.first) // sink write failed
+			if _, ack := accept(t, d, testStream, tc.first+1); ack >= tc.first {
+				t.Fatalf("ack = %d, must stay below unwritten sequence %d", ack, tc.first)
+			}
+
+			// An explicit loss report accounts for an event the guest can no
+			// longer replay, so the saved event after it can now be acknowledged.
+			d.NoteMissing(testStream, tc.first, tc.first)
+			if got := d.ResumeFrom(testStream); got != tc.first+1 {
+				t.Fatalf("ResumeFrom = %d, want %d after reported loss", got, tc.first+1)
+			}
+			if res, ack := accept(t, d, testStream, tc.first+2); res.Gap || res.Duplicate || ack != tc.first+2 {
+				t.Fatalf("next event = %+v, ack = %d, want accepted with ack %d", res, ack, tc.first+2)
+			}
+		})
 	}
 }
 
