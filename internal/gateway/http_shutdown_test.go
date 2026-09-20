@@ -136,6 +136,20 @@ func TestHTTPShutdownWaitsForActiveRequest(t *testing.T) {
 	}
 }
 
+func onlyRegisteredHTTPServer(t *testing.T, registry *httpServerRegistry) *http.Server {
+	t.Helper()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if len(registry.servers) != 1 {
+		t.Fatalf("HTTP registry contains %d servers, want 1", len(registry.servers))
+	}
+	for _, registration := range registry.servers {
+		return registration.server
+	}
+	t.Fatal("HTTP registry contains no server")
+	return nil
+}
+
 func TestHTTPShutdownCancelsRequestAfterDeadline(t *testing.T) {
 	entered := make(chan context.Context, 1)
 	completed := make(chan struct{})
@@ -195,14 +209,7 @@ func TestHTTPShutdownPreservesWebsocketDrain(t *testing.T) {
 	})
 	var address string
 	runtime, _, address = startHTTPDrainRuntime(t, handler, completedBeforeAuditClose(t, completed))
-	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	ws, response, err := dialer.DialContext(t.Context(), "wss"+strings.TrimPrefix(address, "https"), nil)
-	if response != nil {
-		_ = response.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial websocket: %v", err)
-	}
+	ws := dialTestWebsocket(t, address)
 	defer func() { _ = ws.Close() }()
 	select {
 	case <-registered:
@@ -211,6 +218,94 @@ func TestHTTPShutdownPreservesWebsocketDrain(t *testing.T) {
 	}
 	if err := runtime.Close(); err != nil {
 		t.Fatalf("runtime shutdown with websocket: %v", err)
+	}
+}
+
+func TestHTTPShutdownWaitsForHijackedSessionHandoff(t *testing.T) {
+	hijacked := make(chan struct{})
+	releaseHandoff := make(chan struct{})
+	handlerCompleted := make(chan struct{})
+	registrationResult := make(chan bool, 1)
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseHandoff) })
+
+	var runtime *gatewayRuntime
+	authorizationReady := make(chan session.ConnectionAuthorization, 1)
+	upgrader := websocket.Upgrader{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(handlerCompleted)
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer func() { _ = ws.Close() }()
+		close(hijacked)
+		<-releaseHandoff
+
+		authorization := <-authorizationReady
+		unregister, ok := runtime.sessionManager.RegisterUserConnection(authorization, func() { _ = ws.Close() })
+		registrationResult <- ok
+		if !ok {
+			return
+		}
+		defer unregister()
+		_, _, _ = ws.ReadMessage()
+	})
+
+	var address string
+	runtime, _, address = startHTTPDrainRuntime(t, handler, completedBeforeAuditClose(t, handlerCompleted))
+	authorizationReady <- testConnectionAuthorization(t, runtime.sessionManager, "alice")
+
+	ws := dialTestWebsocket(t, address)
+	defer func() { _ = ws.Close() }()
+
+	waitForHTTPShutdownSignal(t, hijacked, "HTTP handler did not reach the hijack handoff")
+
+	// The HTTP registry must retain the connection after net/http reports the
+	// hijack. Otherwise shutdown can pass both registries while the handler is
+	// still opening its backend and has not yet registered the session.
+	registeredServer := onlyRegisteredHTTPServer(t, runtime.httpServers)
+
+	shutdownStarted := make(chan struct{})
+	registeredServer.RegisterOnShutdown(func() { close(shutdownStarted) })
+	closed := make(chan error, 1)
+	go func() { closed <- runtime.Close() }()
+	waitForHTTPShutdownSignal(t, shutdownStarted, "HTTP drain did not start for the pending hijack handoff")
+	select {
+	case err := <-closed:
+		t.Fatalf("shutdown returned before the hijacked handler completed: %v", err)
+	default:
+	}
+
+	releaseOnce.Do(func() { close(releaseHandoff) })
+	if ok := <-registrationResult; ok {
+		t.Fatal("session registration succeeded after terminal shutdown began")
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("runtime shutdown during hijack handoff: %v", err)
+	}
+}
+
+func dialTestWebsocket(t *testing.T, address string) *websocket.Conn {
+	t.Helper()
+	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	ws, response, err := dialer.DialContext(t.Context(), "wss"+strings.TrimPrefix(address, "https"), nil)
+	if response != nil {
+		_ = response.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	return ws
+}
+
+func waitForHTTPShutdownSignal(t *testing.T, signal <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatal(failure)
 	}
 }
 

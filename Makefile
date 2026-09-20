@@ -13,7 +13,7 @@ COVERAGE_MIN ?= 80.0
 GATEWAY_COVERPROFILE := coverage.gateway.out
 SAURON_COVERPROFILE := coverage.sauron.out
 COVERPROFILE := coverage.out
-SAURON_RPM_GOARCH = $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(patsubst i686,386,$(patsubst armhfp,arm,$(patsubst loongarch64,loong64,$(ARCH))))))
+SAURON_RPM_GOARCH = $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(patsubst i686,386,$(patsubst armhfp,arm,$(patsubst armv7hl,arm,$(patsubst loongarch64,loong64,$(ARCH)))))))
 SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,ppc64le,$(DEB_ARCH))))
 
 .PHONY: all build rpm deb sauron-build sauron-rpm sauron-deb lint lint2 gosec test run ui

@@ -4,11 +4,60 @@ import (
 	"bytes"
 	"debug/elf"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestPackageArchitectureAliases(t *testing.T) {
+	for _, tt := range []struct {
+		aliases []string
+		rpm     string
+		deb     string
+	}{
+		{[]string{"amd64", "x86_64"}, "x86_64", "amd64"},
+		{[]string{"arm64", "aarch64"}, "aarch64", "arm64"},
+		{[]string{"386", "i386", "i686"}, "i686", "i386"},
+		{[]string{"arm", "armhf", "armhfp", "armv7hl"}, "armv7hl", "armhf"},
+		{[]string{"ppc64le", "ppc64el"}, "ppc64le", "ppc64el"},
+		{[]string{"loong64", "loongarch64"}, "loongarch64", "loong64"},
+		{[]string{"ppc64"}, "ppc64", "ppc64"},
+		{[]string{"s390x"}, "s390x", "s390x"},
+		{[]string{"riscv64"}, "riscv64", "riscv64"},
+	} {
+		for _, alias := range tt.aliases {
+			t.Run(alias, func(t *testing.T) {
+				opts := Options{Version: "1.2.3", Release: "1", Arch: alias}
+				rpm := RPM(opts)
+				if rpm.Arch != tt.rpm || rpm.Output != fmt.Sprintf("dist/sauronagent-1.2.3-1.%s.rpm", tt.rpm) {
+					t.Fatalf("RPM(%q) = arch %q, output %q", alias, rpm.Arch, rpm.Output)
+				}
+				deb := Deb(opts)
+				if deb.Arch != tt.deb || deb.Output != fmt.Sprintf("dist/sauronagent_1.2.3_%s.deb", tt.deb) {
+					t.Fatalf("Deb(%q) = arch %q, output %q", alias, deb.Arch, deb.Output)
+				}
+			})
+		}
+	}
+}
+
+func TestWriteDebNormalizesArchitectureAlias(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "out.deb")
+	_, err := Write("deb", Options{Source: stageTree(t), Version: "1.2.3", Arch: "x86_64", Output: output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := debMember(t, data, "control.tar.gz")["control"]
+	if !strings.Contains(control, "\nArchitecture: amd64\n") {
+		t.Fatalf("package metadata did not normalize the architecture alias:\n%s", control)
+	}
+}
 
 func TestWriteRejectsMismatchedArchitecture(t *testing.T) {
 	root := stageTree(t)

@@ -446,7 +446,8 @@ func serveHTTPConnection(srv *http.Server, conn net.Conn, registration *httpServ
 	}
 	// Shutdown closes the listener and returns from Serve before active
 	// requests finish. Keep the outer handler's raw.Close defer from aborting
-	// their responses; hijacked connections likewise remain session-owned.
+	// their responses; hijacked handlers remain tracked through their session
+	// handoff and cleanup as well.
 	<-ln.connectionDone
 }
 

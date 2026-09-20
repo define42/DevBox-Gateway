@@ -1,12 +1,47 @@
 package host
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/SauronAgent/internal/output"
 	"github.com/define42/SauronAgent/internal/protocol"
 )
+
+// firstGapFailureSink holds the first gap publication until the test has tried
+// every competing path, then rejects it. Later writes reach the ordinary sink.
+type firstGapFailureSink struct {
+	output.Sink
+	entered  chan struct{}
+	release  chan struct{}
+	attempts atomic.Int64
+	once     sync.Once
+}
+
+func (s *firstGapFailureSink) Write(ctx context.Context, envelope *output.Envelope) error {
+	if envelope.Event == nil || envelope.Event.Type != typeStreamGap {
+		return s.Sink.Write(ctx, envelope)
+	}
+	if s.attempts.Add(1) != 1 {
+		return s.Sink.Write(ctx, envelope)
+	}
+	close(s.entered)
+	select {
+	case <-s.release:
+		return errors.New("first gap publication rejected")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *firstGapFailureSink) unblock() {
+	s.once.Do(func() { close(s.release) })
+}
 
 func TestFailedGapReportRecoversAfterGuestReboot(t *testing.T) {
 	var replaced atomic.Bool
@@ -174,6 +209,63 @@ func TestRecoveredEventFailureRemainsReplayableAcrossReconnect(t *testing.T) {
 			t.Fatalf("recovered sequence 2 was reported missing: %+v", envelope.Event.Fields)
 		}
 	}
+}
+
+func TestConcurrentGapPublishersShareOneClaimAndFailureRemainsRetryable(t *testing.T) {
+	var blocking *firstGapFailureSink
+	h := newHarnessWithOptions(t, nil, func(options *Options) {
+		blocking = &firstGapFailureSink{
+			Sink: options.Sink, entered: make(chan struct{}), release: make(chan struct{}),
+		}
+		options.Sink = blocking
+	})
+	t.Cleanup(blocking.unblock)
+	accept(t, h.srv.dedup, testStream, 1)
+	gap := h.srv.dedup.Check(testStream, 3)
+	h.srv.dedup.Commit(testStream, 3)
+	source := output.Source{VM: "vm", Reported: &output.Reported{BootID: "boot-a"}}
+	first := &session{srv: h.srv, key: testStream, src: source, writeCtx: context.Background()}
+	second := &session{srv: h.srv, key: testStream, src: source, writeCtx: context.Background()}
+
+	done := make(chan struct{})
+	go func() {
+		first.reportGap(gap.GapFirst, gap.GapLast, gap.GapVersion, "first publisher")
+		close(done)
+	}()
+	select {
+	case <-blocking.entered:
+	case <-time.After(testTimeout):
+		t.Fatal("first gap publication did not reach the sink")
+	}
+
+	// Neither another live session nor retained-evidence recovery may bypass the
+	// active claim while its sink result is unknown.
+	second.reportGap(gap.GapFirst, gap.GapLast, gap.GapVersion, "second publisher")
+	h.srv.retryPendingGaps(context.Background())
+	if attempts := blocking.attempts.Load(); attempts != 1 {
+		t.Fatalf("concurrent gap writes = %d, want one claimed write", attempts)
+	}
+
+	blocking.unblock()
+	select {
+	case <-done:
+	case <-time.After(testTimeout):
+		t.Fatal("failed gap publication did not release its claim")
+	}
+	if resume := h.srv.dedup.ResumeFrom(testStream); resume != 1 {
+		t.Fatalf("failed publication advanced ResumeFrom to %d, want 1", resume)
+	}
+
+	// The failure releases ownership but preserves evidence and its source. One
+	// retry can now publish it and release the durable event above the hole.
+	h.srv.retryPendingGaps(context.Background())
+	if attempts := blocking.attempts.Load(); attempts != 2 {
+		t.Fatalf("gap writes after recovery = %d, want one failure and one retry", attempts)
+	}
+	if resume := h.srv.dedup.ResumeFrom(testStream); resume != 3 {
+		t.Fatalf("successful retry left ResumeFrom at %d, want 3", resume)
+	}
+	assertOneDurableGap(t, h, 2, 2)
 }
 
 func TestFailedHelloGapReportWithZeroResumeRetried(t *testing.T) {

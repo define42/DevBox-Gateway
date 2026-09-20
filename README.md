@@ -871,6 +871,8 @@ For ARM64, use `make sauron-rpm ARCH=aarch64` or
 `make sauron-deb DEB_ARCH=arm64`. The package targets select the matching Go
 architecture automatically. The packaging command checks both executable ELF
 headers and rejects binaries that do not match the requested architecture.
+Recognized CPU aliases are normalized to the selected package format in metadata
+and default filenames (for example, `-format deb -arch x86_64` produces `amd64`).
 
 ### UI (TypeScript)
 

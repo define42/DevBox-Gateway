@@ -109,7 +109,8 @@ type Options struct {
 	Version string
 	Release string // rpm only
 	// Arch defaults to the build host's architecture in the format's spelling
-	// (x86_64 for rpm, amd64 for deb).
+	// (x86_64 for rpm, amd64 for deb). Recognized CPU aliases are normalized to
+	// the selected format in both metadata and default output filenames.
 	Arch string
 	// Source is the SauronAgent source tree holding packaging/, examples/,
 	// docs/, README.md and LICENSE.
@@ -187,6 +188,7 @@ func RPM(o Options) rpm.Package {
 	if arch == "" {
 		arch = rpm.Arch(runtime.GOARCH)
 	}
+	arch = rpmArchitecture(arch)
 	output := o.Output
 	if output == "" {
 		output = fmt.Sprintf("dist/%s-%s-%s.%s.rpm", Name, o.Version, o.Release, arch)
@@ -221,6 +223,7 @@ func Deb(o Options) deb.Package {
 	if arch == "" {
 		arch = deb.Arch(runtime.GOARCH)
 	}
+	arch = debArchitecture(arch)
 	output := o.Output
 	if output == "" {
 		output = fmt.Sprintf("dist/%s_%s_%s.deb", Name, o.Version, arch)

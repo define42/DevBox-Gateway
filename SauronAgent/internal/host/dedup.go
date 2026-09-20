@@ -38,6 +38,14 @@ type streamKey struct {
 // seqRange is an inclusive range of sequence numbers.
 type seqRange struct{ first, last uint64 }
 
+// gapVersion identifies one lifetime of pending evidence on one stream state.
+// Both halves matter: a stream can recreate the same range, and an evicted
+// stream can later be recreated under the same key.
+type gapVersion struct {
+	stream     uint64
+	generation uint64
+}
+
 // dedupResult is what the collector learns from the arrival of one sequence.
 type dedupResult struct {
 	// Duplicate means this sequence has already been durably written and must
@@ -50,6 +58,9 @@ type dedupResult struct {
 	Gap      bool
 	GapFirst uint64
 	GapLast  uint64
+	// GapVersion binds an asynchronous publication claim to this exact
+	// lifetime of pending evidence, even if the same numeric range is recreated.
+	GapVersion gapVersion
 
 	// Blocked means remembering this arrival would discard unresolved gap
 	// evidence. The caller must leave the event with the guest for retry.
@@ -77,11 +88,14 @@ type dedup struct {
 	window     int
 	maxStreams int
 	clock      uint64 // monotonic counter used to evict the least recently used stream
+	nextStream uint64
 	streams    map[streamKey]*dedupStream
 }
 
 // dedupStream is the per-stream state.
 type dedupStream struct {
+	identity uint64
+
 	// written is the watermark: every sequence up to and including it is
 	// accounted for, meaning it was durably written or it was reported missing.
 	// A new stream starts immediately before its first received sequence:
@@ -107,10 +121,15 @@ type dedupStream struct {
 	// streams cannot be evicted until their loss evidence is accepted.
 	pending []seqRange
 
-	// gapSource preserves the first gap's attribution across CID reuse and
-	// guest reboots. retrying pins a bounded snapshot while sink I/O runs.
-	gapSource *output.Source
-	retrying  bool
+	// gapSource preserves the first gap's attribution while one generation of
+	// pending evidence remains unresolved. A publication claim pins the stream
+	// while sink I/O runs without holding the dedup lock. gapGeneration prevents
+	// a late completion from applying to a newer generation that happens to use
+	// the same sequence range.
+	gapSource      *output.Source
+	gapGeneration  uint64
+	nextGapClaim   uint64
+	activeGapClaim uint64
 
 	// highest is the highest sequence ever received on this stream, written or
 	// not. Gap detection uses it rather than the watermark so that an event
@@ -264,10 +283,11 @@ func (d *dedup) NoteMissing(k streamKey, first, last uint64) {
 	}
 	d.clock++
 	s.used = d.clock
-	s.noteMissing(first, last)
-	s.pending = slices.DeleteFunc(s.pending, func(r seqRange) bool {
-		return r.first >= first && r.last <= last
-	})
+	remaining, ok := subtractRange(s.pending, first, last)
+	if !ok || !s.noteMissing(first, last) {
+		return
+	}
+	s.pending = remaining
 	s.prunePending()
 	if last > s.highest {
 		s.highest = last
@@ -304,7 +324,11 @@ func (d *dedup) stream(k streamKey) *dedupStream {
 	if len(d.streams) >= d.maxStreams && !d.evictOldest() {
 		return nil
 	}
-	s := &dedupStream{ahead: make(map[uint64]struct{}), used: d.clock}
+	d.nextStream++
+	if d.nextStream == 0 {
+		d.nextStream++
+	}
+	s := &dedupStream{identity: d.nextStream, ahead: make(map[uint64]struct{}), used: d.clock}
 	d.streams[k] = s
 	return s
 }
@@ -322,7 +346,7 @@ func (d *dedup) evictOldest() bool {
 		found  bool
 	)
 	for k, s := range d.streams {
-		if len(s.pending) != 0 || s.retrying {
+		if len(s.pending) != 0 || s.activeGapClaim != 0 {
 			continue
 		}
 		if !found || s.used < oldest {
@@ -346,6 +370,7 @@ func (s *dedupStream) queueMissing(first, last uint64) bool {
 	if first <= s.written {
 		first = s.written + 1
 	}
+	wasEmpty := len(s.pending) == 0
 	ranges := make([]seqRange, 0, len(s.pending)+1)
 	for _, r := range s.pending {
 		before := first > r.last && first-r.last > 1
@@ -363,6 +388,13 @@ func (s *dedupStream) queueMissing(first, last uint64) bool {
 	ranges = append(ranges, seqRange{first: first, last: last})
 	slices.SortFunc(ranges, func(a, b seqRange) int { return cmp.Compare(a.first, b.first) })
 	s.pending = ranges
+	if wasEmpty {
+		s.gapGeneration++
+		if s.gapGeneration == 0 {
+			s.gapGeneration++
+		}
+		s.gapSource = nil
+	}
 	return true
 }
 
@@ -371,7 +403,10 @@ func (s *dedupStream) pendingGap() dedupResult {
 		return dedupResult{}
 	}
 	gap := s.pending[0]
-	return dedupResult{Gap: true, GapFirst: gap.first, GapLast: gap.last}
+	return dedupResult{
+		Gap: true, GapFirst: gap.first, GapLast: gap.last,
+		GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
+	}
 }
 
 // excludePending removes an arriving sequence from retained gap evidence. The
@@ -401,6 +436,7 @@ func (s *dedupStream) excludePending(seq uint64) bool {
 			s.pending[i].last = seq - 1
 			s.pending = slices.Insert(s.pending, i+1, seqRange{first: seq + 1, last: gap.last})
 		}
+		s.clearGapSourceIfDrained()
 		return true
 	}
 	return true
@@ -413,15 +449,24 @@ func (s *dedupStream) excludePending(seq uint64) bool {
 func (s *dedupStream) pendingGapExcluding(seq uint64) dedupResult {
 	for _, gap := range s.pending {
 		if seq < gap.first || seq > gap.last {
-			return dedupResult{Gap: true, GapFirst: gap.first, GapLast: gap.last}
+			return dedupResult{
+				Gap: true, GapFirst: gap.first, GapLast: gap.last,
+				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
+			}
 		}
 	}
 	for _, gap := range s.pending {
 		if gap.first < seq && seq <= gap.last {
-			return dedupResult{Gap: true, GapFirst: gap.first, GapLast: seq - 1}
+			return dedupResult{
+				Gap: true, GapFirst: gap.first, GapLast: seq - 1,
+				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
+			}
 		}
 		if gap.first <= seq && seq < gap.last {
-			return dedupResult{Gap: true, GapFirst: seq + 1, GapLast: gap.last}
+			return dedupResult{
+				Gap: true, GapFirst: seq + 1, GapLast: gap.last,
+				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
+			}
 		}
 	}
 	return dedupResult{}
@@ -462,21 +507,85 @@ func (s *dedupStream) prunePending() {
 			s.pending[i].first = s.written + 1
 		}
 	}
+	s.clearGapSourceIfDrained()
 }
 
 // noteMissing records a reported-lost range and lets the watermark catch up.
-func (s *dedupStream) noteMissing(first, last uint64) {
+func (s *dedupStream) noteMissing(first, last uint64) bool {
 	if last < first || last <= s.written {
-		return
+		return true
 	}
 	if first <= s.written {
 		first = s.written + 1
 	}
-	if len(s.missing) >= maxMissingRanges {
-		return
+	ranges := make([]seqRange, 0, len(s.missing)+1)
+	for _, r := range s.missing {
+		if r.last <= s.written {
+			continue
+		}
+		if r.first <= s.written {
+			r.first = s.written + 1
+		}
+		before := first > r.last && first-r.last > 1
+		after := r.first > last && r.first-last > 1
+		if before || after {
+			ranges = append(ranges, r)
+			continue
+		}
+		first = min(first, r.first)
+		last = max(last, r.last)
 	}
-	s.missing = append(s.missing, seqRange{first: first, last: last})
+	if len(ranges) >= maxMissingRanges {
+		return false
+	}
+	ranges = append(ranges, seqRange{first: first, last: last})
+	slices.SortFunc(ranges, func(a, b seqRange) int { return cmp.Compare(a.first, b.first) })
+	s.missing = ranges
 	s.absorb()
+	return true
+}
+
+// subtractRange removes an accepted range from sorted pending evidence. It may
+// split one range, so it refuses a result that would exceed the evidence bound.
+func subtractRange(ranges []seqRange, first, last uint64) ([]seqRange, bool) {
+	if last < first {
+		return slices.Clone(ranges), true
+	}
+	result := make([]seqRange, 0, len(ranges)+1)
+	for _, r := range ranges {
+		if last < r.first || first > r.last {
+			result = append(result, r)
+			continue
+		}
+		if r.first < first {
+			result = append(result, seqRange{first: r.first, last: first - 1})
+		}
+		if last < r.last {
+			result = append(result, seqRange{first: last + 1, last: r.last})
+		}
+	}
+	if len(result) > maxMissingRanges {
+		return nil, false
+	}
+	return result, true
+}
+
+func (s *dedupStream) pendingContains(first, last uint64) bool {
+	for _, r := range s.pending {
+		if first < r.first {
+			return false
+		}
+		if first >= r.first && last <= r.last {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *dedupStream) clearGapSourceIfDrained() {
+	if len(s.pending) == 0 {
+		s.gapSource = nil
+	}
 }
 
 // absorb advances the watermark over everything immediately above it that is

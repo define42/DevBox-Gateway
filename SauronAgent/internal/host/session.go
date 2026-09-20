@@ -199,7 +199,7 @@ func (s *session) handshake() error {
 		if hello.FirstSequence > missing.GapLast {
 			reason = "agent cannot replay below its first_sequence"
 		}
-		s.reportGap(missing.GapFirst, missing.GapLast, reason)
+		s.reportGap(missing.GapFirst, missing.GapLast, missing.GapVersion, reason)
 	}
 	if missing.Blocked {
 		return fmt.Errorf("pending gap evidence limit reached for stream %q", s.key.boot)
@@ -294,7 +294,7 @@ func (s *session) handleEvent(f *protocol.Frame) error {
 		res = s.srv.dedup.Check(s.key, ev.Sequence)
 	}
 	if res.Gap {
-		s.reportGap(res.GapFirst, res.GapLast, "sequence numbers skipped")
+		s.reportGap(res.GapFirst, res.GapLast, res.GapVersion, "sequence numbers skipped")
 	}
 	if res.Blocked {
 		return fmt.Errorf("pending gap evidence limit reached for stream %q", s.key.boot)
@@ -563,12 +563,18 @@ func (s *session) report(ev *event.Event) {
 // The report is published before the acknowledgement point is allowed past the
 // hole, which is what makes advancing over it defensible: the events are gone
 // either way, and the record of their absence is written first.
-func (s *session) reportGap(first, last uint64, reason string) {
-	src := s.srv.dedup.rememberGapSource(s.key, s.src)
-	s.srv.publishGap(s.writeCtx, s.key, src, first, last, reason)
+func (s *session) reportGap(first, last uint64, version gapVersion, reason string) {
+	publication, ok := s.srv.dedup.claimGap(s.key, s.src, first, last, version)
+	if !ok {
+		return
+	}
+	s.srv.publishGap(s.writeCtx, publication, reason)
 }
 
-func (s *Server) publishGap(ctx context.Context, key streamKey, src output.Source, first, last uint64, reason string) bool {
+func (s *Server) publishGap(ctx context.Context, publication gapPublication, reason string) bool {
+	key := publication.key
+	src := publication.source
+	first, last := publication.gap.first, publication.gap.last
 	missing := last - first + 1
 	s.log.Warn("gap in guest sequence numbers",
 		"first_missing_sequence", first, "last_missing_sequence", last,
@@ -580,10 +586,10 @@ func (s *Server) publishGap(ctx context.Context, key streamKey, src output.Sourc
 		"boot_id":                key.boot,
 		"reason":                 reason,
 	}))
+	s.dedup.finishGap(publication, err == nil)
 	if err != nil {
 		s.metrics.OutputErrors.Add(1)
 		return false
 	}
-	s.dedup.NoteMissing(key, first, last)
 	return true
 }

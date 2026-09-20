@@ -4,8 +4,38 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
+	"time"
 )
+
+func TestBootNewVMWithContextCancelsWhileWaitingForName(t *testing.T) {
+	fixture := newProvisionTestFixture(t)
+	release := sync.OnceFunc(vmNameLocks.Lock(fixture.spec.vmName))
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	type result struct {
+		name string
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		name, err := BootNewVMWithContext(ctx, fixture.request, fixture.settings, nil)
+		done <- result{name, err}
+	}()
+	waitForVMActivityWaiter(t, vmNameLocks, fixture.spec.vmName)
+	cancel()
+	select {
+	case got := <-done:
+		if !errors.Is(got.err, context.Canceled) || got.name != fixture.spec.vmName {
+			t.Fatalf("canceled create = (%q, %v)", got.name, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled create remained blocked on the VM-name lock")
+	}
+	assertNoProvisionedArtifacts(t, fixture)
+}
 
 func TestBootNewVMWithContextCanceledBeforeWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

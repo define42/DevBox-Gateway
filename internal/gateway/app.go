@@ -93,10 +93,14 @@ func (g *gatewayRuntime) close() error {
 		g.stopAutoShutdown()
 	}
 
+	// Close the session registry before draining HTTP. RegisterUserConnection
+	// and CloseAllConnections share one lock, so a WebSocket crossing the
+	// hijack boundary is either included in this drain or is refused and then
+	// awaited by the HTTP registry until its handler unwinds.
 	return errors.Join(
 		g.closeListener(),
-		g.drainHTTP(),
 		g.drainConnections(),
+		g.drainHTTP(),
 		g.closeSauron(),
 		g.closeProfiler(),
 		g.closeFrontTLS(),

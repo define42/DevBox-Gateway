@@ -7,12 +7,16 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 )
 
 // httpServerRegistry owns the per-connection HTTP servers on the shared front
-// listener. Hijacked connections leave this registry and are drained separately
-// by the session manager. Admission stays closed once shutdown starts, including
-// for connections that were still negotiating TLS when the listener stopped.
+// listener. A hijacked connection stays registered until its handler returns;
+// gateway shutdown closes the session registry first so the connection's
+// session handoff either joins that drain or is refused, after which this
+// registry waits for the handler to unwind. Admission stays closed once shutdown
+// starts, including for connections that were still negotiating TLS when the
+// listener stopped.
 type httpServerRegistry struct {
 	mu      sync.Mutex
 	servers map[*http.Server]*httpServerRegistration
@@ -26,6 +30,7 @@ type httpServerRegistration struct {
 	abort    func()
 	done     chan struct{}
 	once     sync.Once
+	hijacked atomic.Bool
 }
 
 func newHTTPServerRegistry() *httpServerRegistry {
@@ -40,6 +45,7 @@ func (r *httpServerRegistry) register(server *http.Server, cancel context.Cancel
 		abort:    abort,
 		done:     make(chan struct{}),
 	}
+	server.Handler = entry.wrapHandler(server.Handler)
 	server.ConnState = entry.connectionState
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -51,9 +57,32 @@ func (r *httpServerRegistry) register(server *http.Server, cancel context.Cancel
 }
 
 func (e *httpServerRegistration) connectionState(_ net.Conn, state http.ConnState) {
-	if state == http.StateClosed || state == http.StateHijacked {
+	switch state {
+	case http.StateClosed:
 		e.finish()
+	case http.StateHijacked:
+		// Hijack is only the start of the ownership transfer. The handler can
+		// still be opening its backend before it registers with session.Manager,
+		// so wrapHandler keeps this entry alive until the handler returns.
+		e.hijacked.Store(true)
+	case http.StateNew, http.StateActive, http.StateIdle:
+		// Non-terminal HTTP states remain owned by the registry.
 	}
+}
+
+func (e *httpServerRegistration) wrapHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		defer func() {
+			if e.hijacked.Load() {
+				e.finish()
+			}
+		}()
+		if next == nil {
+			http.DefaultServeMux.ServeHTTP(w, req)
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 func (e *httpServerRegistration) finish() {
@@ -107,8 +136,8 @@ func (e *httpServerRegistration) shutdown(ctx context.Context) error {
 	}
 	select {
 	case <-e.done:
-		// An upgrade may have completed as the grace period ended. The session
-		// manager now owns that connection, so do not interrupt its audit/drain.
+		// The handler may have completed as the grace period ended. Do not
+		// interrupt cleanup that has already finished.
 		return err
 	default:
 	}

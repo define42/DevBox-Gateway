@@ -112,8 +112,8 @@ func TestBinDirOverride(t *testing.T) {
 
 func TestRPMDescription(t *testing.T) {
 	p := RPM(Options{Version: "1.2.3", Release: "4", Source: "SauronAgent"})
-	if p.Arch != rpm.Arch(runtime.GOARCH) {
-		t.Errorf("default arch = %q, want %q", p.Arch, rpm.Arch(runtime.GOARCH))
+	if want := rpmArchitecture(rpm.Arch(runtime.GOARCH)); p.Arch != want {
+		t.Errorf("default arch = %q, want %q", p.Arch, want)
 	}
 	if want := "dist/sauronagent-1.2.3-4." + p.Arch + ".rpm"; p.Output != want {
 		t.Errorf("default output = %q, want %q", p.Output, want)
@@ -149,8 +149,8 @@ func TestRPMDescription(t *testing.T) {
 
 func TestDebDescription(t *testing.T) {
 	p := Deb(Options{Version: "1.2.3", Source: "SauronAgent"})
-	if p.Arch != deb.Arch(runtime.GOARCH) {
-		t.Errorf("default arch = %q, want %q", p.Arch, deb.Arch(runtime.GOARCH))
+	if want := debArchitecture(deb.Arch(runtime.GOARCH)); p.Arch != want {
+		t.Errorf("default arch = %q, want %q", p.Arch, want)
 	}
 	if want := "dist/sauronagent_1.2.3_" + p.Arch + ".deb"; p.Output != want {
 		t.Errorf("default output = %q, want %q", p.Output, want)

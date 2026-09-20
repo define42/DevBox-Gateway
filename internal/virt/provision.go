@@ -238,7 +238,10 @@ func BootNewVMWithContext(ctx context.Context, req VMCreateRequest, settings *co
 	if err := ctx.Err(); err != nil {
 		return spec.vmName, err
 	}
-	unlockName := vmNameLocks.Lock(spec.vmName)
+	unlockName, err := vmNameLocks.LockContext(ctx, spec.vmName)
+	if err != nil {
+		return spec.vmName, err
+	}
 	defer unlockName()
 	if err := provisionAndStartVM(ctx, conn, settings, spec, report); err != nil {
 		return spec.vmName, err

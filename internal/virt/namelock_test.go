@@ -1,10 +1,72 @@
 package virt
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestKeyedMutexCanceledWaitDoesNotReleaseHolder(t *testing.T) {
+	km := newKeyedMutex()
+	release := sync.OnceFunc(km.Lock("vm"))
+	defer release()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		unlock, err := km.LockContext(ctx, "vm")
+		if unlock != nil {
+			unlock()
+		}
+		done <- err
+	}()
+	waitForVMActivityWaiter(t, km, "vm")
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled wait = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled acquisition waited for the holder")
+	}
+
+	// Canceling a waiter must not remove the entry while its holder is active.
+	ctx, cancel = context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	unlock, err := km.LockContext(ctx, "vm")
+	if unlock != nil {
+		unlock()
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second acquisition = %v, want deadline while original holder remains", err)
+	}
+	release()
+	if n := km.liveKeys(); n != 0 {
+		t.Fatalf("canceled waiters leaked %d lock entries", n)
+	}
+	unlock, err = km.LockContext(t.Context(), "vm")
+	if err != nil {
+		t.Fatalf("reacquire after cancellations: %v", err)
+	}
+	unlock()
+}
+
+func TestKeyedMutexRejectsAlreadyCanceledContext(t *testing.T) {
+	km := newKeyedMutex()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	unlock, err := km.LockContext(ctx, "unused")
+	if unlock != nil {
+		unlock()
+		t.Error("returned a release function for canceled acquisition")
+	}
+	if !errors.Is(err, context.Canceled) || km.liveKeys() != 0 {
+		t.Fatalf("canceled acquisition: error=%v, live keys=%d", err, km.liveKeys())
+	}
+}
 
 // TestKeyedMutexSerializesSameKey exercises many goroutines contending on one
 // key. The unguarded counter increment is only safe because the per-key lock
@@ -72,8 +134,8 @@ func TestKeyedMutexSameKeyBlocksUntilReleased(t *testing.T) {
 	acquired := make(chan struct{})
 	go func() {
 		release2 := km.Lock("k")
-		close(acquired)
 		release2()
+		close(acquired)
 	}()
 
 	select {
