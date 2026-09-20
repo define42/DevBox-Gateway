@@ -62,6 +62,10 @@ const (
 	// DefaultAuditLogFile is the append-only JSON Lines audit log used when
 	// direct Splunk HEC forwarding is disabled, including for file collectors.
 	DefaultAuditLogFile = "/var/log/devbox-gateway/audit.jsonl"
+	// DefaultDevBoxGatewaySpoolMaxMiB bounds the disk space application audit
+	// events may use while they wait for Splunk HEC. Override with
+	// DEVBOX_GATEWAY_SPOOL_MAX_MIB.
+	DefaultDevBoxGatewaySpoolMaxMiB = 10240
 	// SauronVSockPort is the fixed AF_VSOCK port shared by the gateway's
 	// mandatory collector and the agent's compiled-in transport settings.
 	SauronVSockPort uint32 = 9000
@@ -116,6 +120,7 @@ const (
 
 const (
 	acmeDataSubdir      = "acme"
+	auditSpoolSubdir    = "audit-spool"
 	imageDataSubdir     = "image"
 	baseImageDataSubdir = "baseimages"
 	serialDataSubdir    = "serial"
@@ -193,10 +198,11 @@ func (s *Settings) printTable() {
 
 func (s *Settings) setAuditDefaults() {
 	s.SetString(AUDIT_LOG_FILE, "Append-only JSON Lines file for security audit events when SPLUNK_HEC_ENDPOINT is empty; required in file-only mode and ignored when forwarding to Splunk HEC", DefaultAuditLogFile)
-	s.SetString(SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL used instead of AUDIT_LOG_FILE, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Empty selects local file logging. HEC-only delivery uses a bounded in-memory queue with no local file or durable spool", "")
+	s.SetString(SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL used instead of AUDIT_LOG_FILE, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Empty selects local file logging. HEC delivery is durably buffered under <DATA_ROOT_DIR>/audit-spool", "")
 	s.SetSecretString(SPLUNK_HEC_TOKEN, "Splunk HEC token; required when SPLUNK_HEC_ENDPOINT is set", "")
 	s.SetString(SPLUNK_HEC_INDEX, "Splunk index for forwarded audit events; empty uses the HEC token's default index", "")
 	s.SetBool(SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SPLUNK_HEC_ENDPOINT", false)
+	s.SetInt(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "Disk space in MiB the application-audit HEC spool under <DATA_ROOT_DIR>/audit-spool may use. When full, new audit writes wait for space instead of dropping pending events. Values <=0 fall back to the default", DefaultDevBoxGatewaySpoolMaxMiB)
 }
 
 func (s *Settings) setSauronDefaults() {
@@ -243,6 +249,25 @@ func RDPPort(settings *Settings) int {
 		}
 	}
 	return 443
+}
+
+// AuditSpoolDir resolves the fixed directory where application audit events
+// wait for Splunk HEC. It is separate from the SauronAgent guest-event spool.
+func AuditSpoolDir(settings *Settings) string {
+	return filepath.Join(DataRootDir(settings), auditSpoolSubdir)
+}
+
+// AuditSpoolMaxBytes resolves the application-audit spool limit in bytes. A
+// missing or non-positive DEVBOX_GATEWAY_SPOOL_MAX_MIB uses the default.
+// ValidateSplunkHEC rejects positive values that cannot be represented in bytes.
+func AuditSpoolMaxBytes(settings *Settings) int64 {
+	mib := DefaultDevBoxGatewaySpoolMaxMiB
+	if settings != nil {
+		if configured := settings.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); configured > 0 {
+			mib = configured
+		}
+	}
+	return int64(mib) << 20
 }
 
 // SauronSpoolDir resolves the directory where guest events wait for Splunk
@@ -580,6 +605,7 @@ const (
 	AUDIT_LOG_FILE                    = "AUDIT_LOG_FILE"
 	CERT_FILE                         = "CERT_FILE"
 	DATA_ROOT_DIR                     = "DATA_ROOT_DIR"
+	DEVBOX_GATEWAY_SPOOL_MAX_MIB      = "DEVBOX_GATEWAY_SPOOL_MAX_MIB"
 	FRONT_DOMAIN                      = "FRONT_DOMAIN"
 	KEY_FILE                          = "KEY_FILE"
 	LDAP_URL                          = "LDAP_URL"

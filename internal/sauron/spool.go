@@ -220,7 +220,7 @@ func repairSpoolTail(path string, size int64) (int64, error) {
 	if keep == size {
 		return size, nil
 	}
-	log.Printf("sauron: discarding %d bytes of a spool record torn by a crash in %s; it was never acknowledged, so its guest sends it again", size-keep, path)
+	log.Printf("splunk hec: discarding %d bytes of an incomplete spool record after a crash in %s; persistence of that record was not completed", size-keep, path)
 	if err := file.Truncate(keep); err != nil {
 		return 0, fmt.Errorf("truncate torn sauron spool record: %w", err)
 	}
@@ -350,13 +350,13 @@ func (s *spool) ensureCapacityLocked(size int64) error {
 	if size > s.maxBytes-s.total {
 		if !s.full {
 			s.full = true
-			log.Printf("sauron: the splunk hec spool in %s is full (%d MiB); guest events are no longer acknowledged and wait in the guests' own spools until Splunk takes the backlog", s.dir, s.maxBytes>>20)
+			log.Printf("splunk hec: delivery spool in %s is full (%d MiB); new records cannot be accepted until delivery frees capacity", s.dir, s.maxBytes>>20)
 		}
 		return errSpoolFull
 	}
 	if s.full {
 		s.full = false
-		log.Printf("sauron: the splunk hec spool has room again; acknowledging guest events")
+		log.Printf("splunk hec: delivery spool in %s has room again; accepting records", s.dir)
 	}
 	return nil
 }

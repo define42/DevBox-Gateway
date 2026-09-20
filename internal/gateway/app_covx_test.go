@@ -356,13 +356,17 @@ func TestMcovBootGatewaySplunkHECEndpointError(t *testing.T) {
 
 func TestMcovAuditOptionsMapsSettings(t *testing.T) {
 	t.Setenv(config.AUDIT_LOG_FILE, "/srv/audit/devbox.jsonl")
+	t.Setenv(config.DATA_ROOT_DIR, "/srv/devbox")
+	t.Setenv(config.DEVBOX_GATEWAY_SPOOL_MAX_MIB, "512")
 	t.Setenv(config.SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
 	t.Setenv(config.SPLUNK_HEC_TOKEN, "hec-token")
 	t.Setenv(config.SPLUNK_HEC_INDEX, "devbox_audit")
 	t.Setenv(config.SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 
 	want := audit.Options{
-		FilePath: "/srv/audit/devbox.jsonl",
+		FilePath:      "/srv/audit/devbox.jsonl",
+		SpoolDir:      "/srv/devbox/audit-spool",
+		SpoolMaxBytes: 512 << 20,
 		HEC: audit.HECConfig{
 			Endpoint:           "https://splunk.example.test:8088",
 			Token:              "hec-token",
@@ -399,6 +403,37 @@ func TestMcovRunReturnsZeroOnCanceledContext(t *testing.T) {
 type mcovListener struct {
 	closeErr  error
 	acceptErr error
+}
+
+type mcovShutdownAuditSink struct {
+	order *[]string
+}
+
+func (s *mcovShutdownAuditSink) BeginShutdown() {
+	*s.order = append(*s.order, "begin-audit-shutdown")
+}
+
+func (s *mcovShutdownAuditSink) Close() error {
+	*s.order = append(*s.order, "close-audit")
+	return nil
+}
+
+func TestMcovGatewayRuntimeBeginsAuditShutdownBeforeStoppingWorkers(t *testing.T) {
+	var order []string
+	gateway := &gatewayRuntime{
+		auditSink: &mcovShutdownAuditSink{order: &order},
+		stopAutoShutdown: func() {
+			order = append(order, "stop-auto-shutdown")
+		},
+	}
+
+	if err := gateway.Close(); err != nil {
+		t.Fatalf("close gateway runtime: %v", err)
+	}
+	want := []string{"begin-audit-shutdown", "stop-auto-shutdown", "close-audit"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("shutdown order = %v, want %v", order, want)
+	}
 }
 
 func (l *mcovListener) Accept() (net.Conn, error) { return nil, l.acceptErr }

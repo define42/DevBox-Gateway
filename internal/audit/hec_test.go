@@ -40,6 +40,47 @@ type fakeCollector struct {
 	server   *httptest.Server
 }
 
+// replayCollector records exact request bodies so restart tests can prove that
+// persisted HEC routing metadata is replayed byte-for-byte.
+type replayCollector struct {
+	mu       sync.Mutex
+	requests []string
+	reject   atomic.Bool
+	server   *httptest.Server
+}
+
+func newReplayCollector(t *testing.T) *replayCollector {
+	t.Helper()
+	collector := &replayCollector{}
+	collector.reject.Store(true)
+	collector.server = httptest.NewServer(http.HandlerFunc(collector.handle))
+	t.Cleanup(collector.server.Close)
+	return collector
+}
+
+func (c *replayCollector) handle(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	c.mu.Lock()
+	c.requests = append(c.requests, string(body))
+	c.mu.Unlock()
+	if c.reject.Load() {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"code":4}`)
+		return
+	}
+	_, _ = io.WriteString(w, `{"code":0}`)
+}
+
+func (c *replayCollector) snapshotFrom(start int) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.requests[start:]...)
+}
+
 func newFakeCollector(t *testing.T, statuses ...int) *fakeCollector {
 	t.Helper()
 	collector := &fakeCollector{t: t, statuses: statuses}
@@ -101,12 +142,18 @@ func decodeEnvelopes(t *testing.T, body io.Reader) []map[string]any {
 // newTestForwarder builds a forwarder for collector with fast retries.
 func newTestForwarder(t *testing.T, config HECConfig) *hecForwarder {
 	t.Helper()
-	forwarder, err := newHECForwarder(config)
+	return newTestForwarderWithSpool(t, config, t.TempDir(), 1<<20)
+}
+
+func newTestForwarderWithSpool(t *testing.T, config HECConfig, dir string, capacity int64) *hecForwarder {
+	t.Helper()
+	forwarder, err := newHECForwarder(config, dir, capacity)
 	if err != nil {
 		t.Fatalf("newHECForwarder() error = %v", err)
 	}
 	forwarder.retryInitial = time.Millisecond
 	forwarder.retryLimit = 5 * time.Millisecond
+	t.Cleanup(func() { _ = forwarder.Close() })
 	return forwarder
 }
 
@@ -161,8 +208,36 @@ func TestNewHECForwarderRejectsInvalidConfig(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := newHECForwarder(test.config); err == nil {
+			if forwarder, err := newHECForwarder(test.config, t.TempDir(), 1<<20); err == nil {
+				_ = forwarder.Close()
 				t.Fatal("newHECForwarder() error = nil, want non-nil")
+			}
+		})
+	}
+}
+
+func TestNewHECForwarderRequiresUsableSpool(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		dir      string
+		capacity int64
+	}{
+		{name: "empty directory", capacity: 1 << 20},
+		{name: "blank directory", dir: " \t ", capacity: 1 << 20},
+		{name: "zero capacity", dir: t.TempDir()},
+		{name: "negative capacity", dir: t.TempDir(), capacity: -1},
+		{name: "directory is a file", dir: blocker, capacity: 1 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := HECConfig{Endpoint: "https://splunk.example.test", Token: "token"}
+			forwarder, err := newHECForwarder(cfg, tc.dir, tc.capacity)
+			if err == nil {
+				_ = forwarder.Close()
+				t.Fatal("invalid persistent spool configuration accepted")
 			}
 		})
 	}
@@ -173,7 +248,9 @@ func TestConfigureForwardsAuditRecordsToHEC(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
 
 	closer, err := Configure(Options{
-		FilePath: path,
+		FilePath:      path,
+		SpoolDir:      t.TempDir(),
+		SpoolMaxBytes: 1 << 20,
 		HEC: HECConfig{
 			Endpoint:           collector.server.URL,
 			Token:              "hec-token",
@@ -188,7 +265,7 @@ func TestConfigureForwardsAuditRecordsToHEC(t *testing.T) {
 
 	Log(context.Background(), Event{Action: ActionUserLogin, User: "alice", SourceIP: "192.0.2.10"})
 	Log(context.Background(), Event{Action: ActionVMStart, User: "alice", VM: "alice.desktop"})
-	// Close flushes the queue, so every record has reached the collector after it.
+	// The healthy collector receives the pending spool records during Close.
 	if err := closer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -229,8 +306,10 @@ func TestConfigureHECRejectionDoesNotCreateLocalFile(t *testing.T) {
 	collector := newFakeCollector(t, http.StatusBadRequest)
 	path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
 	closer, err := Configure(Options{
-		FilePath: path,
-		HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+		FilePath:      path,
+		SpoolDir:      t.TempDir(),
+		SpoolMaxBytes: 1 << 20,
+		HEC:           HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
 	})
 	if err != nil {
 		t.Fatalf("Configure() error = %v", err)
@@ -242,8 +321,8 @@ func TestConfigureHECRejectionDoesNotCreateLocalFile(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 	requests := collector.received()
-	if len(requests) != 1 || strings.Join(eventUsers(requests), ",") != "rejected" {
-		t.Fatalf("collector requests = %#v, want one rejected event without a retry", requests)
+	if len(requests) != 2 || strings.Join(eventUsers(requests), ",") != "rejected,rejected" {
+		t.Fatalf("collector requests = %#v, want rejected event retried until accepted", requests)
 	}
 	collector.mu.Lock()
 	remainingStatuses := len(collector.statuses)
@@ -268,8 +347,10 @@ func TestConfigureHECLeavesExistingFileUntouched(t *testing.T) {
 	}
 
 	closer, err := Configure(Options{
-		FilePath: path,
-		HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+		FilePath:      path,
+		SpoolDir:      t.TempDir(),
+		SpoolMaxBytes: 1 << 20,
+		HEC:           HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
 	})
 	if err != nil {
 		t.Fatalf("Configure() error = %v", err)
@@ -311,8 +392,10 @@ func TestConfigureHECIgnoresUnusableFilePaths(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			collector := newFakeCollector(t)
 			closer, err := Configure(Options{
-				FilePath: test.path,
-				HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+				FilePath:      test.path,
+				SpoolDir:      t.TempDir(),
+				SpoolMaxBytes: 1 << 20,
+				HEC:           HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
 			})
 			if err != nil {
 				t.Fatalf("Configure() with ignored file path %q: %v", test.path, err)
@@ -343,7 +426,9 @@ func TestConfigureHECPreservesOperationalLogAndRestoresLogging(t *testing.T) {
 	log.SetOutput(&operationalLog)
 
 	closer, err := Configure(Options{
-		HEC: HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+		SpoolDir:      t.TempDir(),
+		SpoolMaxBytes: 1 << 20,
+		HEC:           HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
 	})
 	if err != nil {
 		t.Fatalf("Configure() error = %v", err)
@@ -388,7 +473,7 @@ func TestConfigureRejectsInvalidHECWithoutTouchingLogging(t *testing.T) {
 			previousLogger := slog.Default()
 			previousLogWriter := log.Writer()
 			path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
-			closer, err := Configure(Options{FilePath: path, HEC: test.config})
+			closer, err := Configure(Options{FilePath: path, SpoolDir: t.TempDir(), SpoolMaxBytes: 1 << 20, HEC: test.config})
 			if err == nil {
 				_ = closer.Close()
 				t.Fatal("Configure() error = nil, want HEC configuration error")
@@ -425,11 +510,11 @@ func TestHECForwarderOmitsEmptyIndex(t *testing.T) {
 	}
 }
 
-func TestHECForwarderBatchesQueuedRecords(t *testing.T) {
+func TestHECForwarderDeliversSpooledRecordsInOrder(t *testing.T) {
 	collector := newFakeCollector(t)
 	forwarder := newTestForwarder(t, HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true})
 
-	// Queue the records before the sender runs so they are sent as one batch.
+	// Records written before startup must be delivered in their original order.
 	for _, user := range []string{"alice", "bob", "carol"} {
 		writeRecord(t, forwarder, `{"user":"`+user+`"}`)
 	}
@@ -439,16 +524,13 @@ func TestHECForwarderBatchesQueuedRecords(t *testing.T) {
 	}
 
 	requests := collector.received()
-	if len(requests) != 1 {
-		t.Fatalf("collector received %d requests, want 1 batch", len(requests))
-	}
 	if got, want := strings.Join(eventUsers(requests), ","), "alice,bob,carol"; got != want {
 		t.Fatalf("batched users = %q, want %q", got, want)
 	}
 }
 
-func TestHECForwarderRetriesTransientFailures(t *testing.T) {
-	collector := newFakeCollector(t, http.StatusServiceUnavailable, http.StatusForbidden, http.StatusTooManyRequests)
+func TestHECForwarderRetriesAllHTTPFailures(t *testing.T) {
+	collector := newFakeCollector(t, http.StatusServiceUnavailable, http.StatusBadRequest, http.StatusForbidden, http.StatusTooManyRequests)
 	forwarder := newTestForwarder(t, HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true})
 	forwarder.start()
 
@@ -458,11 +540,8 @@ func TestHECForwarderRetriesTransientFailures(t *testing.T) {
 	}
 
 	requests := collector.received()
-	if len(requests) != 4 {
-		t.Fatalf("collector received %d requests, want 3 failures and 1 success", len(requests))
-	}
-	if got := forwarder.dropped.Load(); got != 0 {
-		t.Errorf("dropped = %d, want 0", got)
+	if len(requests) != 5 {
+		t.Fatalf("collector received %d requests, want 4 failures and 1 success", len(requests))
 	}
 }
 
@@ -511,7 +590,7 @@ func TestHECForwarderRetriesUnconfirmedResponses(t *testing.T) {
 	}
 }
 
-func TestHECForwarderDropsRejectedBatchAndContinues(t *testing.T) {
+func TestHECForwarderRetainsRejectedBatchAndContinuesAfterAcceptance(t *testing.T) {
 	collector := newFakeCollector(t, http.StatusBadRequest)
 	forwarder := newTestForwarder(t, HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true})
 	forwarder.start()
@@ -523,29 +602,43 @@ func TestHECForwarderDropsRejectedBatchAndContinues(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	if got, want := strings.Join(eventUsers(collector.received()), ","), "rejected,accepted"; got != want {
-		t.Fatalf("received users = %q, want %q (a rejected batch is not retried)", got, want)
+	if got, want := strings.Join(eventUsers(collector.received()), ","), "rejected,rejected,accepted"; got != want {
+		t.Fatalf("received users = %q, want %q (rejected events must be retried)", got, want)
 	}
 }
 
 func TestHECForwarderVerifiesTLSByDefault(t *testing.T) {
 	collector := newFakeCollector(t)
-	forwarder := newTestForwarder(t, HECConfig{Endpoint: collector.server.URL, Token: "token"})
+	dir := t.TempDir()
+	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: collector.server.URL, Token: "token"}, dir, 1<<20)
 	forwarder.shutdownTimeout = 100 * time.Millisecond
 	forwarder.start()
 
 	writeRecord(t, forwarder, `{"user":"alice"}`)
-	if err := forwarder.Close(); err == nil {
-		t.Fatal("Close() error = nil, want undelivered-events error")
+	if err := forwarder.Close(); err != nil {
+		t.Fatalf("Close() must retain undelivered events without treating an outage as a close failure: %v", err)
 	}
 	if got := len(collector.received()); got != 0 {
 		t.Fatalf("collector with an untrusted certificate received %d requests, want 0", got)
 	}
+
+	recovered := newTestForwarderWithSpool(t, HECConfig{
+		Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true,
+	}, dir, 1<<20)
+	recovered.start()
+	if err := recovered.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(eventUsers(collector.received()), ","); got != "alice" {
+		t.Fatalf("recovered users = %q, want the event retained through TLS failure", got)
+	}
 }
 
-func TestHECForwarderCloseAbandonsQueueAfterDeadline(t *testing.T) {
+func TestHECForwarderCloseRetainsSpoolAfterDeadline(t *testing.T) {
 	collector := newFakeCollector(t, http.StatusServiceUnavailable)
-	forwarder := newTestForwarder(t, HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true})
+	dir := t.TempDir()
+	cfg := HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true}
+	forwarder := newTestForwarderWithSpool(t, cfg, dir, 1<<20)
 	forwarder.retryInitial = time.Hour
 	forwarder.retryLimit = time.Hour
 	forwarder.shutdownTimeout = 50 * time.Millisecond
@@ -555,49 +648,239 @@ func TestHECForwarderCloseAbandonsQueueAfterDeadline(t *testing.T) {
 	waitForRequests(t, collector, 1)
 
 	started := time.Now()
-	if err := forwarder.Close(); err == nil {
-		t.Fatal("Close() error = nil, want undelivered-events error")
+	if err := forwarder.Close(); err != nil {
+		t.Fatalf("Close() error = %v, want pending records retained without error", err)
 	}
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("Close() took %s despite a %s shutdown deadline", elapsed, forwarder.shutdownTimeout)
 	}
-}
-
-func TestHECForwarderWriteNeverBlocksWhenQueueIsFull(t *testing.T) {
-	forwarder := newTestForwarder(t, HECConfig{Endpoint: "https://splunk.example.test", Token: "token"})
-	forwarder.queue = make(chan []byte, 2)
-
-	var output strings.Builder
-	previousLogWriter := log.Writer()
-	log.SetOutput(&output)
-	t.Cleanup(func() { log.SetOutput(previousLogWriter) })
-
-	// The sender is not running, so nothing drains the queue.
-	for range 5 {
-		writeRecord(t, forwarder, `{"user":"alice"}`)
+	recovered := newTestForwarderWithSpool(t, cfg, dir, 1<<20)
+	recovered.start()
+	if err := recovered.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if got := forwarder.dropped.Load(); got != 3 {
-		t.Fatalf("dropped = %d, want 3", got)
-	}
-
-	forwarder.reportDropped()
-	if !strings.Contains(output.String(), "3 audit event(s) could not be forwarded") {
-		t.Errorf("drop report = %q, want the dropped count", output.String())
-	}
-	if got := forwarder.dropped.Load(); got != 0 {
-		t.Errorf("dropped after report = %d, want 0", got)
+	if got := strings.Join(eventUsers(collector.received()), ","); got != "alice,alice" {
+		t.Fatalf("delivery attempts = %q, want failed event replayed after restart", got)
 	}
 }
 
-func TestHECForwarderDropsInvalidRecord(t *testing.T) {
+func TestHECForwarderRejectsInvalidRecord(t *testing.T) {
 	forwarder := newTestForwarder(t, HECConfig{Endpoint: "https://splunk.example.test", Token: "token"})
-
-	writeRecord(t, forwarder, `{"user":`)
-	if got := forwarder.dropped.Load(); got != 1 {
-		t.Fatalf("dropped = %d, want 1", got)
+	if n, err := forwarder.Write([]byte(`{"user":`)); err == nil || n != 0 {
+		t.Fatalf("Write(invalid JSON) = %d, %v; want 0 and an error", n, err)
 	}
-	if got := len(forwarder.queue); got != 0 {
-		t.Fatalf("queue length = %d, want 0", got)
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHECForwarderReplayPreservesOriginalEnvelope(t *testing.T) {
+	collector := newReplayCollector(t)
+	dir := t.TempDir()
+	cfg := HECConfig{Endpoint: collector.server.URL, Token: "token", Index: "original-index"}
+	first := newTestForwarderWithSpool(t, cfg, dir, 1<<20)
+	first.host = "original-host"
+	first.shutdownTimeout = 30 * time.Millisecond
+	const originalEvent = `{"time":"2001-02-03T04:05:06Z","user":"alice","source_ip":"192.0.2.42"}`
+	writeRecord(t, first, originalEvent)
+	first.start()
+	if err := first.Close(); err != nil {
+		t.Fatalf("close while HEC rejects: %v", err)
+	}
+	failedAttempts := collector.snapshotFrom(0)
+	if len(failedAttempts) == 0 {
+		t.Fatal("no initial delivery attempted")
+	}
+
+	// A new process may have a different hostname/index configuration. Records
+	// already accepted into the spool must keep their original complete envelope.
+	collector.reject.Store(false)
+	cfg.Index = "new-index"
+	recovered := newTestForwarderWithSpool(t, cfg, dir, 1<<20)
+	recovered.host = "new-host"
+	recovered.start()
+	if err := recovered.Close(); err != nil {
+		t.Fatal(err)
+	}
+	replayed := collector.snapshotFrom(len(failedAttempts))
+	if len(replayed) != 1 || replayed[0] != failedAttempts[0] {
+		t.Fatalf("replay changed or lost the original envelope: replay=%q, original=%q", replayed, failedAttempts[0])
+	}
+	envelopes := decodeEnvelopes(t, strings.NewReader(replayed[0]))
+	if len(envelopes) != 1 {
+		t.Fatalf("replayed envelopes=%d, want 1", len(envelopes))
+	}
+	assertFields(t, "replayed envelope", envelopes[0], map[string]any{"host": "original-host", "index": "original-index"})
+	event, _ := envelopes[0]["event"].(map[string]any)
+	assertFields(t, "replayed event", event, map[string]any{"time": "2001-02-03T04:05:06Z", "user": "alice", "source_ip": "192.0.2.42"})
+
+	// A persisted success checkpoint prevents already delivered records from
+	// being sent again on the following restart.
+	third := newTestForwarderWithSpool(t, cfg, dir, 1<<20)
+	writeRecord(t, third, `{"user":"bob"}`)
+	third.start()
+	if err := third.Close(); err != nil {
+		t.Fatal(err)
+	}
+	finalRequests := collector.snapshotFrom(len(failedAttempts) + 1)
+	if len(finalRequests) != 1 || strings.Contains(finalRequests[0], "alice") || !strings.Contains(finalRequests[0], "bob") {
+		t.Fatalf("acknowledged event was replayed: %q", finalRequests)
+	}
+}
+
+func TestHECForwarderFullSpoolBlocksUntilClose(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"code":9}`)
+	}))
+	t.Cleanup(server.Close)
+	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: server.URL, Token: "token"}, t.TempDir(), 512)
+	forwarder.host = "test-host"
+	forwarder.shutdownTimeout = 30 * time.Millisecond
+	record := `{"user":"` + strings.Repeat("a", 200) + `"}`
+	writeRecord(t, forwarder, record)
+	forwarder.start()
+
+	written := make(chan error, 1)
+	go func() {
+		_, err := forwarder.Write([]byte(record))
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		t.Fatalf("full-spool Write returned before space became available or shutdown: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-written:
+		if err == nil {
+			t.Fatal("blocked writer reported success without persisting its record")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not unblock the full-spool writer")
+	}
+	if n, err := forwarder.Write([]byte(`{"user":"after-close"}`)); n != 0 || err == nil {
+		t.Fatalf("Write after Close = %d, %v; want 0 and an error", n, err)
+	}
+}
+
+func TestHECForwarderFullSpoolResumesAfterDelivery(t *testing.T) {
+	var reject atomic.Bool
+	reject.Store(true)
+	var acceptedMu sync.Mutex
+	var accepted []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		events := decodeEnvelopes(t, r.Body)
+		if reject.Load() {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":4}`)
+			return
+		}
+		acceptedMu.Lock()
+		accepted = append(accepted, eventUsers([]hecRequest{{events: events}})...)
+		acceptedMu.Unlock()
+		_, _ = io.WriteString(w, `{"code":0}`)
+	}))
+	t.Cleanup(server.Close)
+	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: server.URL, Token: "token"}, t.TempDir(), 512)
+	forwarder.host = "test-host"
+	firstUser, secondUser := strings.Repeat("a", 200), strings.Repeat("b", 200)
+	writeRecord(t, forwarder, `{"user":"`+firstUser+`"}`)
+	forwarder.start()
+
+	record := []byte(`{"user":"` + secondUser + `"}`)
+	written := make(chan error, 1)
+	go func() {
+		n, err := forwarder.Write(record)
+		if err == nil && n != len(record) {
+			t.Errorf("resumed Write persisted %d bytes, want %d", n, len(record))
+		}
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		t.Fatalf("full-spool Write returned while HEC was still rejecting: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	reject.Store(false)
+	select {
+	case err := <-written:
+		if err != nil {
+			t.Fatalf("writer failed after confirmed delivery released capacity: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("confirmed HEC delivery did not release the blocked writer")
+	}
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	acceptedMu.Lock()
+	defer acceptedMu.Unlock()
+	if len(accepted) != 2 || accepted[0] != firstUser || accepted[1] != secondUser {
+		t.Fatalf("accepted events=%q, want both persisted records in order", accepted)
+	}
+}
+
+func TestConfigureBeginShutdownUnblocksFullSpoolWriter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	closer, err := Configure(Options{
+		SpoolDir:      t.TempDir(),
+		SpoolMaxBytes: 512,
+		HEC:           HECConfig{Endpoint: server.URL, Token: "token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	sink := closer.(*configuredSink)
+	sink.forwarder.host = "test-host"
+	sink.forwarder.shutdownTimeout = 30 * time.Millisecond
+	record := `{"user":"` + strings.Repeat("a", 200) + `"}`
+	writeRecord(t, sink.forwarder, record)
+	written := make(chan error, 1)
+	go func() {
+		_, err := sink.forwarder.Write([]byte(record))
+		written <- err
+	}()
+	select {
+	case err := <-written:
+		t.Fatalf("full-spool writer returned before shutdown: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	sink.BeginShutdown()
+	select {
+	case err := <-written:
+		if err == nil {
+			t.Fatal("unpersisted writer returned success during shutdown")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("BeginShutdown did not release the writer before Close")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHECForwarderRejectsRecordLargerThanCapacity(t *testing.T) {
+	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: "https://splunk.example.test", Token: "token"}, t.TempDir(), 512)
+	result := make(chan error, 1)
+	go func() {
+		_, err := forwarder.Write([]byte(`{"user":"` + strings.Repeat("a", 1024) + `"}`))
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("oversized record accepted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("oversized record blocked even though it can never fit")
 	}
 }
 

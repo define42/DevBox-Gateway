@@ -106,8 +106,13 @@ type Options struct {
 	// disabled. It is required in file-only mode and ignored in HEC-only mode.
 	FilePath string
 	// HEC forwards records exclusively to a Splunk HTTP Event Collector when
-	// its Endpoint is set. It uses a bounded in-memory queue, not a disk spool.
+	// its Endpoint is set. Records are durably spooled until HEC accepts them.
 	HEC HECConfig
+	// SpoolDir and SpoolMaxBytes configure the persistent application-audit
+	// buffer. HEC mode requires a directory and a positive byte limit; file-only
+	// mode ignores both fields.
+	SpoolDir      string
+	SpoolMaxBytes int64
 }
 
 // configuredSink owns the audit destinations and the process logging state
@@ -125,39 +130,30 @@ type configuredSink struct {
 // is set, or to options.FilePath as newline-delimited JSON otherwise.
 //
 // HEC-only mode never opens or modifies FilePath and does not fall back to it
-// during delivery failures. HEC delivery happens in the background through a
-// bounded in-memory queue; overflow and process termination can lose events.
+// during delivery failures. HEC delivery happens in the background from a
+// bounded disk spool. Writes wait for space instead of evicting pending events.
 // File-only mode requires FilePath, opens it in append mode with mode 0640 when
 // absent, and creates missing parent directories with mode 0750. Ordinary log
 // package output keeps its existing destination. Keep the returned closer open
 // while audit records can be emitted; closing it restores the previous logging
-// state and flushes the HEC queue or closes the file.
+// state and attempts a bounded HEC drain (retaining pending records) or closes
+// the file. Storage failures are reported through the operational log.
 func Configure(options Options) (io.Closer, error) {
 	var file *os.File
 	var forwarder *hecForwarder
 	var handler slog.Handler
 	if strings.TrimSpace(options.HEC.Endpoint) != "" {
 		var err error
-		if forwarder, err = newHECForwarder(options.HEC); err != nil {
+		if forwarder, err = newHECForwarder(options.HEC, options.SpoolDir, options.SpoolMaxBytes); err != nil {
 			return nil, fmt.Errorf("configure splunk hec forwarding: %w", err)
 		}
 		forwarder.start()
 		handler = slog.NewJSONHandler(forwarder, nil)
 	} else {
-		path := options.FilePath
-		if strings.TrimSpace(path) == "" {
-			return nil, fmt.Errorf("configure audit JSON file: path is empty")
-		}
-
-		directory := filepath.Dir(path)
-		if err := os.MkdirAll(directory, 0o750); err != nil {
-			return nil, fmt.Errorf("create audit log directory %q: %w", directory, err)
-		}
-
 		var err error
-		file, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302,G304 -- operator-configured path; group-readable mode allows a log collector to ingest the audit stream
+		file, err = openAuditFile(options.FilePath)
 		if err != nil {
-			return nil, fmt.Errorf("open audit log file %q: %w", path, err)
+			return nil, err
 		}
 		handler = slog.NewJSONHandler(file, nil)
 	}
@@ -177,8 +173,31 @@ func Configure(options Options) (io.Closer, error) {
 	}, nil
 }
 
-// Close restores the previous process logging state and flushes queued HEC
-// events or closes the audit file, according to the configured destination.
+func openAuditFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("configure audit JSON file: path is empty")
+	}
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		return nil, fmt.Errorf("create audit log directory %q: %w", directory, err)
+	}
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302,G304 -- operator-configured path; group-readable mode allows a log collector to ingest the audit stream
+	if err != nil {
+		return nil, fmt.Errorf("open audit log file %q: %w", path, err)
+	}
+	return file, nil
+}
+
+// BeginShutdown bounds capacity waits before the gateway drains workers that
+// may be blocked logging. Already persisted events remain safe for replay.
+func (sink *configuredSink) BeginShutdown() {
+	if sink.forwarder != nil {
+		sink.forwarder.beginShutdown()
+	}
+}
+
+// Close restores the previous process logging state and attempts delivery of
+// pending HEC events or closes the audit file. Pending HEC records remain on disk.
 func (sink *configuredSink) Close() error {
 	sink.once.Do(func() {
 		slog.SetDefault(sink.previousLogger)

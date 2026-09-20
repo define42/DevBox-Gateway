@@ -88,6 +88,14 @@ func (g *gatewayRuntime) Close() error {
 }
 
 func (g *gatewayRuntime) close() error {
+	// Tell a durable audit sink that shutdown has begun before stopping workers
+	// that may themselves emit a final audit event. The sink keeps ordinary
+	// capacity waits available for its grace period, then releases them so a full
+	// spool cannot deadlock the remainder of shutdown.
+	if sink, ok := g.auditSink.(interface{ BeginShutdown() }); ok {
+		sink.BeginShutdown()
+	}
+
 	if g.stopAutoShutdown != nil {
 		g.stopAutoShutdown()
 	}
@@ -342,7 +350,9 @@ func startGatewayRuntime(
 // ValidateSplunkHEC has already rejected partial HEC settings at boot.
 func auditOptions(settings *config.Settings) audit.Options {
 	return audit.Options{
-		FilePath: settings.Get(config.AUDIT_LOG_FILE),
+		FilePath:      settings.Get(config.AUDIT_LOG_FILE),
+		SpoolDir:      config.AuditSpoolDir(settings),
+		SpoolMaxBytes: config.AuditSpoolMaxBytes(settings),
 		HEC: audit.HECConfig{
 			Endpoint:           settings.Get(config.SPLUNK_HEC_ENDPOINT),
 			Token:              settings.Get(config.SPLUNK_HEC_TOKEN),

@@ -685,11 +685,15 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 	if s.Bool(SPLUNK_HEC_SKIP_TLS_VERIFY) {
 		t.Fatal("expected default SPLUNK_HEC_SKIP_TLS_VERIFY=false")
 	}
+	if got := s.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); got != DefaultDevBoxGatewaySpoolMaxMiB {
+		t.Fatalf("expected default %s=%d, got %d", DEVBOX_GATEWAY_SPOOL_MAX_MIB, DefaultDevBoxGatewaySpoolMaxMiB, got)
+	}
 
 	t.Setenv(SPLUNK_HEC_ENDPOINT, " https://splunk.example.test:8088 ")
 	t.Setenv(SPLUNK_HEC_TOKEN, " 11111111-2222-3333-4444-555555555555 ")
 	t.Setenv(SPLUNK_HEC_INDEX, " devbox_audit ")
 	t.Setenv(SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
+	t.Setenv(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "512")
 
 	s = NewSettings(false)
 	for key, want := range map[string]string{
@@ -707,6 +711,42 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 	// The token is a credential and must be masked in the printed settings table.
 	if !s.m[SPLUNK_HEC_TOKEN].Secret {
 		t.Fatal("expected SPLUNK_HEC_TOKEN to be registered as a secret")
+	}
+	if got := s.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); got != 512 {
+		t.Fatalf("expected %s=512 from environment, got %d", DEVBOX_GATEWAY_SPOOL_MAX_MIB, got)
+	}
+}
+
+func TestAuditSpoolSettings(t *testing.T) {
+	t.Setenv(DATA_ROOT_DIR, "/srv/devbox")
+	s := NewSettings(false)
+	if got := AuditSpoolDir(s); got != "/srv/devbox/audit-spool" {
+		t.Errorf("default AuditSpoolDir = %q, want it under DATA_ROOT_DIR", got)
+	}
+	if got := AuditSpoolMaxBytes(s); got != int64(DefaultDevBoxGatewaySpoolMaxMiB)<<20 {
+		t.Errorf("default AuditSpoolMaxBytes = %d, want %d MiB", got, DefaultDevBoxGatewaySpoolMaxMiB)
+	}
+
+	t.Setenv(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "512")
+	s = NewSettings(false)
+	if got := AuditSpoolMaxBytes(s); got != 512<<20 {
+		t.Errorf("AuditSpoolMaxBytes = %d, want 512 MiB", got)
+	}
+
+	for _, value := range []string{"0", "-1"} {
+		t.Run("nonpositive_"+value, func(t *testing.T) {
+			t.Setenv(DEVBOX_GATEWAY_SPOOL_MAX_MIB, value)
+			got := AuditSpoolMaxBytes(NewSettings(false))
+			if got != int64(DefaultDevBoxGatewaySpoolMaxMiB)<<20 {
+				t.Errorf("AuditSpoolMaxBytes with %s = %d, want the default", value, got)
+			}
+		})
+	}
+	if got := AuditSpoolDir(nil); got != filepath.Join(DefaultDataRootDir, "audit-spool") {
+		t.Errorf("AuditSpoolDir(nil) = %q, want the default data root", got)
+	}
+	if got := AuditSpoolMaxBytes(nil); got != int64(DefaultDevBoxGatewaySpoolMaxMiB)<<20 {
+		t.Errorf("AuditSpoolMaxBytes(nil) = %d, want the default", got)
 	}
 }
 

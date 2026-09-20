@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -77,7 +78,13 @@ func ValidateSplunkHEC(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}
-	return validateHECSettings(settings, SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, "audit events")
+	if err := validateHECSettings(settings, SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, "audit events"); err != nil {
+		return err
+	}
+	if mib := settings.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); mib > 0 && int64(mib) > math.MaxInt64>>20 {
+		return fmt.Errorf("%s is too large to represent as a byte limit", DEVBOX_GATEWAY_SPOOL_MAX_MIB)
+	}
+	return nil
 }
 
 // ValidateSauron requires an event output for the mandatory guest collector

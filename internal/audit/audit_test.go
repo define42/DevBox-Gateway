@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -275,6 +276,61 @@ func TestConfigureRejectsEmptyPath(t *testing.T) {
 			}
 			if slog.Default() != previousLogger || log.Writer() != previousLogWriter {
 				t.Error("failed Configure replaced a logging destination")
+			}
+		})
+	}
+}
+
+func TestConfigureFileOnlyIgnoresSpoolSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	spoolPath := filepath.Join(t.TempDir(), "unneeded-spool")
+	closer, err := Configure(Options{FilePath: path, SpoolDir: spoolPath, SpoolMaxBytes: -1})
+	if err != nil {
+		t.Fatalf("file-only audit rejected unused spool settings: %v", err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	Log(context.Background(), Event{Action: ActionUserLogin, User: "file-only"})
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(data, []byte(`"user":"file-only"`)) {
+		t.Fatalf("file-only event missing: data=%q, error=%v", data, err)
+	}
+	if _, err := os.Stat(spoolPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("file-only mode created its unused spool: %v", err)
+	}
+}
+
+func TestConfigureRejectsInvalidHECSpoolWithoutChangingLogging(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		dir      string
+		capacity int64
+	}{
+		{name: "missing spool directory", capacity: 1 << 20},
+		{name: "missing capacity", dir: t.TempDir()},
+		{name: "negative capacity", dir: t.TempDir(), capacity: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previousLogger := slog.Default()
+			previousWriter := log.Writer()
+			path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
+			closer, err := Configure(Options{
+				FilePath:      path,
+				SpoolDir:      tc.dir,
+				SpoolMaxBytes: tc.capacity,
+				HEC:           HECConfig{Endpoint: "https://splunk.example.test", Token: "token"},
+			})
+			if err == nil {
+				_ = closer.Close()
+				t.Fatal("HEC logging started without a valid persistent spool")
+			}
+			if slog.Default() != previousLogger || log.Writer() != previousWriter {
+				t.Error("failed configuration changed the process logging destinations")
+			}
+			if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("failed HEC setup created a fallback audit directory: %v", err)
 			}
 		})
 	}

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -201,6 +203,20 @@ func TestValidateSplunkHEC(t *testing.T) {
 func TestValidateSplunkHECRejectsNilSettings(t *testing.T) {
 	if err := ValidateSplunkHEC(nil); err == nil {
 		t.Fatal("expected nil settings to be rejected")
+	}
+}
+
+func TestValidateSplunkHECRejectsSpoolByteOverflow(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("an int cannot hold a MiB value large enough to overflow int64 bytes")
+	}
+	t.Setenv(SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
+	t.Setenv(SPLUNK_HEC_TOKEN, "token")
+	t.Setenv(DEVBOX_GATEWAY_SPOOL_MAX_MIB, strconv.FormatInt((math.MaxInt64>>20)+1, 10))
+
+	err := ValidateSplunkHEC(NewSettings(false))
+	if err == nil || !strings.Contains(err.Error(), DEVBOX_GATEWAY_SPOOL_MAX_MIB) {
+		t.Fatalf("ValidateSplunkHEC() error = %v, want it to name %s", err, DEVBOX_GATEWAY_SPOOL_MAX_MIB)
 	}
 }
 

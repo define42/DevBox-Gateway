@@ -123,7 +123,8 @@ Requirements on the host:
   gateway creates its dedicated `devbox` NAT network and `virbr-devbox` bridge
   during startup; no pre-existing bridge or macvlan is needed.
 - Write access to `/data/` on the host (used for ACME data, VM images, serial /
-  VNC sockets, the SauronAgent guest log and its Splunk forwarding spool).
+  VNC sockets, the application-audit HEC spool, and the separate SauronAgent
+  guest log and forwarding spool).
 - At least one QCOW2 base disk image in `/data/baseimages`, named with an
   `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
   valid QCOW2 image — see
@@ -148,9 +149,10 @@ This stops any previous stack, rebuilds the images, and starts:
   [SauronAgent guest events](#sauronagent-guest-events)). Starting it accepts
   the [Splunk General Terms](https://www.splunk.com/en_us/legal/splunk-general-terms.html).
 
-The first Splunk start takes a few minutes; the gateway queues and retries
-application audit events in memory, up to its 10,000-event queue limit. This
-Compose setup uses HEC-only application logging and does not write
+The first Splunk start takes a few minutes. Application audit events are fsynced
+to `/data/audit-spool` before the delivery sink accepts them, then retried in the
+background and replayed after a gateway restart. This Compose setup reserves up
+to 10 GiB for that spool, uses HEC-only application logging, and does not write
 `/data/logs/audit.jsonl`. Guest events keep their separate local log and spool.
 Then open Splunk Web at
 `http://localhost:8000` (user `admin`, password `devbox-splunk`) and search
@@ -183,6 +185,7 @@ application audit file at runtime only when `SPLUNK_HEC_ENDPOINT` is unset:
 | `/usr/lib/systemd/system/devbox-gateway.service` | systemd unit (runs as root, binds `:443`).           |
 | `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests), marked `%config(noreplace)` so your edits survive upgrades. |
 | `/var/log/devbox-gateway/audit.jsonl`             | Default JSON Lines application audit log, created when HEC forwarding is disabled. |
+| `/var/lib/libvirt/devbox-gateway/audit-spool`     | Application-audit HEC delivery spool, created under `DATA_ROOT_DIR` when HEC forwarding is enabled. |
 
 It requires `libvirt-libs`, `ca-certificates`, `libvirt-daemon-kvm`,
 `libvirt-daemon-driver-nwfilter`, and `qemu-kvm`. The nwfilter driver supplies
@@ -458,6 +461,7 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
+| `DEVBOX_GATEWAY_SPOOL_MAX_MIB` | `10240`                                                                                                    | Maximum disk space for the application-audit HEC delivery spool at `<DATA_ROOT_DIR>/audit-spool`. `<=0` → the default. Pending events are preserved at capacity and new audit writes wait for space. |
 | `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
@@ -544,6 +548,7 @@ audit events directly to a Splunk HTTP Event Collector. Set the endpoint and tok
 SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
 SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
 SPLUNK_HEC_INDEX=devbox_audit
+DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
 ```
 
 - HEC is the sole application audit destination. `AUDIT_LOG_FILE` is ignored,
@@ -555,22 +560,35 @@ SPLUNK_HEC_INDEX=devbox_audit
   must be allowed to write to `SPLUNK_HEC_INDEX`, and must have indexer
   acknowledgement disabled (otherwise Splunk rejects every request with
   "Data channel is missing").
+- Before the delivery sink accepts an event, it appends and fsyncs it under
+  `<DATA_ROOT_DIR>/audit-spool`. A background worker sends persisted events in
+  order and resumes from the spool after a gateway or Splunk restart. Pending
+  events do not expire merely because an outage is long.
 - Configure the collector's direct URL: redirects are not followed. Delivery
   succeeds only when a `2xx` response contains valid HEC JSON with `code: 0`.
-  Redirects, incomplete or invalid responses, and nonzero codes in `2xx`
-  responses are retried without discarding the batch.
-- Delivery happens in the background and never slows down or fails a user
-  action. Events are batched, and network errors, `5xx`, `429`, `401`, and
-  `403` responses are retried with backoff (up to 30s between attempts). Other
-  `4xx` responses drop that batch. Up to 10,000 events are held in memory while
-  the collector is unavailable; beyond that, new events are dropped. Drops and
-  failures are reported in the process log (`journalctl` / Docker logs).
-- This best-effort delivery cannot guarantee retention of every application
-  audit event. The queue is volatile: overflow, process termination,
-  non-retryable responses or an exhausted shutdown flush can lose events.
-  There is no application disk spool, file fallback or replay of old audit
-  files. SauronAgent guest logging and its forwarding spool are separate.
-- On shutdown the gateway waits up to 5s for queued events to be delivered.
+  Network failures, redirects, `400`, `403`, every other non-success status,
+  invalid response bodies, and nonzero HEC codes retain the pending event and
+  retry with backoff; no HEC rejection is treated as permission to drop it.
+- Delivery is at-least-once. A crash after Splunk accepts an event but before
+  its local checkpoint advances can cause that event to be sent twice.
+- `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool (10 GiB by default). Existing
+  pending events remain intact at capacity; new application audit writes wait
+  for delivery to free space instead of being discarded. That backpressure can
+  delay the user action emitting the audit event during a sufficiently long
+  outage. Size a 48-hour objective from the measured encoded event rate:
+  `bytes/second × 172800 × operational headroom`, converted to MiB. The default
+  size is a byte limit, not a 48-hour guarantee.
+- HEC remains the sole application audit output: acknowledged spool records are
+  reclaimed, and the spool is not a permanent `audit.jsonl` copy or file
+  fallback. SauronAgent guest logging and `SAURON_SPOOL_*` are separate.
+- Disk failures, a single event too large for the spool, or writes attempted
+  while the sink is closing are surfaced in process diagnostics. No design can
+  guarantee lossless retention when an event cannot be persisted; monitor these
+  errors and spool capacity through `journalctl` or Docker logs.
+- On shutdown, blocked capacity waits get a five-second grace period so final
+  worker events can use space freed by delivery. After that deadline,
+  not-yet-persisted writes return an operational error so shutdown can finish;
+  records already in the spool remain available for replay after restart.
 - The gateway refuses to start when `SPLUNK_HEC_ENDPOINT` is set without
   `SPLUNK_HEC_TOKEN`, or when a token or index is set without an endpoint.
   Invalid HEC configuration fails startup; it does not select file logging.
