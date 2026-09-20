@@ -122,6 +122,60 @@ func TestFailedGapReportSurvivesReconnect(t *testing.T) {
 	assertOneDurableGap(t, h, 2, 2)
 }
 
+func TestRecoveredEventFailureRemainsReplayableAcrossReconnect(t *testing.T) {
+	h := newHarness(t, nil)
+	h.sink.failInternal(typeStreamGap, true)
+	first := h.dial(102, true)
+	first.handshake(&protocol.Hello{AgentVersion: "test", BootID: "boot-a"})
+	first.sendEvent(1, "boot-a")
+	if ack := first.expectAck(); ack != 1 {
+		t.Fatalf("initial ACK = %d, want 1", ack)
+	}
+
+	// Sequence 3 reaches the event sink, but the report for the apparent gap at
+	// sequence 2 does not. Sequence 2 then arrives, proving that it was delayed
+	// rather than lost, but its own sink write fails.
+	first.sendEvent(3, "boot-a")
+	first.ping()
+	h.sink.failInternal(typeStreamGap, false)
+	h.sink.fail(2, true)
+	first.sendEvent(2, "boot-a")
+	first.ping()
+	if resume := h.srv.dedup.ResumeFrom(testStream); resume != 1 {
+		t.Fatalf("ResumeFrom after failed recovery = %d, want 1", resume)
+	}
+	first.close()
+
+	second := h.dial(102, true)
+	ready := second.handshake(&protocol.Hello{
+		AgentVersion:  "test",
+		BootID:        "boot-a",
+		FirstSequence: 2,
+	})
+	if ready.ResumeFrom != 1 {
+		t.Fatalf("READY.ResumeFrom = %d, want 1 while sequence 2 remains replayable", ready.ResumeFrom)
+	}
+
+	// Once output recovers, the guest's retained copy must still reach the sink.
+	h.sink.fail(2, false)
+	second.sendEvent(2, "boot-a")
+	if ack := second.expectAck(); ack != 3 {
+		t.Fatalf("ACK after recovered write = %d, want 3", ack)
+	}
+	var sequences []uint64
+	for _, envelope := range h.sink.events() {
+		sequences = append(sequences, envelope.Event.Sequence)
+	}
+	if len(sequences) != 3 || sequences[0] != 1 || sequences[1] != 3 || sequences[2] != 2 {
+		t.Fatalf("written sequences = %v, want [1 3 2]", sequences)
+	}
+	for _, envelope := range h.sink.internals() {
+		if envelope.Event.Type == typeStreamGap {
+			t.Fatalf("recovered sequence 2 was reported missing: %+v", envelope.Event.Fields)
+		}
+	}
+}
+
 func TestFailedHelloGapReportWithZeroResumeRetried(t *testing.T) {
 	h := newHarness(t, nil)
 	h.sink.fail(1, true)

@@ -47,6 +47,76 @@ func TestDedupGapRetryDoesNotCoverEarlierFailedEvent(t *testing.T) {
 	}
 }
 
+func TestDedupRecoveredArrivalIsExcludedFromPendingGap(t *testing.T) {
+	tests := []struct {
+		name         string
+		high         uint64
+		arrival      uint64
+		wantGap      bool
+		wantGapFirst uint64
+		wantGapLast  uint64
+	}{
+		{name: "only missing sequence", high: 3, arrival: 2},
+		{name: "first in range", high: 5, arrival: 2, wantGap: true, wantGapFirst: 3, wantGapLast: 4},
+		{name: "middle of range", high: 5, arrival: 3, wantGap: true, wantGapFirst: 2, wantGapLast: 2},
+		{name: "last in range", high: 5, arrival: 4, wantGap: true, wantGapFirst: 2, wantGapLast: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := newDedup(1024, 16)
+			accept(t, d, testStream, 1)
+			d.Check(testStream, tt.high)
+			d.Commit(testStream, tt.high)
+
+			result := d.Check(testStream, tt.arrival)
+			if result.Gap != tt.wantGap || result.GapFirst != tt.wantGapFirst || result.GapLast != tt.wantGapLast {
+				t.Fatalf("recovered arrival = %+v, want gap=%t %d..%d",
+					result, tt.wantGap, tt.wantGapFirst, tt.wantGapLast)
+			}
+			if result.Gap {
+				d.NoteMissing(testStream, result.GapFirst, result.GapLast)
+			}
+			if resume := d.ResumeFrom(testStream); resume >= tt.arrival {
+				t.Fatalf("ResumeFrom = %d, must remain below unwritten arrival %d", resume, tt.arrival)
+			}
+		})
+	}
+}
+
+func TestDedupRecoveredArrivalFailsClosedAtPendingRangeLimit(t *testing.T) {
+	d := newDedup(1024, 16)
+	accept(t, d, testStream, 1)
+	d.Check(testStream, 5) // The first pending range is 2..4.
+	d.Commit(testStream, 5)
+	for sequence := uint64(7); sequence < 7+2*(maxMissingRanges-1); sequence += 2 {
+		result := d.Check(testStream, sequence)
+		if result.Blocked {
+			t.Fatalf("building pending range before the limit at sequence %d: %+v", sequence, result)
+		}
+		d.Commit(testStream, sequence)
+	}
+
+	// Splitting 2..4 around the recovered sequence 3 would create a 65th
+	// range. Refuse the arrival and report different evidence instead of either
+	// exceeding the bound or calling sequence 3 missing.
+	blocked := d.Check(testStream, 3)
+	if !blocked.Blocked || !blocked.Gap {
+		t.Fatalf("arrival at pending range limit = %+v, want a blocked safe gap", blocked)
+	}
+	if blocked.GapFirst <= 3 && 3 <= blocked.GapLast {
+		t.Fatalf("blocked gap %d..%d covers arriving sequence 3", blocked.GapFirst, blocked.GapLast)
+	}
+	d.NoteMissing(testStream, blocked.GapFirst, blocked.GapLast)
+
+	retry := d.Check(testStream, 3)
+	if retry.Blocked {
+		t.Fatalf("accepted gap evidence did not make room for retry: %+v", retry)
+	}
+	if retry.Gap && retry.GapFirst <= 3 && 3 <= retry.GapLast {
+		t.Fatalf("retry gap %d..%d covers arriving sequence 3", retry.GapFirst, retry.GapLast)
+	}
+}
+
 func TestDedupHelloGapAfterFirstWriteFailure(t *testing.T) {
 	d := newDedup(1024, 16)
 	d.Check(testStream, 1) // No successful write, so ResumeFrom is still zero.

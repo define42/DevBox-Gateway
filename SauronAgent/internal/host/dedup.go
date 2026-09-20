@@ -165,6 +165,18 @@ func (d *dedup) Check(k streamKey, seq uint64) dedupResult {
 		s.written = seq - 1
 	}
 
+	// A pending gap may have been detected before this sequence arrived. Remove
+	// the arrival from that evidence before returning it to a caller: reporting
+	// the sequence missing could advance the watermark past an event whose sink
+	// write is still about to happen. If splitting a range would exceed the
+	// evidence bound, refuse the arrival and offer a different, safe range for
+	// reporting; the guest retains the event and retries it later.
+	if !s.excludePending(seq) {
+		r = s.pendingGapExcluding(seq)
+		r.Blocked = true
+		return r
+	}
+
 	// A sequence more than one above the highest ever received means events are
 	// missing. The first sequence on a brand-new stream is not a gap: the
 	// collector simply started after the guest did.
@@ -360,6 +372,59 @@ func (s *dedupStream) pendingGap() dedupResult {
 	}
 	gap := s.pending[0]
 	return dedupResult{Gap: true, GapFirst: gap.first, GapLast: gap.last}
+}
+
+// excludePending removes an arriving sequence from retained gap evidence. The
+// sequence is not accounted for yet -- Commit still waits for the sink write --
+// but it is no longer missing, and the watermark must remain behind it if that
+// write fails.
+func (s *dedupStream) excludePending(seq uint64) bool {
+	for i, gap := range s.pending {
+		if seq < gap.first {
+			return true
+		}
+		if seq > gap.last {
+			continue
+		}
+
+		switch {
+		case gap.first == gap.last:
+			s.pending = slices.Delete(s.pending, i, i+1)
+		case seq == gap.first:
+			s.pending[i].first++
+		case seq == gap.last:
+			s.pending[i].last--
+		default:
+			if len(s.pending) >= maxMissingRanges {
+				return false
+			}
+			s.pending[i].last = seq - 1
+			s.pending = slices.Insert(s.pending, i+1, seqRange{first: seq + 1, last: gap.last})
+		}
+		return true
+	}
+	return true
+}
+
+// pendingGapExcluding returns evidence that cannot cover seq. It is used only
+// when excludePending cannot split a range without exceeding the bound. A full
+// different range is preferred because accepting its report frees capacity; a
+// portion of the containing range is the fail-safe fallback.
+func (s *dedupStream) pendingGapExcluding(seq uint64) dedupResult {
+	for _, gap := range s.pending {
+		if seq < gap.first || seq > gap.last {
+			return dedupResult{Gap: true, GapFirst: gap.first, GapLast: gap.last}
+		}
+	}
+	for _, gap := range s.pending {
+		if gap.first < seq && seq <= gap.last {
+			return dedupResult{Gap: true, GapFirst: gap.first, GapLast: seq - 1}
+		}
+		if gap.first <= seq && seq < gap.last {
+			return dedupResult{Gap: true, GapFirst: seq + 1, GapLast: gap.last}
+		}
+	}
+	return dedupResult{}
 }
 
 // queueReplayMissing excludes events already held out of order and losses
