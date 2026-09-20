@@ -285,10 +285,14 @@ func startupHint(cfg config.Agent, err error) string {
 	if !errors.Is(err, fs.ErrPermission) {
 		return ""
 	}
+	if strings.Contains(err.Error(), "CAP_DAC_READ_SEARCH") {
+		return "audit path discovery needs CAP_DAC_READ_SEARCH to traverse private home directories. " +
+			"Use the shipped sauronagent.service, which grants it and uses ProtectHome=read-only"
+	}
 	if strings.Contains(err.Error(), "CAP_AUDIT_CONTROL") {
 		return "kernel audit rule setup needs CAP_AUDIT_CONTROL. The shipped sauronagent.service " +
-			"grants CAP_AUDIT_READ and CAP_AUDIT_CONTROL through AmbientCapabilities and " +
-			"CapabilityBoundingSet; run the agent through that unit or grant both capabilities"
+			"grants CAP_AUDIT_READ, CAP_AUDIT_CONTROL and CAP_DAC_READ_SEARCH through AmbientCapabilities and " +
+			"CapabilityBoundingSet; run the agent through that unit or grant these capabilities"
 	}
 	if strings.Contains(err.Error(), "CAP_AUDIT_READ") {
 		return "the kernel refused the audit socket. Grant CAP_AUDIT_READ: the shipped unit " +
@@ -298,7 +302,7 @@ func startupHint(cfg config.Agent, err error) string {
 			"capability outside the bounding set grants nothing. Do not add PrivateUsers=: inside a " +
 			"user namespace CAP_AUDIT_READ does not cover the initial namespace the kernel checks, " +
 			"and the agent would start and receive nothing. Running the binary by hand needs root, " +
-			"or setcap cap_audit_read,cap_audit_control+ep on it for the default managed policy"
+			"or setcap cap_audit_read,cap_audit_control,cap_dac_read_search+ep on it for the default managed policy"
 	}
 	if cfg.Spool.Enabled {
 		return fmt.Sprintf("a path the agent needs was refused. The spool is %s: the shipped unit "+

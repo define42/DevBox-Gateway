@@ -319,9 +319,9 @@ creates the users and directories (`systemd-sysusers`, `systemd-tmpfiles`) but
 enables and starts **neither** unit: only you know whether a machine is a guest
 or the hypervisor. Upgrades restart whichever unit is running; removal stops and
 disables both but never deletes the agent spool or the collector's output.
-The guest agent enables kernel auditing and installs its managed
-process-execution and identity/credential file rules when it starts. No audit
-rules file, `auditd`, or audit tools are needed.
+The guest agent enables kernel auditing and installs its built-in execution,
+privilege, configuration, persistence, and system-change rules when it starts.
+No audit rules file, `auditd`, or audit tools are needed.
 
 On a DevBox Gateway host the gateway itself is the collector: set
 `SAURON_ENABLE=true` (see [SauronAgent guest events](#sauronagent-guest-events))
@@ -339,15 +339,18 @@ sudo dnf install ./sauronagent-<version>-1.x86_64.rpm    # or: sudo apt install 
 sudo systemctl enable --now sauronagent
 ```
 
-Starting the agent automatically applies its managed baseline: `execve` and
-`execveat` auditing (including 64-bit and 32-bit execution on x86_64) plus the
-five identity/credential file watches. Commands such as `nmap` produce
-execution events, while account database writes produce file events. The agent
-checks and applies the baseline on every start, including after reboot. It
-preserves unrelated rules and reports a startup error if an immutable or
-conflicting policy prevents setup. See the
+Starting the agent automatically applies its built-in audit baseline, including
+execution, access rights, privilege changes, identity/credential files,
+security configuration, persistence, kernel modules, network configuration,
+time changes, and mounts. It discovers existing local users' `.ssh` directories
+at startup, including root's; restart after adding a user or SSH directory.
+Commands such as `nmap` produce execution events, while account database writes
+produce file events. The agent checks and applies the baseline on every start,
+including after reboot. It preserves unrelated rules, reports unavailable
+optional paths, and fails startup if an immutable or conflicting policy prevents
+setup. See the
 [SauronAgent deployment guide](SauronAgent/docs/deployment.md#guest-audit-rules)
-for the exact paths and keys, policy-conflict handling, and broader coverage.
+for the complete paths and keys, discovery behavior, and policy-conflict handling.
 
 To remove it: `sudo apt remove sauronagent` or `sudo dnf remove sauronagent`.
 Package removal leaves the guest spool intact.

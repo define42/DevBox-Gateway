@@ -22,8 +22,8 @@ func TestEnsureManagedRulesInstallsAndReusesPolicy(t *testing.T) {
 	if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
 		t.Fatal(err)
 	}
-	if kernel.enabled != 1 || kernel.added != 7 || kernel.sets != 1 {
-		t.Fatalf("enabled=%d added=%d sets=%d; want 1, 7, 1", kernel.enabled, kernel.added, kernel.sets)
+	if kernel.enabled != 1 || kernel.added != len(wanted) || kernel.sets != 1 {
+		t.Fatalf("enabled=%d added=%d sets=%d; want 1, %d, 1", kernel.enabled, kernel.added, kernel.sets, len(wanted))
 	}
 	if kernel.changedOtherStatus {
 		t.Fatal("setup changed status fields other than AUDIT_STATUS_ENABLED")
@@ -36,7 +36,7 @@ func TestEnsureManagedRulesInstallsAndReusesPolicy(t *testing.T) {
 	if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
 		t.Fatal(err)
 	}
-	if kernel.added != 7 || kernel.sets != 1 {
+	if kernel.added != len(wanted) || kernel.sets != 1 {
 		t.Fatalf("restart changed policy: added=%d sets=%d", kernel.added, kernel.sets)
 	}
 }
@@ -55,10 +55,10 @@ func TestEnsureManagedRulesExistingPolicy(t *testing.T) {
 		wantAdds int
 		wantErr  string
 	}{
-		{name: "already enabled", enabled: 1, wantAdds: 7},
-		{name: "one architecture covered", enabled: 1, rules: wanted[:1], wantAdds: 6},
-		{name: "user-limited coverage is insufficient", enabled: 1, rules: []auditRule{limited}, wantAdds: 7},
-		{name: "immutable with coverage", enabled: 2, rules: wanted},
+		{name: "already enabled", enabled: 1, wantAdds: len(wanted)},
+		{name: "one architecture covered", enabled: 1, rules: wanted[:1], wantAdds: len(wanted)},
+		{name: "user-limited coverage is insufficient", enabled: 1, rules: []auditRule{limited}, wantAdds: len(wanted)},
+		{name: "immutable with coverage", enabled: 2, rules: orderedManagedRules(wanted)},
 		{name: "immutable missing rules", enabled: 2, wantErr: "immutable"},
 		{name: "immutable missing one watch", enabled: 2, rules: wanted[:len(wanted)-1], wantErr: "immutable"},
 		{name: "never task blocks all changes", rules: []auditRule{neverTask}, wantErr: "never,task"},
@@ -81,6 +81,134 @@ func TestEnsureManagedRulesExistingPolicy(t *testing.T) {
 				if !slices.Contains(kernel.rules, existing) {
 					t.Fatal("existing policy was removed or changed")
 				}
+			}
+		})
+	}
+}
+
+func TestEnsureManagedRulesFullSecurityPolicy(t *testing.T) {
+	t.Parallel()
+	wanted, err := managedRules("amd64", 59, 322)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range securityPathSpecs() {
+		wanted = append(wanted, pathWatchRule(spec.path, spec.key, spec.permissions, spec.directory))
+	}
+	wanted = append(wanted, pathWatchRule("/home/alice/.ssh", "ssh_keys", unix.AUDIT_PERM_WRITE|unix.AUDIT_PERM_ATTR, true))
+	ordered := orderedManagedRules(wanted)
+	old, err := executionRules("amd64", 59, 322)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old = append(identityCredentialWatchRules(), old...)
+	unrelated := fileWatchRule("/opt/company/settings", "company_config")
+	for _, tc := range []struct {
+		name    string
+		rules   []auditRule
+		enabled uint32
+	}{
+		{name: "fresh installation", enabled: 1},
+		{name: "upgrade execution and identity baseline", enabled: 1, rules: old},
+		{name: "reorder existing complete policy", enabled: 1, rules: wanted},
+		{name: "immutable complete policy", enabled: 2, rules: ordered},
+		{name: "newly discovered directory", enabled: 1, rules: orderedManagedRules(wanted[:len(wanted)-1])},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			kernel := &fakeAuditKernel{enabled: tc.enabled, rules: append(slices.Clone(tc.rules), unrelated)}
+			client := &auditControlClient{transport: kernel}
+			if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
+				t.Fatal(err)
+			}
+			if len(kernel.rules) != len(wanted)+1 || !slices.Contains(kernel.rules, unrelated) {
+				t.Fatal("full policy was not installed exactly once while preserving unrelated rules")
+			}
+			for i, expected := range ordered {
+				if !sameManagedRule(kernel.rules[i], expected) {
+					t.Fatalf("priority %d: got %s, want %s", i, managedRuleDescription(kernel.rules[i]), managedRuleDescription(expected))
+				}
+			}
+			added, deleted := kernel.added, kernel.deleted
+			if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
+				t.Fatal(err)
+			}
+			if kernel.added != added || kernel.deleted != deleted {
+				t.Fatal("restart changed the verified policy")
+			}
+		})
+	}
+}
+
+func TestManagedRuleOrderingPreservesSpecificKeys(t *testing.T) {
+	t.Parallel()
+	permissions, err := keyedSyscallRule(unix.AUDIT_ARCH_X86_64, "permission_change", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution, err := executionRules("amd64", 59, 322)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := append(execution, permissions,
+		pathWatchRule("/etc/security", "authentication_config", unix.AUDIT_PERM_WRITE|unix.AUDIT_PERM_ATTR, true),
+		fileWatchRule("/etc/security/opasswd", credentialRuleKey),
+		pathWatchRule("/usr/bin/sudo", "privilege_use", unix.AUDIT_PERM_EXEC, false))
+	ordered := orderedManagedRules(wanted)
+	if err := checkManagedRuleKeyOrdering(ordered, ordered); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkManagedRuleKeyOrdering(wanted, ordered); !isRuleOrderingError(err) {
+		t.Fatalf("unsafe priority accepted: %v", err)
+	}
+	wrongKey := permissions
+	wrongKey.buffer = "other"
+	wrongKey.BufferLength, wrongKey.Values[1] = uint32(len(wrongKey.buffer)), uint32(len(wrongKey.buffer))
+	if managedRuleCovered([]auditRule{wrongKey}, permissions) {
+		t.Fatal("generic syscall coverage satisfied a required security key")
+	}
+}
+
+func TestManagedRuleReorderingKeepsOtherRulesOnFailure(t *testing.T) {
+	t.Parallel()
+	wanted, err := managedRules("amd64", 59, 322)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kernel := &fakeAuditKernel{
+		enabled: 1, rules: slices.Clone(wanted),
+		failType: unix.AUDIT_ADD_RULE, failCode: unix.EPERM,
+	}
+	err = ensureManagedRules(t.Context(), &auditControlClient{transport: kernel}, wanted)
+	if err == nil || !strings.Contains(err.Error(), "installing") {
+		t.Fatalf("error=%v, want installation failure", err)
+	}
+	if kernel.deleted != 1 || len(kernel.rules) != len(wanted)-1 {
+		t.Fatalf("reordering removed the rest of the baseline: deleted=%d remaining=%d", kernel.deleted, len(kernel.rules))
+	}
+}
+
+func TestManagedRulesRejectSecurityRecordExclusions(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		typeID uint32
+	}{
+		{name: "AVC", typeID: unix.AUDIT_AVC},
+		{name: "AVC_PATH", typeID: unix.AUDIT_AVC_PATH},
+		{name: "SECCOMP", typeID: unix.AUDIT_SECCOMP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rule := auditRule{kernelRule: kernelRule{Flags: unix.AUDIT_FILTER_EXCLUDE, Action: unix.AUDIT_NEVER, FieldCount: 1}}
+			rule.Fields[0], rule.Values[0], rule.FieldFlags[0] = unix.AUDIT_MSGTYPE, tc.typeID, unix.AUDIT_EQUAL
+			kernel := &fakeAuditKernel{enabled: 1, rules: []auditRule{rule}}
+			wanted, err := managedRules("amd64", 59, 322)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = ensureManagedRules(t.Context(), &auditControlClient{transport: kernel}, wanted)
+			if err == nil || !strings.Contains(err.Error(), "suppress SELinux AVC or seccomp") || kernel.added != 0 || kernel.deleted != 0 {
+				t.Fatalf("excluded security record: error=%v adds=%d deletes=%d", err, kernel.added, kernel.deleted)
 			}
 		})
 	}
@@ -120,8 +248,8 @@ func TestEnsureManagedRulesConcurrentInstallation(t *testing.T) {
 	if err := ensureManagedRules(t.Context(), &auditControlClient{transport: kernel}, wanted); err != nil {
 		t.Fatal(err)
 	}
-	if len(kernel.rules) != 6 {
-		t.Fatalf("rules=%d, want 6", len(kernel.rules))
+	if len(kernel.rules) != len(wanted) {
+		t.Fatalf("rules=%d, want %d", len(kernel.rules), len(wanted))
 	}
 }
 
@@ -146,21 +274,22 @@ func TestEnsureManagedRulesPrependsWatchesAheadOfExistingExitRule(t *testing.T) 
 	if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
 		t.Fatal(err)
 	}
-	if kernel.added != 5 {
-		t.Fatalf("added=%d, want five missing watches; generic rule already covers execution", kernel.added)
+	wantAdds := len(wanted) - 1 // The generic external rule covers execution only.
+	if kernel.added != wantAdds {
+		t.Fatalf("added=%d, want %d; generic rule already covers execution", kernel.added, wantAdds)
 	}
 	for i, rule := range kernel.rules[:5] {
 		if !hasRuleField(rule, unix.AUDIT_WATCH) || rule.Flags != unix.AUDIT_FILTER_EXIT {
 			t.Fatalf("rule %d was not a listed high-priority watch: %+v", i, rule)
 		}
 	}
-	if kernel.rules[5] != generic {
+	if kernel.rules[wantAdds] != generic {
 		t.Fatal("existing exit rule was not preserved behind the managed watches")
 	}
 	if err := ensureManagedRules(t.Context(), client, wanted); err != nil {
 		t.Fatal(err)
 	}
-	if kernel.added != 5 {
+	if kernel.added != wantAdds {
 		t.Fatalf("restart duplicated rules: added=%d", kernel.added)
 	}
 }
@@ -607,6 +736,7 @@ type fakeAuditKernel struct {
 	rules              []auditRule
 	queue              [][]byte
 	added              int
+	deleted            int
 	sets               int
 	changedOtherStatus bool
 	failType           uint16
@@ -646,7 +776,7 @@ func (k *fakeAuditKernel) send(request []byte) error {
 		}
 		k.added++
 		if !k.discardRules {
-			if hasRuleField(rule, unix.AUDIT_WATCH) {
+			if isPathRule(rule) {
 				// The kernel reserves syscall-class bits in the final mask word
 				// and normalizes them before returning AUDIT_LIST_RULES.
 				rule.Mask[len(rule.Mask)-1] &= 0x0000ffff
@@ -662,6 +792,18 @@ func (k *fakeAuditKernel) send(request []byte) error {
 		}
 		if k.addExists {
 			ack = controlACK(request, unix.EEXIST)
+		}
+	case unix.AUDIT_DEL_RULE:
+		rule, err := parseKernelRule(payload)
+		if err != nil {
+			return err
+		}
+		index := slices.IndexFunc(k.rules, func(existing auditRule) bool { return sameManagedRule(existing, rule) })
+		if index < 0 {
+			ack = controlACK(request, unix.ENOENT)
+		} else {
+			k.rules = slices.Delete(k.rules, index, index+1)
+			k.deleted++
 		}
 	case unix.AUDIT_SET:
 		k.sets++

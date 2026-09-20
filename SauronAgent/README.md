@@ -13,7 +13,7 @@ Two programs:
 
 | Program | Runs on | Needs | Does |
 |---|---|---|---|
-| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, a virtio-vsock device | configures the managed audit baseline, reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
+| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, `CAP_DAC_READ_SEARCH`, a virtio-vsock device | discovers watched paths, configures the managed audit baseline, reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
 | `sauronhost` | the hypervisor | no capabilities at all | accepts VSOCK connections, identifies each guest by its CID, enriches, writes events onward |
 
 ## Data path
@@ -143,17 +143,22 @@ into `config.DefaultAgent`: it dials `CID 2` (`VMADDR_CID_HOST`) port 9000 and
 spools to `/var/lib/sauronagent/spool`. Run `sauronagent -check-config` to
 validate and inspect those built-in settings without starting collection.
 
-On startup, the agent enables kernel auditing and ensures `execve`/`execveat`
-rules are loaded, including the 32-bit compatibility ABI on x86_64. It also
-installs write/attribute-change watches for `/etc/passwd`, `/etc/shadow`,
-`/etc/group`, `/etc/gshadow`, and `/etc/security/opasswd`. Commands such as
-`nmap` then produce process execution events, while account database changes
-produce file events. Setup uses netlink directly; no rules file, `auditd`, or
-audit tools are required. The RPM and DEB install both components without
-starting them, so enable the guest unit as shown above. Every subsequent start
-reapplies the managed baseline as needed. See
-[guest audit rules](docs/deployment.md#guest-audit-rules) for exact keys,
-conflicting-policy handling, and optional broader coverage.
+On startup, the agent enables kernel auditing and installs its built-in rules
+for execution, permissions, ownership, extended attributes, privileges, kernel
+modules, kernel replacement, hostname/time changes, and mounts. On x86_64 the
+syscall rules include the 32-bit compatibility ABI. It retains the five
+identity/credential file watches and adds configuration and persistence paths,
+escalation-tool execution, and existing local users' `.ssh` directories,
+including root's. The startup journal reports skipped paths and discovery
+counts; restart after adding a user or a directory that was absent at startup.
+
+Commands such as `nmap` produce process execution events, while account
+database changes produce file events. Setup uses netlink directly; no rules
+file, `auditd`, or audit tools are required. The RPM and DEB install both
+components without starting them, so enable the guest unit as shown above.
+Every subsequent start reapplies the managed baseline as needed. See
+[guest audit rules](docs/deployment.md#guest-audit-rules) for the complete paths,
+syscalls, keys, overlap precedence, and discovery limitations.
 
 ## The normalized event
 

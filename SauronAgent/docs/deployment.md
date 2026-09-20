@@ -11,7 +11,7 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 | Unit | `sauronhost.service` | `sauronagent.service` |
 | User | `sauronhost` | `sauronagent` |
 | State | `/var/log/sauronhost` (if the file output is enabled) | `/var/lib/sauronagent/spool` |
-| Privilege | none | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL` |
+| Privilege | none | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, `CAP_DAC_READ_SEARCH` |
 
 ### Requirements
 
@@ -20,6 +20,8 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 * `CAP_AUDIT_READ` and the audit read-log multicast group: Linux 3.16 or newer.
 * `CAP_AUDIT_CONTROL` for automatic managed-rule setup. No `auditd`
   or audit command-line tools are required.
+* `CAP_DAC_READ_SEARCH` and visible home directories for discovering existing
+  SSH directories under private user homes, including `/root`.
 * systemd 247 or newer for the units as shipped. Older systemd ignores the
   directives it does not know (`ProtectProc=`, `ProcSubset=`) with a warning;
   everything else applies.
@@ -106,14 +108,38 @@ intended guests. The startup journal entry identifies the configuration as
 
 ### Guest audit rules
 
-The built-in agent policy enables kernel auditing and ensures its managed rule
-baseline through `NETLINK_AUDIT` when it starts. The execution portion covers `execve` and
-`execveat` without filtering by user or success. On x86_64 it covers both the
-native 64-bit and 32-bit compatibility ABIs; other supported architectures use
-their native ABI. Unsupported architectures report a startup error.
+The built-in agent policy enables kernel auditing and installs its managed
+baseline through `NETLINK_AUDIT` at startup. All rules are inside the binary;
+there is no guest YAML or audit rules file to deploy. The syscall rules do not
+filter by user or success, so failed attempts and root activity are included.
+On x86_64 they cover the native 64-bit and 32-bit compatibility ABIs; other
+supported architectures use their native ABI. Unsupported architectures report
+a startup error. Path rules use architecture-independent permission matching.
 
-The baseline also contains these write/attribute-change watches. The keys are
-part of the event and distinguish identity data from password credential data:
+#### Syscall groups
+
+| Audit key | Operations |
+|---|---|
+| `exec` | `execve`, `execveat` |
+| `permission_change` | `chmod`, `fchmod`, `fchmodat` |
+| `ownership_change` | `chown`, `fchown`, `lchown`, `fchownat` |
+| `attribute_change` | `setxattr`, `lsetxattr`, `fsetxattr`, `removexattr`, `lremovexattr`, `fremovexattr` |
+| `privilege_change` | `setuid`, `setreuid`, `setresuid`, `setgid`, `setregid`, `setresgid`, `capset` |
+| `kernel_module` | `init_module`, `finit_module`, `delete_module` |
+| `kernel_replacement` | `kexec_load`, `kexec_file_load` where the ABI defines it |
+| `network_config` | `sethostname`, `setdomainname` |
+| `time_change` | `adjtimex`, `settimeofday`, `clock_settime` |
+| `filesystem_mount` | `mount`, `umount2`, `mount_setattr` where the ABI defines it |
+
+Only syscall numbers defined for each ABI are included. The agent installs
+audit masks; it never executes module-loading, kernel-replacement, clock, or
+mount operations to probe support. An accepted audit mask is not proof that
+the running kernel implements every named syscall.
+
+#### Identity and credential files
+
+The five existing write/attribute-change watches remain required. Their keys
+distinguish identity data from password credential data:
 
 ```text
 -w /etc/passwd          -p wa -k sauron_identity
@@ -128,10 +154,72 @@ not emit on reads. A watched file may be absent when the rule is installed: the
 kernel watches its existing parent and attaches the file when it is created.
 The parent path must exist and be accessible.
 
+#### Configuration, persistence, and escalation paths
+
+The following paths are discovered at startup. Existing paths receive the
+listed rule. A missing file is also watched when its parent exists, so creating
+files such as `/etc/ld.so.preload` later is covered. Missing directories or file
+parents are skipped with a startup report; the agent creates no watched files.
+Except for the four executable paths marked `x`, every entry watches writes
+and attribute changes (`wa`). A directory rule covers its descendants, subject
+to Linux Audit's mount boundaries.
+
+| Audit key | Paths |
+|---|---|
+| `privilege_config` | `/etc/sudoers`, `/etc/sudoers.d/`, `/etc/polkit-1/` |
+| `authentication_config` | `/etc/pam.d/`, `/etc/security/` |
+| `ssh_config` | `/etc/ssh/sshd_config`, `/etc/ssh/sshd_config.d/` |
+| `privilege_use` (`x`) | `/usr/bin/sudo`, `/usr/bin/su`, `/usr/bin/pkexec`, `/usr/bin/systemd-run` |
+| `persistence` | `/etc/systemd/system/`, `/usr/lib/systemd/system/`, `/etc/cron.d/`, `/var/spool/cron/`, `/etc/crontab`, `/etc/rc.local`, `/etc/ld.so.preload`, `/etc/profile.d/` |
+| `ssh_keys` | Existing `.ssh/` directories in local users' home directories, including `/root/.ssh/` |
+| `kernel_config` | `/etc/modprobe.d/`, `/etc/modules-load.d/`, `/etc/sysctl.d/`, `/etc/sysctl.conf` |
+| `boot_config` | `/etc/default/`, `/etc/grub.d/` |
+| `mac_policy` | `/etc/selinux/`, `/etc/apparmor.d/` |
+| `crypto_policy` | `/etc/crypto-policies/` |
+| `firewall` | `/etc/firewalld/`, `/etc/nftables.conf` |
+| `network_config` | `/etc/hosts`, `/etc/resolv.conf`, `/etc/NetworkManager/`, `/etc/systemd/network/` |
+| `time_change` | `/etc/localtime` |
+| `time_config` | `/etc/chrony.conf`, `/etc/chrony.d/` |
+| `filesystem_config` | `/etc/fstab` |
+
+Home discovery reads the local `/etc/passwd` file and also checks `/root`.
+It does not query LDAP/NSS or expand `/home/*/.ssh` wildcards. Users whose homes
+exist only in a remote identity service need local account entries to be
+discovered. Restart SauronAgent after creating a user, an `.ssh` directory, or
+an optional directory/file parent that was absent at startup. This discovery is
+not a continuous filesystem scan. Unexpected permissions, wrong path types,
+or discovery errors fail startup instead of silently omitting coverage.
+
+File symlinks receive watches for both the declared path and the resolved
+target so writes through paths such as `/etc/resolv.conf` and `/etc/localtime`
+are covered. Directory symlinks are watched at their resolved target. Restart
+after retargeting a symlink to discover its new target. The
+`audit managed paths discovered` startup entry reports `path_rules`,
+`ssh_directories`, `missing_ssh_directories`, `skipped_paths`, and
+`pending_files` (missing files whose existing parents permit watching their
+later creation). Check this journal entry when verifying a guest's coverage.
+
+#### Event interpretation and rule ordering
+
 Commands such as `nmap` produce execution events containing the executable and
 arguments. These events do not contain terminal output or a port-scan detection
 alert. File-watch events contain audit metadata, not file contents or a
-before/after diff. The agent preserves unrelated rules, does not lock policy,
+before/after diff. Linux Audit selects the first matching rule, so an operation
+matching several groups normally carries one key. Managed rules put specific
+file/executable watches before directory watches and broad syscall rules. For
+example, changing `/etc/security/opasswd` retains `sauron_credentials` rather
+than `authentication_config`, and executing `/usr/bin/sudo` carries
+`privilege_use` rather than `exec`. Use the syscall and path fields alongside
+the key when interpreting overlapping activity.
+
+The agent consumes kernel-emitted SELinux AVC and SECCOMP records through the
+same pipeline without adding syscall rules for them. Whether the kernel emits
+a particular record still depends on its security and logging policy. Mount
+events identify the audited operation and its available audit fields; the
+agent does not correlate udev data or add USB vendor, model, or serial numbers.
+The baseline does not audit every `connect()` call.
+
+The agent preserves unrelated rules, does not lock policy,
 and never claims the audit daemon PID. Repeated starts do not duplicate its
 rules. The rules remain active when the agent stops and are reapplied as needed
 on the next start, including after reboot.
@@ -143,12 +231,12 @@ file and no dependency on `auditd`, `auditctl`, or `augenrules`.
 
 Startup fails with an actionable error if the agent cannot establish its
 managed baseline: for example, missing `CAP_AUDIT_CONTROL`, immutable policy
-without all required rules, a missing watch parent, or a conflicting
-`never,task`/`never,exit`/`never,filesystem` rule. New managed watches are
-inserted at high priority so an older generic exit rule cannot hide the
-requested `sauron_*` key. When reusing an already-loaded watch, an earlier
-potentially matching exit rule with a different key is rejected for the same
-reason. Resolve the existing policy rather than having the agent delete
+without all required rules, a missing mandatory identity/credential watch parent, or a conflicting
+`never,task`/`never,exit`/`never,filesystem` rule. New managed rules are
+inserted at high priority so an older generic exit rule cannot hide their
+requested keys. When reusing already-loaded rules, an earlier conflicting rule
+with a different key can prevent startup. Resolve the existing policy rather
+than having the agent delete
 unrelated rules. Immutable policy changes require a reboot. After removing
 `never,task`, start a new login session or reboot so newly created processes
 receive syscall auditing.
@@ -166,33 +254,11 @@ If the kernel was booted with `audit=0` and `NETLINK_AUDIT` is unavailable,
 remove that boot argument and reboot. Runtime setup can enable an initialized
 audit subsystem, but cannot restore one disabled during kernel initialization.
 
-#### Optional broader coverage
-
-The built-in watches cover the five account and credential files listed above.
-If detection needs other configuration files or privilege activity, manage
-additional rules separately with the audit policy tools. For example, an
-existing `augenrules` deployment can load rules such as these from
-`/etc/audit/rules.d/sauron-local.rules`. If its reload clears active rules,
-restart SauronAgent afterwards to restore the managed baseline:
-
-```text
-## privilege configuration
--w /etc/sudoers    -p wa -k identity
--w /etc/sudoers.d/ -p wa -k identity
-
-## remote access configuration
--w /etc/ssh/sshd_config -p wa -k sshd
-
-## privilege escalation by ordinary users
--a always,exit -F arch=b64 -S setuid,setreuid,setresuid -F auid>=1000 -F auid!=4294967295 -k privilege
-
-## the audit configuration itself
--w /etc/audit/ -p wa -k audit-config
-```
-
-Syscall rules are not free. `-S execve` on a build server is a large volume of
-records; start with the managed baseline, then add what your detection actually
-uses.
+Syscall rules can produce substantial volume, especially on build servers and
+during package upgrades. Monitor the loss and overflow events described below.
+If another audit-policy manager clears the active rules, restart SauronAgent to
+restore its baseline. Changes to the built-in policy require rebuilding and
+deploying the agent.
 
 ## 5. Sizing
 

@@ -5,8 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -40,18 +44,24 @@ type auditRule struct {
 	buffer string
 }
 
-// EnsureManagedRules enables Linux auditing and installs the built-in process
-// execution rules and identity/credential file watches. It requires
-// CAP_AUDIT_CONTROL, uses no external tools, and never claims the audit daemon
-// PID. Existing rules are preserved and reused across restarts. The caller
-// should subscribe to audit events before calling this function.
+// EnsureManagedRules enables Linux auditing and installs the built-in security
+// policy, including discovered SSH directories. It requires CAP_AUDIT_CONTROL
+// and CAP_DAC_READ_SEARCH for private directory traversal, uses no external
+// tools, and never claims the audit daemon PID. Unrelated rules are preserved.
+// The caller should subscribe to audit events before calling this function.
 //
 // Rules remain active after the agent exits. Immutable policy is accepted only
 // when it already provides the complete managed baseline. Suppressing task or
 // exit rules produce an actionable error instead of silently starting without
 // the promised coverage.
 func EnsureManagedRules(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	return EnsureManagedRulesWithLogger(ctx, slog.Default())
+}
+
+// EnsureManagedRulesWithLogger reports discovered paths and optional components
+// absent at startup through the agent's diagnostic logger.
+func EnsureManagedRulesWithLogger(ctx context.Context, logger *slog.Logger) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -59,6 +69,19 @@ func EnsureManagedRules(ctx context.Context) error {
 	wanted, err := managedRules(runtime.GOARCH, unix.SYS_EXECVE, unix.SYS_EXECVEAT)
 	if err != nil {
 		return err
+	}
+	paths, err := discoverSecurityPathRules(ctx, systemPolicyDiscoveryFiles())
+	if err != nil {
+		return err
+	}
+	wanted = append(wanted, paths.rules...)
+	if logger != nil {
+		logger.Info("audit managed paths discovered",
+			"path_rules", len(paths.rules),
+			"ssh_directories", paths.sshDirectories,
+			"missing_ssh_directories", paths.missingSSHDirectories,
+			"skipped_paths", paths.skippedPaths,
+			"pending_files", paths.pendingFiles)
 	}
 	socket, err := openControlSocket()
 	if err != nil {
@@ -70,12 +93,13 @@ func EnsureManagedRules(ctx context.Context) error {
 }
 
 // EnsureExecutionRules is retained for callers of the original execution-only
-// API. The managed baseline now also includes identity and credential watches.
+// API. It installs the complete built-in security policy.
 func EnsureExecutionRules(ctx context.Context) error {
 	return EnsureManagedRules(ctx)
 }
 
 func ensureManagedRules(ctx context.Context, client *auditControlClient, wanted []auditRule) error {
+	wanted = orderedManagedRules(wanted)
 	enabled, err := client.enabled(ctx)
 	if err != nil {
 		return err
@@ -85,13 +109,58 @@ func ensureManagedRules(ctx context.Context, client *auditControlClient, wanted 
 		return err
 	}
 	missing, err := missingManagedRules(rules, wanted)
-	if err != nil {
+	if err != nil && !isRuleOrderingError(err) {
 		return err
 	}
-	if enabled == 2 && len(missing) != 0 {
-		return errors.New("audit: kernel audit policy is immutable and managed rules are missing; configure the execution rules and identity/credential watches before locking the policy and reboot the VM")
+	if enabled == 2 && (len(missing) != 0 || err != nil) {
+		return errors.New("audit: kernel audit policy is immutable and managed rules are missing or incorrectly ordered; configure the complete managed policy before locking the policy and reboot the VM")
 	}
-	for _, rule := range missing {
+	var replacements []auditRule
+	if len(missing) != 0 || err != nil {
+		// Rebuild only exact managed rules. Inserting a newly discovered broad
+		// directory ahead of an existing specific watch would otherwise change
+		// the key selected by the kernel's first-match semantics.
+		remaining := make([]auditRule, 0, len(rules))
+		for _, rule := range rules {
+			if !exactManagedRule(rule, wanted) {
+				remaining = append(remaining, rule)
+				continue
+			}
+			replacements = append(replacements, rule)
+		}
+		missing, err = missingManagedRules(remaining, wanted)
+		if err != nil {
+			if !isRuleOrderingError(err) {
+				return err
+			}
+			// Existing split or broader external coverage cannot be moved. Add
+			// our exact policy ahead of it without modifying the external rules.
+			missing = wanted
+		}
+		if len(missing) != 0 {
+			// An existing non-exact provider (for example split permissions)
+			// also needs a higher-priority exact rule if a broader rule is added.
+			last := slices.Index(wanted, missing[len(missing)-1])
+			missing = wanted[:last+1]
+		}
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		rule := missing[i]
+		// Move one exact rule at a time. Linux has no atomic rule-replace
+		// operation; keep the rest of the policy active during reordering.
+		for _, existing := range replacements {
+			if !sameManagedRule(existing, rule) {
+				continue
+			}
+			payload, marshalErr := marshalKernelRule(existing)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, deleteErr := client.exchange(ctx, unix.AUDIT_DEL_RULE, payload); deleteErr != nil && !errors.Is(deleteErr, unix.ENOENT) {
+				return controlError("reordering "+managedRuleDescription(rule), deleteErr)
+			}
+		}
+		rule.Flags |= unix.AUDIT_FILTER_PREPEND
 		payload, err := marshalKernelRule(rule)
 		if err != nil {
 			return err
@@ -143,6 +212,11 @@ func managedRules(goarch string, execve, execveat uint32) ([]auditRule, error) {
 	if err != nil {
 		return nil, err
 	}
+	syscalls, err := securitySyscallRules(goarch)
+	if err != nil {
+		return nil, err
+	}
+	rules = append(rules, syscalls...)
 	return append(rules, identityCredentialWatchRules()...), nil
 }
 
@@ -260,10 +334,11 @@ func parseKernelRule(payload []byte) (auditRule, error) {
 }
 
 func missingManagedRules(existing, wanted []auditRule) ([]auditRule, error) {
-	executionWanted := make([]auditRule, 0, len(wanted))
+	wanted = orderedManagedRules(wanted)
+	syscallWanted := make([]auditRule, 0, len(wanted))
 	watchWanted := make([]auditRule, 0, len(wanted))
 	for _, rule := range wanted {
-		if hasRuleField(rule, unix.AUDIT_WATCH) {
+		if isPathRule(rule) {
 			path, key, _, ok := fileWatchRuleParts(rule)
 			if !ok || path == "" || key == "" {
 				return nil, errors.New("audit: malformed managed file watch")
@@ -271,25 +346,109 @@ func missingManagedRules(existing, wanted []auditRule) ([]auditRule, error) {
 			watchWanted = append(watchWanted, rule)
 			continue
 		}
-		executionWanted = append(executionWanted, rule)
+		syscallWanted = append(syscallWanted, rule)
 	}
-
-	missing, err := missingExecutionRules(existing, executionWanted)
-	if err != nil {
+	if err := checkExecutionSuppressions(existing, syscallWanted); err != nil {
+		return nil, err
+	}
+	if err := checkSecurityRecordSuppressions(existing); err != nil {
 		return nil, err
 	}
 	if err := checkFileWatchSuppressions(existing, watchWanted); err != nil {
 		return nil, err
 	}
-	if err := checkFileWatchKeyOrdering(existing, watchWanted, executionWanted); err != nil {
+	if err := checkManagedRuleKeyOrdering(existing, wanted); err != nil {
 		return nil, err
 	}
-	for _, desired := range watchWanted {
-		if !fileWatchRulesCover(existing, desired) {
+	var missing []auditRule
+	for _, desired := range wanted {
+		if !managedRuleCovered(existing, desired) {
 			missing = append(missing, desired)
 		}
 	}
 	return missing, nil
+}
+
+// orderedManagedRules defines intentional key precedence. Specific path events
+// keep their path key even when a broad syscall rule also matches the event.
+func orderedManagedRules(wanted []auditRule) []auditRule {
+	ordered := slices.Clone(wanted)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := managedRulePriority(ordered[i]), managedRulePriority(ordered[j])
+		if left != right {
+			return left < right
+		}
+		if left == 1 {
+			leftPath, _, _, _ := fileWatchRuleParts(ordered[i])
+			rightPath, _, _, _ := fileWatchRuleParts(ordered[j])
+			return strings.Count(leftPath, "/") > strings.Count(rightPath, "/")
+		}
+		return false
+	})
+	return ordered
+}
+
+func managedRulePriority(rule auditRule) int {
+	if hasRuleField(rule, unix.AUDIT_WATCH) {
+		return 0
+	}
+	if hasRuleField(rule, unix.AUDIT_DIR) {
+		return 1
+	}
+	if key, _ := auditRuleFilterKey(rule); key == executionRuleKey {
+		return 3
+	}
+	return 2
+}
+
+func isPathRule(rule auditRule) bool {
+	return hasRuleField(rule, unix.AUDIT_WATCH) || hasRuleField(rule, unix.AUDIT_DIR)
+}
+
+func sameManagedRule(left, right auditRule) bool {
+	left.Flags &^= unix.AUDIT_FILTER_PREPEND
+	right.Flags &^= unix.AUDIT_FILTER_PREPEND
+	if isPathRule(left) && isPathRule(right) && allSyscalls(left.Mask) && allSyscalls(right.Mask) {
+		left.Mask[len(left.Mask)-1] = 0
+		right.Mask[len(right.Mask)-1] = 0
+	}
+	return left == right
+}
+
+func exactManagedRule(rule auditRule, wanted []auditRule) bool {
+	return slices.ContainsFunc(wanted, func(desired auditRule) bool { return sameManagedRule(rule, desired) })
+}
+
+func managedRuleCovered(existing []auditRule, desired auditRule) bool {
+	if isPathRule(desired) {
+		return fileWatchRulesCover(existing, desired)
+	}
+	arch, ok := ruleArchitecture(desired)
+	if !ok {
+		return false
+	}
+	desiredKey, ok := auditRuleFilterKey(desired)
+	if !ok {
+		return false
+	}
+	var covered [unix.AUDIT_BITMASK_SIZE]uint32
+	for _, rule := range existing {
+		if !unconditionalExecutionRule(rule, arch) {
+			continue
+		}
+		if key, _ := auditRuleFilterKey(rule); desiredKey != executionRuleKey && !auditKeyContains(key, desiredKey) {
+			continue
+		}
+		for i, mask := range rule.Mask {
+			covered[i] |= mask
+		}
+	}
+	for i, mask := range desired.Mask {
+		if mask&covered[i] != mask {
+			return false
+		}
+	}
+	return true
 }
 
 func missingExecutionRules(existing, wanted []auditRule) ([]auditRule, error) {
@@ -322,7 +481,7 @@ func fileWatchCovers(existing, desired auditRule) bool {
 		return false
 	}
 	desiredPath, desiredKey, desiredPerms, ok := fileWatchRuleParts(desired)
-	return ok && existingPath == desiredPath && auditKeyContains(existingKey, desiredKey) && existingPerms&desiredPerms == desiredPerms
+	return ok && existingPath == desiredPath && hasRuleField(existing, unix.AUDIT_DIR) == hasRuleField(desired, unix.AUDIT_DIR) && auditKeyContains(existingKey, desiredKey) && existingPerms&desiredPerms == desiredPerms
 }
 
 func fileWatchRulesCover(existing []auditRule, desired auditRule) bool {
@@ -333,7 +492,7 @@ func fileWatchRulesCover(existing []auditRule, desired auditRule) bool {
 	var covered uint32
 	for _, rule := range existing {
 		path, key, permissions, ok := fileWatchRuleParts(rule)
-		if ok && path == desiredPath && auditKeyContains(key, desiredKey) {
+		if ok && path == desiredPath && hasRuleField(rule, unix.AUDIT_DIR) == hasRuleField(desired, unix.AUDIT_DIR) && auditKeyContains(key, desiredKey) {
 			covered |= permissions
 		}
 	}
@@ -379,11 +538,11 @@ func fileWatchRuleParts(rule auditRule) (path, key string, permissions uint32, o
 			return "", "", 0, false
 		}
 		switch field {
-		case unix.AUDIT_WATCH:
+		case unix.AUDIT_WATCH, unix.AUDIT_DIR:
 			if havePath {
 				return "", "", 0, false
 			}
-			path, havePath = stringValue, true
+			path, havePath = filepath.Clean(stringValue), true
 		case unix.AUDIT_PERM:
 			if havePermissions {
 				return "", "", 0, false
@@ -432,9 +591,36 @@ func hasRuleField(rule auditRule, wanted uint32) bool {
 func managedRuleDescription(rule auditRule) string {
 	path, _, _, ok := fileWatchRuleParts(rule)
 	if ok {
+		if hasRuleField(rule, unix.AUDIT_DIR) {
+			return fmt.Sprintf("recursive directory watch for %q", path)
+		}
 		return fmt.Sprintf("file watch for %q", path)
 	}
-	return "process-execution rule"
+	key, _ := auditRuleFilterKey(rule)
+	return fmt.Sprintf("syscall rule with key %q", key)
+}
+
+func checkSecurityRecordSuppressions(existing []auditRule) error {
+	for _, rule := range existing {
+		if rule.Flags&^unix.AUDIT_FILTER_PREPEND != unix.AUDIT_FILTER_EXCLUDE {
+			continue
+		}
+		for _, messageType := range [...]uint32{unix.AUDIT_AVC, unix.AUDIT_AVC_PATH, unix.AUDIT_SECCOMP} {
+			mayMatch := true
+			for i := uint32(0); i < rule.FieldCount; i++ {
+				if rule.Fields[i]&^unix.AUDIT_OPERATORS != unix.AUDIT_MSGTYPE {
+					continue
+				}
+				if rule.FieldFlags[i] == unix.AUDIT_EQUAL && rule.Values[i] != messageType || rule.FieldFlags[i] == unix.AUDIT_NOT_EQUAL && rule.Values[i] == messageType {
+					mayMatch = false
+				}
+			}
+			if mayMatch {
+				return errors.New("audit: existing exclude rule can suppress SELinux AVC or seccomp records; revise the conflicting VM audit policy before starting SauronAgent")
+			}
+		}
+	}
+	return nil
 }
 
 func checkFileWatchSuppressions(existing, wanted []auditRule) error {
@@ -502,40 +688,49 @@ func nearestFilesystemType(path string) (uint32, bool) {
 	}
 }
 
-func checkFileWatchKeyOrdering(existing, wanted, executionWanted []auditRule) error {
-	permissions := [...]uint32{unix.AUDIT_PERM_WRITE, unix.AUDIT_PERM_ATTR}
+func checkManagedRuleKeyOrdering(existing, wanted []auditRule) error {
+	var executionWanted []auditRule
+	for _, rule := range wanted {
+		if key, _ := auditRuleFilterKey(rule); key == executionRuleKey && !isPathRule(rule) {
+			executionWanted = append(executionWanted, rule)
+		}
+	}
 	for _, desired := range wanted {
-		desiredPath, desiredKey, desiredPerms, ok := fileWatchRuleParts(desired)
-		// A missing rule will be inserted at the head of the exit filter and
-		// therefore outrank every existing rule. Ordering only needs checking
-		// when an existing watch is being reused.
-		if !ok || !fileWatchRulesCover(existing, desired) {
+		// Missing rules will be prepended; check the effective priority of
+		// providers that would otherwise be reused unchanged.
+		if !managedRuleCovered(existing, desired) {
 			continue
 		}
-		for _, permission := range permissions {
-			if desiredPerms&permission == 0 {
-				continue
+		if isPathRule(desired) {
+			if err := checkPathRuleKeyOrdering(existing, desired, wanted, executionWanted); err != nil {
+				return err
 			}
-			for _, rule := range existing {
-				if rule.Action != unix.AUDIT_ALWAYS || rule.Flags&^unix.AUDIT_FILTER_PREPEND != unix.AUDIT_FILTER_EXIT || !hasAnySyscall(rule.Mask) {
+			continue
+		}
+		key, _ := auditRuleFilterKey(desired)
+		if key == executionRuleKey {
+			continue // Execution coverage historically accepts any event key.
+		}
+		arch, _ := ruleArchitecture(desired)
+		for word, mask := range desired.Mask {
+			for bit := uint32(0); bit < 32; bit++ {
+				if mask&(1<<bit) == 0 {
 					continue
 				}
-				path, key, rulePerms, ok := fileWatchRuleParts(rule)
-				if ok {
-					if path != desiredPath || rulePerms&permission == 0 {
+				for _, rule := range existing {
+					if !activeExitRule(rule) || rule.Mask[word]&(1<<bit) == 0 || !mayMatchArchitecture(rule, arch) {
 						continue
 					}
-					if !auditKeyContains(key, desiredKey) {
-						return conflictingFileWatchKeyError(desiredPath, desiredKey)
+					if moreSpecificManagedRule(rule, desired, wanted) {
+						continue
 					}
-					break
-				}
-				if onlyManagedExecutionSyscalls(rule, executionWanted) {
-					continue
-				}
-				key, hasKey := auditRuleFilterKey(rule)
-				if !hasKey || !auditKeyContains(key, desiredKey) {
-					return conflictingFileWatchKeyError(desiredPath, desiredKey)
+					ruleKey, _ := auditRuleFilterKey(rule)
+					if !auditKeyContains(ruleKey, key) {
+						return ruleOrderingError{description: managedRuleDescription(desired), key: key}
+					}
+					if unconditionalExecutionRule(rule, arch) {
+						break
+					}
 				}
 			}
 		}
@@ -543,8 +738,93 @@ func checkFileWatchKeyOrdering(existing, wanted, executionWanted []auditRule) er
 	return nil
 }
 
-func conflictingFileWatchKeyError(path, key string) error {
-	return fmt.Errorf("audit: existing higher-priority exit rule can hide key %q for file watch %q; revise the conflicting VM audit policy before starting SauronAgent", key, path)
+func checkPathRuleKeyOrdering(existing []auditRule, desired auditRule, wanted, executionWanted []auditRule) error {
+	_, desiredKey, desiredPerms, _ := fileWatchRuleParts(desired)
+	for _, permission := range [...]uint32{unix.AUDIT_PERM_WRITE, unix.AUDIT_PERM_ATTR, unix.AUDIT_PERM_READ, unix.AUDIT_PERM_EXEC} {
+		if desiredPerms&permission == 0 {
+			continue
+		}
+		for _, rule := range existing {
+			if !activeExitRule(rule) {
+				continue
+			}
+			_, key, rulePerms, pathRule := fileWatchRuleParts(rule)
+			if pathRule && (!pathRulesOverlap(rule, desired) || rulePerms&permission == 0) {
+				continue
+			}
+			if moreSpecificManagedRule(rule, desired, wanted) {
+				continue
+			}
+			if !pathRule && permission != unix.AUDIT_PERM_EXEC && onlyManagedExecutionSyscalls(rule, executionWanted) {
+				continue
+			}
+			if !pathRule {
+				key, _ = auditRuleFilterKey(rule)
+			}
+			if !auditKeyContains(key, desiredKey) {
+				return ruleOrderingError{description: managedRuleDescription(desired), key: desiredKey}
+			}
+			if pathRule && fileWatchCovers(rule, pathRulePermission(desired, permission)) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func pathRulePermission(rule auditRule, permission uint32) auditRule {
+	for i := uint32(0); i < rule.FieldCount; i++ {
+		if rule.Fields[i]&^unix.AUDIT_OPERATORS == unix.AUDIT_PERM {
+			rule.Values[i] = permission
+		}
+	}
+	return rule
+}
+
+func activeExitRule(rule auditRule) bool {
+	return rule.Action == unix.AUDIT_ALWAYS && rule.Flags&^unix.AUDIT_FILTER_PREPEND == unix.AUDIT_FILTER_EXIT && hasAnySyscall(rule.Mask)
+}
+
+func pathRulesOverlap(left, right auditRule) bool {
+	leftPath, _, _, leftOK := fileWatchRuleParts(left)
+	rightPath, _, _, rightOK := fileWatchRuleParts(right)
+	if !leftOK || !rightOK {
+		return true
+	}
+	return leftPath == rightPath || hasRuleField(left, unix.AUDIT_DIR) && pathWithin(rightPath, leftPath) || hasRuleField(right, unix.AUDIT_DIR) && pathWithin(leftPath, rightPath)
+}
+
+func pathWithin(path, directory string) bool {
+	return strings.HasPrefix(path, strings.TrimSuffix(directory, "/")+"/")
+}
+
+func moreSpecificManagedRule(rule, desired auditRule, wanted []auditRule) bool {
+	if !isPathRule(rule) || !exactManagedRule(rule, wanted) {
+		return false
+	}
+	if !isPathRule(desired) {
+		return true
+	}
+	if !hasRuleField(desired, unix.AUDIT_DIR) {
+		return false
+	}
+	path, _, _, ok := fileWatchRuleParts(rule)
+	desiredPath, _, _, desiredOK := fileWatchRuleParts(desired)
+	return ok && desiredOK && pathWithin(path, desiredPath)
+}
+
+type ruleOrderingError struct {
+	description string
+	key         string
+}
+
+func (e ruleOrderingError) Error() string {
+	return fmt.Sprintf("audit: existing higher-priority exit rule can hide key %q for %s; revise the conflicting VM audit policy before starting SauronAgent", e.key, e.description)
+}
+
+func isRuleOrderingError(err error) bool {
+	var ordering ruleOrderingError
+	return errors.As(err, &ordering)
 }
 
 func hasAnySyscall(mask [unix.AUDIT_BITMASK_SIZE]uint32) bool {

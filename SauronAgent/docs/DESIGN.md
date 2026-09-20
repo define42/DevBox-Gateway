@@ -55,15 +55,22 @@ The primary event source is `NETLINK_AUDIT`. Linux provides `CAP_AUDIT_READ`
 specifically for reading the audit stream through a multicast Netlink socket.
 SauronAgent subscribes to that multicast stream without claiming the audit
 daemon PID, so it can coexist with `auditd`. At startup it also enables kernel
-auditing and ensures a managed baseline of process-execution rules and
-identity/credential file watches through netlink when it starts. This makes
-command execution and account database changes visible when SauronAgent is the
-only audit service.
+auditing and installs a built-in baseline through netlink: execution, access
+rights, privileges, identity/credential and configuration files, persistence,
+kernel modules/replacement, hostname/time changes, and mounts. Optional paths
+and local users' existing `.ssh` directories are discovered at startup; absent
+directories are reported and require a restart after creation. File watches can
+cover later creation when the parent already exists. Specific watches precede
+directory rules and broad syscall groups so overlapping events retain the more
+specific key. The complete policy and limits are in the
+[deployment guide](deployment.md#guest-audit-rules).
 
 # 5. Linux Capabilities
 
-The guest service holds `CAP_AUDIT_READ` for collection and `CAP_AUDIT_CONTROL`
-for automatic managed-rule setup. Both remain available while it runs. The
+The guest service holds `CAP_AUDIT_READ` for collection, `CAP_AUDIT_CONTROL`
+for automatic managed-rule setup, and `CAP_DAC_READ_SEARCH` for discovering
+watched paths under private homes and configuration directories. All remain
+available while it runs. The
 agent's audit policy is compiled into `config.DefaultAgent`; there is no
 guest-side configuration file or reduced-capability operating mode. The
 collector needs no capabilities, and neither service receives `CAP_SYS_ADMIN`.
@@ -72,8 +79,11 @@ collector needs no capabilities, and neither service receives `CAP_SYS_ADMIN`.
 
 Initially understand at least: AUDIT_SYSCALL, AUDIT_EXECVE, AUDIT_PATH,
 AUDIT_CWD, AUDIT_PROCTITLE, AUDIT_USER_AUTH, AUDIT_USER_LOGIN,
-AUDIT_USER_LOGOUT, AUDIT_LOGIN, AUDIT_USER_CMD, AUDIT_AVC,
-AUDIT_NETFILTER_CFG, AUDIT_CONFIG_CHANGE.
+AUDIT_USER_LOGOUT, AUDIT_LOGIN, AUDIT_USER_CMD, AUDIT_AVC, AUDIT_SECCOMP,
+AUDIT_NETFILTER_CFG, AUDIT_CONFIG_CHANGE. AVC and SECCOMP records emitted by
+the kernel are consumed without additional syscall rules; their emission still
+depends on the kernel's security and logging policy. Mount auditing does not
+include udev correlation or USB device vendor/model/serial enrichment.
 
 # 7. Event Correlation
 

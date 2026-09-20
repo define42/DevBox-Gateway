@@ -397,6 +397,19 @@ func TestStartupHintForAuditControl(t *testing.T) {
 	}
 }
 
+func TestStartupHintForPrivateHomeDiscovery(t *testing.T) {
+	err := fmt.Errorf("audit: private home directory requires CAP_DAC_READ_SEARCH: %w", syscall.EACCES)
+	hint := startupHint(defaultTestConfig(t), err)
+	for _, want := range []string{"CAP_DAC_READ_SEARCH", "ProtectHome=read-only", "sauronagent.service"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint does not mention %q: %s", want, hint)
+		}
+	}
+	if strings.Contains(hint, "spool") {
+		t.Errorf("home discovery failure was blamed on the spool: %s", hint)
+	}
+}
+
 // A permission error that is not the netlink socket must not be answered with
 // advice about a capability that has nothing to do with it.
 func TestStartupHintForAnUnwritableSpoolPointsAtTheStateDirectory(t *testing.T) {

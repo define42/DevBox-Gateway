@@ -210,7 +210,9 @@ func New(opts Options) (*Agent, error) {
 		if cfg.Audit.ManageRules {
 			a.configureRules = opts.ConfigureRules
 			if a.configureRules == nil && opts.Source == nil {
-				a.configureRules = audit.EnsureManagedRules
+				a.configureRules = func(ctx context.Context) error {
+					return audit.EnsureManagedRulesWithLogger(ctx, a.log)
+				}
 			}
 		}
 	}

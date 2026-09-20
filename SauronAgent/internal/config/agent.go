@@ -46,10 +46,9 @@ type AuditSection struct {
 	// for testing the transport in isolation.
 	Enabled bool `yaml:"enabled"`
 
-	// ManageRules enables kernel auditing and installs the built-in process
-	// execution and identity/credential file rules at startup. The production
-	// configuration enables it and requires CAP_AUDIT_CONTROL in addition to
-	// CAP_AUDIT_READ.
+	// ManageRules enables kernel auditing and installs the built-in security
+	// policy at startup. Production enables it and requires CAP_AUDIT_CONTROL
+	// and CAP_AUDIT_READ, plus CAP_DAC_READ_SEARCH for private SSH directories.
 	ManageRules bool `yaml:"manage_rules"`
 
 	// PreserveRaw keeps the original kernel record text on every event.

@@ -25,7 +25,7 @@ const Name = "sauronagent"
 
 const (
 	summary     = "SauronAgent guest audit agent and SauronHost hypervisor collector"
-	description = "SauronAgent streams Linux audit events from inside KVM guests to the hypervisor over virtio-vsock. The guest agent (sauronagent) configures process-execution and identity/credential file audit rules with CAP_AUDIT_CONTROL, reads the kernel audit multicast feed with CAP_AUDIT_READ, spools unacknowledged events to disk, and never speaks IP. No auditd or audit command-line tools are required. The hypervisor collector (sauronhost) identifies every guest by its VSOCK CID, deduplicates replays, and writes normalized JSON events to the journal, a file, or syslog. Install the package on both the hypervisor and the guests, then enable sauronhost.service or sauronagent.service respectively."
+	description = "SauronAgent streams Linux audit events from inside KVM guests to the hypervisor over virtio-vsock. The guest agent (sauronagent) installs its built-in execution, identity, privilege and system-security audit policy with CAP_AUDIT_CONTROL, discovers private SSH directories with CAP_DAC_READ_SEARCH, reads the kernel audit multicast feed with CAP_AUDIT_READ, spools unacknowledged events to disk, and never speaks IP. No auditd or audit command-line tools are required. The hypervisor collector (sauronhost) identifies every guest by its VSOCK CID, deduplicates replays, and writes normalized JSON events to the journal, a file, or syslog. Install the package on both the hypervisor and the guests, then enable sauronhost.service or sauronagent.service respectively."
 	url         = "https://github.com/define42/SauronAgent"
 	licenseTag  = "Apache-2.0"
 	debSection  = "admin"

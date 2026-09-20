@@ -14,7 +14,7 @@ gets trusted for things it cannot do.
 |   kernel audit subsystem                                     |
 |        |  NETLINK_AUDIT                                      |
 |   sauronagent  (uid sauronagent)                              |
-|     CAP_AUDIT_READ + CAP_AUDIT_CONTROL                         |
+|     CAP_AUDIT_READ + CAP_AUDIT_CONTROL + CAP_DAC_READ_SEARCH   |
 |        |                                                     |
 |   /var/lib/sauronagent/spool  (0700, still inside the guest) |
 +--------|-----------------------------------------------------+
@@ -73,10 +73,13 @@ allocates nothing from a length field it has not validated.
 **Auditing keeps working alongside auditd.** The agent is a consumer on the
 audit multicast group. It never registers as the audit daemon, so deploying it
 does not displace an existing `auditd`. At startup it enables auditing and
-ensures process-execution rules plus write/attribute-change watches for the
-system identity and credential files at startup, preserving unrelated rules.
-That managed baseline is compiled into the agent and cannot be disabled with a
-configuration file.
+installs its built-in execution, access-rights, privilege, configuration,
+persistence, kernel, network-configuration, time, and mount rules, preserving
+unrelated rules. Identity/credential watches remain part of the baseline, and
+existing local users' `.ssh` directories are discovered at startup. That
+baseline is compiled into the agent and cannot be disabled with a configuration
+file. See the [full policy](deployment.md#guest-audit-rules) for exact paths,
+keys, overlap precedence, and startup discovery limits.
 
 ## 3. What the design does not protect against
 
@@ -140,15 +143,20 @@ host's clock so drift is detectable. Correlation across VMs should use
 
 | Component | Runs as | Capabilities | Why |
 |---|---|---|---|
-| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ` and `CAP_AUDIT_CONTROL`, ambient and bounded | joining the audit multicast group and configuring the managed audit baseline |
+| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, `CAP_DAC_READ_SEARCH`, ambient and bounded | collecting audit records, configuring the managed policy, and discovering watched paths inside private directories |
 | `sauronhost` | `sauronhost` (system user) | none; empty bounding set | it parses hostile input and needs no privilege to do so |
 
 `CAP_AUDIT_READ` permits receiving audit events. `CAP_AUDIT_CONTROL` permits
-enabling auditing and installing the managed execution and identity/credential
-file rules without a separate audit service. Both capabilities remain
-available throughout the process lifetime. A compromise of the agent therefore
-exposes audit contents and also grants the ability to change rules or disable
-auditing when policy is mutable.
+enabling auditing and installing the managed policy without a separate audit
+service. `CAP_DAC_READ_SEARCH` bypasses discretionary read/search permissions,
+allowing discovery inside root's and users' private home directories and
+restricted configuration directories. It does not grant write access, and the
+agent does not read SSH keys or watched credential-file contents to create
+rules. It is nevertheless broader than directory traversal: a compromised
+agent can use it to read otherwise protected files visible within its service
+sandbox. These capabilities remain available throughout the process lifetime.
+A compromise also exposes audit contents and grants the ability to change
+rules or disable auditing when policy is mutable.
 
 The service does not get:
 
@@ -188,9 +196,10 @@ with why it is present. The security-relevant ones:
 | Directive | Effect |
 |---|---|
 | `User=` / `Group=` | neither component ever runs as root |
-| `CapabilityBoundingSet=` | a ceiling on what a successful exploit can acquire: audit read and control for the agent, none for the collector |
+| `CapabilityBoundingSet=` | a ceiling on what a successful exploit can acquire: audit read/control and DAC read/search for the agent, none for the collector |
 | `NoNewPrivileges=true` | no path to more privilege through setuid or file capabilities |
-| `ProtectSystem=strict`, `ProtectHome=true` | the filesystem is read-only except the one state or log directory |
+| `ProtectSystem=strict` | the filesystem is read-only except the state or log directory |
+| `ProtectHome=read-only` (agent), `ProtectHome=true` (collector) | agent home paths remain visible for SSH-directory discovery but cannot be written; the collector's home paths are hidden |
 | `StateDirectory=` / `LogsDirectory=` | the only writable path, owned by the service user, mode 0700 / 0750 |
 | `PrivateDevices=true` | no device nodes: the vsock socket is a socket, not `/dev/vsock` |
 | `RestrictAddressFamilies=` | the agent may use only `AF_NETLINK`, `AF_VSOCK` and `AF_UNIX`; the collector only `AF_VSOCK` and `AF_UNIX` |

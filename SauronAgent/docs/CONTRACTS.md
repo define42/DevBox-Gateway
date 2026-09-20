@@ -35,9 +35,13 @@ func (c *NetlinkConn) Close() error
 func (c *NetlinkConn) SetReceiveDeadline(t time.Time) error
 
 // Startup policy: enable auditing and idempotently ensure the managed
-// process-execution and identity/credential file rules. Requires
-// CAP_AUDIT_CONTROL; does not register the audit daemon PID.
+// syscall groups and discovered configuration/persistence/SSH path rules.
+// Requires CAP_AUDIT_CONTROL and path traversal access; the shipped service
+// uses CAP_DAC_READ_SEARCH. Does not register the audit daemon PID.
 func EnsureManagedRules(ctx context.Context) error
+
+// Same policy, with path-discovery diagnostics sent to the supplied logger.
+func EnsureManagedRulesWithLogger(ctx context.Context, logger *slog.Logger) error
 
 // Compatibility name; ensures the complete managed baseline.
 func EnsureExecutionRules(ctx context.Context) error

@@ -170,6 +170,47 @@ func execGroup(tb testing.TB) *audit.Group {
 // tests
 // ---------------------------------------------------------------------------
 
+func TestNormalizeKernelSecurityRecordsThroughParserAndCorrelator(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, line, category, field, value string
+	}{
+		{
+			name:     "AVC",
+			line:     `type=AVC msg=audit(1789753100.001:9200): avc: denied { read } for pid=2901 comm="httpd" name="shadow" scontext=system_u:system_r:httpd_t:s0 tcontext=system_u:object_r:shadow_t:s0 tclass=file permissive=0`,
+			category: TypeSELinuxDenial, field: "tclass", value: "file",
+		},
+		{
+			name:     "SECCOMP",
+			line:     `type=SECCOMP msg=audit(1789753100.001:9200): auid=1000 uid=1000 gid=1000 ses=3 pid=2901 comm="sandbox" exe="/usr/bin/sandbox" sig=31 arch=c000003e syscall=101 compat=0 ip=0x7f012345 code=0x80000000`,
+			category: TypePrivilegeChange, field: "code", value: "0x80000000",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			record, err := audit.ParseLine(tc.line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			correlator := audit.NewCorrelator(audit.CorrelatorOptions{})
+			groups := correlator.Add(record)
+			// Kernel security records need not have an EOE marker. A flush
+			// still delivers their evidence, marked as incomplete if needed.
+			groups = append(groups, correlator.Flush()...)
+			if len(groups) != 1 {
+				t.Fatalf("groups=%d, want one security event", len(groups))
+			}
+			event := Normalize(groups[0], NormalizeOptions{PreserveRaw: true})
+			if event == nil || event.Type != tc.category || len(event.Raw) != 1 || event.Raw[0] != tc.line {
+				t.Fatalf("security event was lost or changed: %+v", event)
+			}
+			fields, ok := event.Fields[strings.ToLower(tc.name)].(map[string]any)
+			if !ok || fields[tc.field] != tc.value {
+				t.Fatalf("security details not preserved: %+v", event.Fields)
+			}
+		})
+	}
+}
+
 // TestNormalizeExecveGroup asserts the worked example in DESIGN section 7:
 // five kernel records for one `cat /etc/shadow` collapse into exactly one
 // process.exec event with those field values.

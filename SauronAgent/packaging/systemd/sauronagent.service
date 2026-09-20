@@ -5,7 +5,7 @@
 # sauronagent.tmpfiles.conf.
 #
 # Every hardening directive below was chosen against what this program
-# actually does: configure audit rules, read NETLINK_AUDIT, append to
+# actually does: discover watched paths, configure audit rules, read NETLINK_AUDIT, append to
 # /var/lib/sauronagent/spool and write to one AF_VSOCK stream. Directives whose
 # absence or tightening would break it are marked; do not "harden further"
 # past those without testing that events still arrive at the collector.
@@ -39,7 +39,8 @@ RestartSec=5s
 
 # Dedicated unprivileged system user, created by sauronagent.sysusers.conf.
 # Running as root would give an attacker who finds a bug in the audit parser
-# the whole guest; the two audit capabilities cover setup and collection.
+# the whole guest; audit capabilities cover setup/collection and DAC read/search
+# allows discovering watched directories inside private user homes.
 User=sauronagent
 Group=sauronagent
 
@@ -47,15 +48,19 @@ Group=sauronagent
 #
 # CAP_AUDIT_READ is what lets a process join the NETLINK_AUDIT read-log
 # multicast group. CAP_AUDIT_CONTROL enables auditing and installs the built-in
-# process-execution and identity/credential file rules at startup, so auditd
-# and auditctl are not required. The agent never claims the audit daemon PID.
+# syscall and path rules at startup, so auditd and auditctl are not required.
+# CAP_DAC_READ_SEARCH permits discovering paths inside private home/config
+# directories, including /root/.ssh, without reading their files for setup.
+# It also permits protected-file reads if the agent is compromised; the
+# capability remains available while running. The agent never claims the audit
+# daemon PID.
 # If auditd is present, ordering after it lets startup detect conflicts with
 # its loaded policy. After= does not start auditd or require it to exist.
 #
 # The bounding set is the ceiling: even a successful exploit of this process
 # cannot acquire a capability that is not listed here.
-CapabilityBoundingSet=CAP_AUDIT_READ CAP_AUDIT_CONTROL
-AmbientCapabilities=CAP_AUDIT_READ CAP_AUDIT_CONTROL
+CapabilityBoundingSet=CAP_AUDIT_READ CAP_AUDIT_CONTROL CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_AUDIT_READ CAP_AUDIT_CONTROL CAP_DAC_READ_SEARCH
 
 # NoNewPrivileges keeps the ambient capability (ambient caps survive execve);
 # what it removes is any path to *more* privilege through a setuid or
@@ -82,7 +87,7 @@ StateDirectory=sauronagent
 StateDirectoryMode=0700
 
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 PrivateTmp=true
 PrivateMounts=true
 UMask=0077
