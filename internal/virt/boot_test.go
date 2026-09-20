@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	testVMName   = "test-vm"
-	testUsername = "testuser"
+	testVMName = "test-vm"
 	// testPasswordHash is the salted sha512_crypt digest BootNewVM requires in
 	// place of a cleartext guest password (this fixture hashes "GuestPass1!").
 	testPasswordHash      = "$6$WJFY1R5pSUjLUS/I$UhK5RfTTXlJCeMqs0kxS6YUm1Bw3DY2IiEMdP7gitriP0NPsTGVvcYyGiSEqML/CVCQ1yqChTcUb5UGM77arQ/"
@@ -153,16 +152,54 @@ func newConsoleSocketSettings(t *testing.T) *config.Settings {
 	t.Helper()
 
 	rootDir := newLibvirtAccessibleTempDir(t, "devboxgateway-console-root-")
+	poolName := "virt-console-test-" + fmt.Sprint(time.Now().UnixNano())
 
 	settings := config.NewSettings(false)
 	if settings.OverwriteForTestString(config.DATA_ROOT_DIR, rootDir) != nil {
 		t.Fatalf("Failed to overwrite DATA_ROOT_DIR for test")
 	}
-	if settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, "virt-console-test-"+fmt.Sprint(time.Now().UnixNano())) != nil {
+	if settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, poolName) != nil {
 		t.Fatalf("Failed to overwrite VIRT_STORAGE_POOL_NAME for test")
 	}
+	t.Cleanup(func() { cleanupConsoleStoragePool(t, poolName) })
 	stageExistingBaseImageFromDefaultRoot(t, settings)
 	return settings
+}
+
+func cleanupConsoleStoragePool(t *testing.T, poolName string) {
+	t.Helper()
+
+	conn, err := libvirt.NewConnect(virt.LibvirtURI())
+	if err != nil {
+		t.Errorf("Connect to libvirt to clean storage pool %s: %v", poolName, err)
+		return
+	}
+	defer func() { _, _ = conn.Close() }()
+
+	pool, err := conn.LookupStoragePoolByName(poolName)
+	if errors.Is(err, libvirt.ERR_NO_STORAGE_POOL) {
+		return
+	}
+	if err != nil {
+		t.Errorf("Look up storage pool %s for cleanup: %v", poolName, err)
+		return
+	}
+	defer func() { _ = pool.Free() }()
+
+	active, err := pool.IsActive()
+	if err != nil {
+		t.Errorf("Check storage pool %s state for cleanup: %v", poolName, err)
+		return
+	}
+	if active {
+		if err := pool.Destroy(); err != nil {
+			t.Errorf("Stop storage pool %s during cleanup: %v", poolName, err)
+			return
+		}
+	}
+	if err := pool.Undefine(); err != nil {
+		t.Errorf("Undefine storage pool %s during cleanup: %v", poolName, err)
+	}
 }
 
 // stageExistingBaseImageFromDefaultRoot copies a locally available base image
@@ -258,6 +295,7 @@ func assertRemovedVM(t *testing.T, conn *libvirt.Connect, vmName string) {
 
 func TestStartVM(t *testing.T) {
 	settings := newConsoleSocketSettings(t)
+	testUsername := fmt.Sprintf("testuser-%d", time.Now().UnixNano())
 
 	user, err := identity.New(testUsername)
 	if err != nil {

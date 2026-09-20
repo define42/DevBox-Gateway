@@ -65,8 +65,9 @@ lint2:
 	go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run --enable=stylecheck --enable=gochecknoinits
 gosec:
 	go run github.com/securego/gosec/v2/cmd/gosec@v2.28.0 ./...
+# Integration tests in multiple packages share the system libvirt daemon.
 test:
-	go test ./... -covermode=atomic -coverprofile=$(GATEWAY_COVERPROFILE) -coverpkg=github.com/define42/devbox-gateway/...
+	go test -p=1 -covermode=atomic -coverprofile=$(GATEWAY_COVERPROFILE) -coverpkg=github.com/define42/devbox-gateway/... ./...
 	$(MAKE) -C SauronAgent cover COVERPROFILE=$(CURDIR)/$(SAURON_COVERPROFILE)
 	@awk 'FNR == 1 { if (NR == 1) print; next } { print }' $(GATEWAY_COVERPROFILE) $(SAURON_COVERPROFILE) > $(COVERPROFILE)
 	go tool cover -html=$(COVERPROFILE) -o coverage.html
