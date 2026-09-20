@@ -101,11 +101,22 @@ func (g *gatewayRuntime) close() error {
 		g.closeListener(),
 		g.drainConnections(),
 		g.drainHTTP(),
+		g.closeSessionManager(),
 		g.closeSauron(),
 		g.closeProfiler(),
 		g.closeFrontTLS(),
 		g.closeAuditSink(),
 	)
+}
+
+func (g *gatewayRuntime) closeSessionManager() error {
+	if g.sessionManager == nil {
+		return nil
+	}
+	if err := g.sessionManager.Close(); err != nil {
+		return fmt.Errorf("close session manager: %w", err)
+	}
+	return nil
 }
 
 func (g *gatewayRuntime) closeSauron() error {

@@ -272,7 +272,7 @@ func TestCovxCreateSessionRenewTokenError(t *testing.T) {
 	}
 }
 
-func TestCovxEnforceClientIPDestroyFailureStillServes(t *testing.T) {
+func TestCovxEnforceClientIPDestroyFailureFailsClosed(t *testing.T) {
 	m := New()
 	user := covxUser(t, "kate")
 	cookie := issueSession(t, m, user, "192.0.2.60:5000")
@@ -290,7 +290,10 @@ func TestCovxEnforceClientIPDestroyFailureStillServes(t *testing.T) {
 	})))
 	handler.ServeHTTP(rec, req)
 
-	if !served {
-		t.Fatal("expected the request to be served even when destroying the roamed session fails")
+	if served {
+		t.Fatal("roamed session reached the protected handler after invalidation failed")
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 	}
 }

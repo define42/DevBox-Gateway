@@ -631,8 +631,8 @@ func TestUserHasActiveSessionFromIPIgnoresExpiredSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode expired session: %v", err)
 	}
-	if err := m.Store.Commit(token, expiredData, expiredDeadline); err != nil {
-		t.Fatalf("commit expired session: %v", err)
+	if err := m.Store.Commit(token, expiredData, expiredDeadline); err == nil {
+		t.Fatal("commit expired session unexpectedly succeeded")
 	}
 
 	if m.UserHasActiveSessionFromIP("dora", "192.0.2.20") {

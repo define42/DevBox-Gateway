@@ -53,6 +53,36 @@ const (
 	ResultSuccess = "success"
 	// ResultFailure records an action that did not complete.
 	ResultFailure = "failure"
+
+	// OperationLoginOriginRejected identifies a login rejected by the
+	// same-origin gate before credentials are processed.
+	OperationLoginOriginRejected = "origin_rejected"
+	// OperationLoginMalformedRequest identifies a login request whose form
+	// could not be parsed safely.
+	OperationLoginMalformedRequest = "malformed_request"
+	// OperationLoginMissingCredentials identifies a login request without both
+	// a username and password.
+	OperationLoginMissingCredentials = "missing_credentials"
+	// OperationLoginRateLimited identifies a login rejected by brute-force
+	// protection.
+	OperationLoginRateLimited = "rate_limited"
+	// OperationLoginInvalidUsername identifies a login with a username outside
+	// the gateway's accepted identity syntax.
+	OperationLoginInvalidUsername = "invalid_username"
+	// OperationLoginAuthenticationFailed identifies credentials rejected by the
+	// configured identity provider.
+	OperationLoginAuthenticationFailed = "authentication_failed"
+	// OperationLoginSessionFailed identifies an authenticated login whose
+	// browser session could not be established or persisted.
+	OperationLoginSessionFailed = "session_failed"
+
+	// OperationLogoutExplicit identifies a user-requested logout.
+	OperationLogoutExplicit = "explicit"
+	// OperationLogoutTimeout identifies automatic session expiry.
+	OperationLogoutTimeout = "timeout"
+	// OperationLogoutClientIPChanged identifies a session invalidated after its
+	// request source no longer matched the address bound at login.
+	OperationLogoutClientIPChanged = "client_ip_changed"
 )
 
 // Event describes one security-relevant user action.

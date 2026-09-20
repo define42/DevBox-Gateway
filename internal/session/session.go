@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/audit"
 	"github.com/define42/devbox-gateway/internal/identity"
 
 	"github.com/alexedwards/scs/v2"
-	"github.com/alexedwards/scs/v2/memstore"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 )
@@ -68,6 +68,8 @@ var registerSessionTypesOnce sync.Once //nolint:gochecknoglobals // package-leve
 type Manager struct {
 	*scs.SessionManager
 
+	sessionExpiryStore *sessionExpiryStore
+
 	// sessionsMu serializes RDP grant updates with session deletion and token
 	// renewal. Store methods lock individually, so a read-modify-write needs
 	// this additional lock to avoid recreating a token revoked between calls.
@@ -102,8 +104,15 @@ func New() *Manager {
 	registerSessionTypes()
 	connectionsDrained := make(chan struct{})
 	close(connectionsDrained)
+	sessionManager := newSessionManager()
+	expiryStore, err := newSessionExpiryStore(sessionManager.Store, sessionManager.Codec)
+	if err != nil {
+		panic(fmt.Sprintf("configure session expiry auditing: %v", err))
+	}
+	sessionManager.Store = expiryStore
 	return &Manager{
-		SessionManager:     newSessionManager(),
+		SessionManager:     sessionManager,
+		sessionExpiryStore: expiryStore,
 		userConnections:    make(map[string]map[uint64]func()),
 		connectionsDrained: connectionsDrained,
 	}
@@ -117,7 +126,6 @@ func registerSessionTypes() {
 
 func newSessionManager() *scs.SessionManager {
 	manager := scs.New()
-	manager.Store = memstore.New()
 	manager.Lifetime = sessionTTL
 	// Keep IdleTimeout disabled: an automatic snapshot save on authenticated
 	// requests could overwrite the atomic grant updates made directly in Store.
@@ -453,6 +461,23 @@ func (m *Manager) DestroySession(ctx context.Context) error {
 	return m.Destroy(ctx)
 }
 
+// invalidateSession claims the timeout record before destroying the current
+// session. The claim makes concurrent invalidation requests for the same token
+// converge on one audit event. A failed deletion restores timeout tracking so
+// the still-live store record cannot silently lose its eventual expiry event.
+func (m *Manager) invalidateSession(ctx context.Context) (bool, error) {
+	m.sessionsMu.Lock()
+	defer m.sessionsMu.Unlock()
+
+	token := m.Token(ctx)
+	tracked := m.sessionExpiryStore.claim(token)
+	if err := m.Destroy(ctx); err != nil {
+		m.sessionExpiryStore.restore(token, tracked)
+		return tracked != nil, err
+	}
+	return tracked != nil, nil
+}
+
 // DestroyAllSessionsForUser removes every active browser session belonging to
 // username from the backing store. The current request should still call
 // DestroySession so LoadAndSave expires that browser's cookie.
@@ -615,6 +640,17 @@ func (m *Manager) CloseAllConnections(ctx context.Context) (int, error) {
 	}
 }
 
+// Close stops session-expiry callbacks and waits for an expiry audit already in
+// progress. The gateway calls this after draining HTTP requests and before it
+// closes the process audit sink.
+func (m *Manager) Close() error {
+	if m == nil || m.sessionExpiryStore == nil {
+		return nil
+	}
+	m.sessionExpiryStore.Close()
+	return nil
+}
+
 // EnforceClientIP is router middleware that destroys an authenticated session
 // whose bound client IP no longer matches the request's source address. The IP
 // is bound once at login (see CreateSession); when a user roams to a new network
@@ -630,18 +666,46 @@ func (m *Manager) CloseAllConnections(ctx context.Context) (int, error) {
 func (m *Manager) EnforceClientIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess, ok := m.Get(r.Context(), sessionKey).(sessionData)
-		if ok && sess.User != nil {
-			canonicalIP, ipOK := CanonicalClientIP(r.RemoteAddr)
-			if !ipOK || canonicalIP != sess.ClientIP {
-				log.Printf("session client IP changed for user %s (bound=%s now=%s): forcing re-login",
-					strconv.Quote(sess.User.Name), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
-				if err := m.DestroySession(r.Context()); err != nil {
-					log.Printf("destroy roamed session for user %q failed: %v", sess.User.Name, err)
-				}
-			}
+		if !ok || sess.User == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !m.enforceClientIP(w, r, sess) {
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (m *Manager) enforceClientIP(w http.ResponseWriter, r *http.Request, sess sessionData) bool {
+	canonicalIP, ipOK := CanonicalClientIP(r.RemoteAddr)
+	if ipOK && canonicalIP == sess.ClientIP {
+		return true
+	}
+
+	log.Printf("session client IP changed for user %s (bound=%s now=%s): forcing re-login",
+		strconv.Quote(sess.User.Name), strconv.Quote(sess.ClientIP), strconv.Quote(canonicalIP))
+	claimed, err := m.invalidateSession(r.Context())
+	result := audit.ResultSuccess
+	if err != nil {
+		result = audit.ResultFailure
+		log.Printf("destroy roamed session for user %q failed: %v", sess.User.Name, err)
+	}
+	if claimed {
+		audit.Log(context.WithoutCancel(r.Context()), audit.Event{
+			Action:        audit.ActionUserLogout,
+			User:          sess.User.Name,
+			Result:        result,
+			SourceIP:      canonicalIP,
+			Operation:     audit.OperationLogoutClientIPChanged,
+			Administrator: sess.User.IsAdmin,
+		})
+	}
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return false
+	}
+	return true
 }
 
 type sessionContextKey struct{}

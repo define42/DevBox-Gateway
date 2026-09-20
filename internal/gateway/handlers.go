@@ -115,39 +115,48 @@ func handleLoginPostWithAuthenticator(
 		// what closes it. Reject before touching the rate limiter or credential
 		// parsing so forged requests do no work.
 		if !sameOriginRequest(r) {
+			markLoginFailureForAudit(r, "", audit.OperationLoginOriginRejected)
 			http.Error(w, forbiddenOrigin, http.StatusForbidden)
 			return
 		}
 
 		username, password, ok, err := extractCredentials(w, r)
 		if err != nil {
+			markLoginFailureForAudit(r, "", audit.OperationLoginMalformedRequest)
 			serveLogin(w, settings, "Invalid form submission.")
 			return
 		}
+		validatedUsername, usernameErr := validateLoginUsernameForAudit(r, username)
 		if !ok {
+			markLoginFailureForAudit(r, validatedUsername, audit.OperationLoginMissingCredentials)
 			serveLogin(w, settings, "Missing credentials.")
 			return
 		}
 
 		if rejectRateLimitedLogin(w, settings, loginLimiter, "", r.RemoteAddr) {
+			markLoginFailureForAudit(r, validatedUsername, audit.OperationLoginRateLimited)
 			return
 		}
 
-		username, err = validateLoginUsername(username)
-		if err != nil {
-			log.Printf("rejected login attempt: %v", err)
+		if usernameErr != nil {
+			markLoginFailureForAudit(r, "", audit.OperationLoginInvalidUsername)
+			log.Printf("rejected login attempt: %v", usernameErr)
 			recordFailedLogin(w, settings, loginLimiter, "", r.RemoteAddr, "Invalid credentials.")
 			return
 		}
+		username = validatedUsername
 
 		if rejectRateLimitedLogin(w, settings, loginLimiter, username, r.RemoteAddr) {
+			markLoginFailureForAudit(r, username, audit.OperationLoginRateLimited)
 			return
 		}
 
 		user, err := authenticate(r.Context(), username, password, settings)
 		if err != nil {
-			log.Printf("auth failed for %s: %v", strconv.Quote(username), err)
-			auditLoginFailure(r, username)
+			// Authenticator errors are not safe to log: an implementation can
+			// include the credential it was given in the returned error.
+			log.Printf("authentication rejected for username %s", strconv.Quote(username))
+			markLoginFailureForAudit(r, username, audit.OperationLoginAuthenticationFailed)
 			recordFailedLogin(w, settings, loginLimiter, username, r.RemoteAddr, "Invalid credentials.")
 			return
 		}
@@ -155,6 +164,14 @@ func handleLoginPostWithAuthenticator(
 		loginLimiter.RecordSuccess(username, r.RemoteAddr)
 		completeLogin(sessionManager, settings, w, r, user, password)
 	}
+}
+
+func validateLoginUsernameForAudit(r *http.Request, username string) (string, error) {
+	validatedUsername, err := validateLoginUsername(username)
+	if err == nil {
+		markLoginUsernameForAudit(r, validatedUsername)
+	}
+	return validatedUsername, err
 }
 
 func rejectRateLimitedLogin(w http.ResponseWriter, settings *config.Settings, loginLimiter *loginRateLimiter, username, remoteAddr string) bool {
@@ -178,24 +195,14 @@ func recordFailedLogin(w http.ResponseWriter, settings *config.Settings, loginLi
 // credentials have just been verified. Any session-establishment failure is a
 // server-side error that aborts the login.
 func completeLogin(sessionManager *session.Manager, settings *config.Settings, w http.ResponseWriter, r *http.Request, user *identity.User, password string) {
+	markLoginForAudit(r, user)
 	if err := establishSession(r.Context(), sessionManager, user, r.RemoteAddr, password); err != nil {
 		log.Printf("login completion failed for %s: %v", strconv.Quote(user.Name), err)
-		auditLoginFailure(r, user.Name)
+		markLoginFailureForAudit(r, user.Name, audit.OperationLoginSessionFailed)
 		serveLogin(w, settings, "Login failed.")
 		return
 	}
-	markLoginForAudit(r, user)
 	http.Redirect(w, r, "/api/dashboard", http.StatusSeeOther)
-}
-
-func auditLoginFailure(r *http.Request, username string) {
-	clientIP, _ := session.CanonicalClientIP(r.RemoteAddr)
-	audit.Log(r.Context(), audit.Event{
-		Action:   audit.ActionUserLogin,
-		User:     username,
-		Result:   audit.ResultFailure,
-		SourceIP: clientIP,
-	})
 }
 
 // establishSession digests the password and creates the session. The password
@@ -299,6 +306,7 @@ func handleLogout(sessionManager *session.Manager) http.HandlerFunc {
 				User:          username,
 				Result:        logoutResult,
 				SourceIP:      clientIP,
+				Operation:     audit.OperationLogoutExplicit,
 				Administrator: user.IsAdmin,
 			})
 		}
@@ -335,8 +343,10 @@ func requestScheme(r *http.Request) string {
 }
 
 type loginAuditState struct {
-	user     *identity.User
-	sourceIP string
+	username  string
+	user      *identity.User
+	sourceIP  string
+	operation string
 }
 
 type loginAuditContextKey struct{}
@@ -371,26 +381,58 @@ func auditLoginOutcome(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		state := &loginAuditState{}
+		clientIP, _ := session.CanonicalClientIP(r.RemoteAddr)
+		state := &loginAuditState{
+			sourceIP:  clientIP,
+			operation: audit.OperationLoginSessionFailed,
+		}
 		request := r.WithContext(context.WithValue(r.Context(), loginAuditContextKey{}, state))
 		response := &statusResponseWriter{ResponseWriter: w}
+		defer func() {
+			result := audit.ResultFailure
+			username := state.username
+			administrator := false
+			operation := state.operation
+			if state.user != nil {
+				username = state.user.Name
+				administrator = state.user.IsAdmin
+				if response.status == http.StatusSeeOther {
+					result = audit.ResultSuccess
+					operation = ""
+				} else if operation == "" {
+					operation = audit.OperationLoginSessionFailed
+				}
+			}
+			audit.Log(context.WithoutCancel(request.Context()), audit.Event{
+				Action:        audit.ActionUserLogin,
+				User:          username,
+				Result:        result,
+				SourceIP:      state.sourceIP,
+				Operation:     operation,
+				Administrator: administrator,
+			})
+		}()
 		next.ServeHTTP(response, request)
-		if state.user == nil {
-			return
-		}
-
-		result := audit.ResultFailure
-		if response.status == http.StatusSeeOther {
-			result = audit.ResultSuccess
-		}
-		audit.Log(request.Context(), audit.Event{
-			Action:        audit.ActionUserLogin,
-			User:          state.user.Name,
-			Result:        result,
-			SourceIP:      state.sourceIP,
-			Administrator: state.user.IsAdmin,
-		})
 	})
+}
+
+func markLoginUsernameForAudit(r *http.Request, username string) {
+	state, ok := r.Context().Value(loginAuditContextKey{}).(*loginAuditState)
+	if !ok {
+		return
+	}
+	state.username = username
+}
+
+func markLoginFailureForAudit(r *http.Request, username, operation string) {
+	state, ok := r.Context().Value(loginAuditContextKey{}).(*loginAuditState)
+	if !ok {
+		return
+	}
+	if username != "" {
+		state.username = username
+	}
+	state.operation = operation
 }
 
 func markLoginForAudit(r *http.Request, user *identity.User) {
@@ -399,7 +441,8 @@ func markLoginForAudit(r *http.Request, user *identity.User) {
 		return
 	}
 	state.user = user
-	state.sourceIP, _ = session.CanonicalClientIP(r.RemoteAddr)
+	state.username = user.Name
+	state.operation = ""
 }
 
 // debugConnectionLogger logs every HTTP request (including WebSocket upgrades)
