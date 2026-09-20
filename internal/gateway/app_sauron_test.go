@@ -26,6 +26,7 @@ func TestSauronOptionsMapsSettings(t *testing.T) {
 	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
 	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "sauron-token")
 	t.Setenv(config.SAURON_SPLUNK_HEC_INDEX, "sauron")
+	t.Setenv(config.SAURON_SPLUNK_HEC_ACK_ENABLED, "true")
 	t.Setenv(config.SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 	t.Setenv(config.SAURON_SPOOL_DIR, "/srv/sauron/spool")
 	t.Setenv(config.SAURON_SPOOL_MAX_MIB, "2048")
@@ -38,6 +39,7 @@ func TestSauronOptionsMapsSettings(t *testing.T) {
 		Endpoint:           "https://splunk.example.test:8088",
 		Token:              "sauron-token",
 		Index:              "sauron",
+		ACKEnabled:         true,
 		InsecureSkipVerify: true,
 	}
 	if got.HEC != wantHEC {
@@ -48,6 +50,33 @@ func TestSauronOptionsMapsSettings(t *testing.T) {
 	}
 	if got.Resolve == nil {
 		t.Error("sauronOptions().Resolve is nil; guests would never be attributed to their VMs")
+	}
+}
+
+func TestHECOptionsACKSettingsAreIndependent(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		auditACK      string
+		sauronACK     string
+		wantAuditACK  bool
+		wantSauronACK bool
+	}{
+		{name: "both disabled", auditACK: "false", sauronACK: "false"},
+		{name: "application only", auditACK: "true", sauronACK: "false", wantAuditACK: true},
+		{name: "guest only", auditACK: "false", sauronACK: "true", wantSauronACK: true},
+		{name: "both enabled", auditACK: "true", sauronACK: "true", wantAuditACK: true, wantSauronACK: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(config.SPLUNK_HEC_ACK_ENABLED, test.auditACK)
+			t.Setenv(config.SAURON_SPLUNK_HEC_ACK_ENABLED, test.sauronACK)
+			settings := config.NewSettings(false)
+			if got := auditOptions(settings).HEC.ACKEnabled; got != test.wantAuditACK {
+				t.Errorf("application HEC ACK = %v, want %v", got, test.wantAuditACK)
+			}
+			if got := sauronOptions(settings).HEC.ACKEnabled; got != test.wantSauronACK {
+				t.Errorf("guest HEC ACK = %v, want %v", got, test.wantSauronACK)
+			}
+		})
 	}
 }
 

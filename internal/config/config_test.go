@@ -685,6 +685,9 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 	if s.Bool(SPLUNK_HEC_SKIP_TLS_VERIFY) {
 		t.Fatal("expected default SPLUNK_HEC_SKIP_TLS_VERIFY=false")
 	}
+	if s.Bool(SPLUNK_HEC_ACK_ENABLED) {
+		t.Fatal("expected default SPLUNK_HEC_ACK_ENABLED=false")
+	}
 	if got := s.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); got != DefaultDevBoxGatewaySpoolMaxMiB {
 		t.Fatalf("expected default %s=%d, got %d", DEVBOX_GATEWAY_SPOOL_MAX_MIB, DefaultDevBoxGatewaySpoolMaxMiB, got)
 	}
@@ -692,6 +695,7 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 	t.Setenv(SPLUNK_HEC_ENDPOINT, " https://splunk.example.test:8088 ")
 	t.Setenv(SPLUNK_HEC_TOKEN, " 11111111-2222-3333-4444-555555555555 ")
 	t.Setenv(SPLUNK_HEC_INDEX, " devbox_audit ")
+	t.Setenv(SPLUNK_HEC_ACK_ENABLED, "true")
 	t.Setenv(SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 	t.Setenv(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "512")
 
@@ -707,6 +711,9 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 	}
 	if !s.Bool(SPLUNK_HEC_SKIP_TLS_VERIFY) {
 		t.Fatal("expected SPLUNK_HEC_SKIP_TLS_VERIFY=true from environment")
+	}
+	if !s.Bool(SPLUNK_HEC_ACK_ENABLED) {
+		t.Fatal("expected SPLUNK_HEC_ACK_ENABLED=true from environment")
 	}
 	// The token is a credential and must be masked in the printed settings table.
 	if !s.m[SPLUNK_HEC_TOKEN].Secret {
@@ -760,10 +767,14 @@ func TestNewSettingsSauron(t *testing.T) {
 			t.Fatalf("expected default %s to be empty, got %q", key, got)
 		}
 	}
+	if s.Bool(SAURON_SPLUNK_HEC_ACK_ENABLED) {
+		t.Fatal("expected default SAURON_SPLUNK_HEC_ACK_ENABLED=false")
+	}
 
 	t.Setenv(SAURON_SPLUNK_HEC_ENDPOINT, " https://splunk.example.test:8088 ")
 	t.Setenv(SAURON_SPLUNK_HEC_TOKEN, " 11111111-2222-3333-4444-555555555555 ")
 	t.Setenv(SAURON_SPLUNK_HEC_INDEX, " sauron ")
+	t.Setenv(SAURON_SPLUNK_HEC_ACK_ENABLED, "true")
 	t.Setenv(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 
 	s = NewSettings(false)
@@ -778,6 +789,9 @@ func TestNewSettingsSauron(t *testing.T) {
 	}
 	if !s.Bool(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY) {
 		t.Fatal("expected SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=true from environment")
+	}
+	if !s.Bool(SAURON_SPLUNK_HEC_ACK_ENABLED) {
+		t.Fatal("expected SAURON_SPLUNK_HEC_ACK_ENABLED=true from environment")
 	}
 	if !s.m[SAURON_SPLUNK_HEC_TOKEN].Secret {
 		t.Fatal("expected SAURON_SPLUNK_HEC_TOKEN to be registered as a secret")

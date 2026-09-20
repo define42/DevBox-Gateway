@@ -166,15 +166,19 @@ func TestValidateRemovedSSHTunnelModeRejectsEnabled(t *testing.T) {
 
 func TestValidateSplunkHEC(t *testing.T) {
 	tests := []struct {
-		name     string
-		endpoint string
-		token    string
-		index    string
-		wantErr  string
+		name       string
+		endpoint   string
+		token      string
+		index      string
+		ackEnabled bool
+		wantErr    string
 	}{
 		{name: "disabled"},
 		{name: "endpoint and token", endpoint: "https://splunk.example.test:8088", token: "token"},
 		{name: "endpoint token and index", endpoint: "https://splunk.example.test:8088", token: "token", index: "devbox"},
+		{name: "endpoint token and acknowledgement", endpoint: "https://splunk.example.test:8088", token: "token", ackEnabled: true},
+		{name: "acknowledgement without endpoint", ackEnabled: true, wantErr: SPLUNK_HEC_ENDPOINT},
+		{name: "acknowledgement with blank endpoint", endpoint: "  ", ackEnabled: true, wantErr: SPLUNK_HEC_ACK_ENABLED},
 		{name: "endpoint without token", endpoint: "https://splunk.example.test:8088", token: "  ", wantErr: SPLUNK_HEC_TOKEN},
 		{name: "token without endpoint", token: "token", wantErr: SPLUNK_HEC_ENDPOINT},
 		{name: "index without endpoint", index: "devbox", wantErr: SPLUNK_HEC_ENDPOINT},
@@ -185,6 +189,7 @@ func TestValidateSplunkHEC(t *testing.T) {
 			t.Setenv(SPLUNK_HEC_ENDPOINT, test.endpoint)
 			t.Setenv(SPLUNK_HEC_TOKEN, test.token)
 			t.Setenv(SPLUNK_HEC_INDEX, test.index)
+			t.Setenv(SPLUNK_HEC_ACK_ENABLED, strconv.FormatBool(test.ackEnabled))
 
 			err := ValidateSplunkHEC(NewSettings(false))
 			if test.wantErr == "" {
@@ -227,6 +232,14 @@ func TestValidateSauron(t *testing.T) {
 		wantErr string
 	}{
 		{name: "mandatory collection with default event log"},
+		{name: "file output with acknowledgement disabled", env: map[string]string{SAURON_SPLUNK_HEC_ACK_ENABLED: "false"}},
+		{name: "hec with acknowledgement enabled", env: map[string]string{
+			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SAURON_SPLUNK_HEC_TOKEN: "token", SAURON_SPLUNK_HEC_ACK_ENABLED: "true",
+		}},
+		{name: "acknowledgement without endpoint", env: map[string]string{SAURON_SPLUNK_HEC_ACK_ENABLED: "true"}, wantErr: SAURON_SPLUNK_HEC_ENDPOINT},
+		{name: "acknowledgement with blank endpoint", env: map[string]string{
+			SAURON_SPLUNK_HEC_ENDPOINT: "  ", SAURON_SPLUNK_HEC_ACK_ENABLED: "true",
+		}, wantErr: SAURON_SPLUNK_HEC_ACK_ENABLED},
 		{name: "hec only", env: map[string]string{
 			SAURON_EVENT_LOG_FILE:      "",
 			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SAURON_SPLUNK_HEC_TOKEN: "token", SAURON_SPLUNK_HEC_INDEX: "sauron",
@@ -245,7 +258,7 @@ func TestValidateSauron(t *testing.T) {
 		}},
 		{name: "token without endpoint", env: map[string]string{SAURON_SPLUNK_HEC_TOKEN: "token"}, wantErr: SAURON_SPLUNK_HEC_ENDPOINT},
 		{name: "audit hec is independent of sauron", env: map[string]string{
-			SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SPLUNK_HEC_TOKEN: "token",
+			SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SPLUNK_HEC_TOKEN: "token", SPLUNK_HEC_ACK_ENABLED: "true",
 		}},
 	}
 

@@ -460,12 +460,14 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_ENDPOINT`     | _(empty)_                                                                                                        | Splunk HTTP Event Collector URL, e.g. `https://splunk.example.com:8088`. A nonblank value selects HEC as the sole application audit output and disables local audit-file writes. A URL without a path uses `/services/collector/event`. Empty selects `AUDIT_LOG_FILE`. See [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
+| `SPLUNK_HEC_ACK_ENABLED`  | `false`                                                                                                          | Require indexer acknowledgement before advancing the application-audit spool. Requires its endpoint and an ACK-enabled HEC token; see [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
 | `DEVBOX_GATEWAY_SPOOL_MAX_MIB` | `10240`                                                                                                    | Maximum disk space for the application-audit HEC delivery spool at `<DATA_ROOT_DIR>/audit-spool`. `<=0` → the default. Pending events are preserved at capacity and new audit writes wait for space. |
 | `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
 | `SAURON_SPLUNK_HEC_INDEX` | _(empty)_                                                                                                        | Destination index for guest events. Empty → the token's default index.                           |
+| `SAURON_SPLUNK_HEC_ACK_ENABLED` | `false`                                                                                                     | Require indexer acknowledgement before advancing the guest-event spool, independently of the application-audit setting. Guest acknowledgements still mean local spool acceptance. Requires its endpoint and an ACK-enabled HEC token. |
 | `SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                | When `true`, skip TLS certificate verification against `SAURON_SPLUNK_HEC_ENDPOINT`.              |
 | `SAURON_SPOOL_DIR`        | _(empty → `<DATA_ROOT_DIR>/sauron-spool`)_                                                                       | Where guest events wait, durably and across gateway restarts, until Splunk HEC accepts them.      |
 | `SAURON_SPOOL_MAX_MIB`    | `10240`                                                                                                          | Disk space the spool may use. Size it for the longest Splunk outage to ride out. `<=0` → the default. |
@@ -548,6 +550,8 @@ audit events directly to a Splunk HTTP Event Collector. Set the endpoint and tok
 SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
 SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
 SPLUNK_HEC_INDEX=devbox_audit
+# Opt in only after enabling indexer acknowledgement on this HEC token.
+SPLUNK_HEC_ACK_ENABLED=false
 DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
 ```
 
@@ -557,18 +561,42 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
 - Each event arrives on the JSON event endpoint with `source=devbox-gateway`,
   `sourcetype=devbox-gateway:audit`, the gateway's hostname as `host`, and the
   same JSON schema used in file mode as the event body. The token
-  must be allowed to write to `SPLUNK_HEC_INDEX`, and must have indexer
-  acknowledgement disabled (otherwise Splunk rejects every request with
-  "Data channel is missing").
+  must be allowed to write to `SPLUNK_HEC_INDEX`. When the token uses indexer
+  acknowledgement, enable the corresponding gateway ACK setting below.
 - Before the delivery sink accepts an event, it appends and fsyncs it under
   `<DATA_ROOT_DIR>/audit-spool`. A background worker sends persisted events in
   order and resumes from the spool after a gateway or Splunk restart. Pending
   events do not expire merely because an outage is long.
-- Configure the collector's direct URL: redirects are not followed. Delivery
-  succeeds only when a `2xx` response contains valid HEC JSON with `code: 0`.
+- Configure the collector's direct URL: redirects are not followed. With
+  `SPLUNK_HEC_ACK_ENABLED=false` (the default), delivery succeeds when a `2xx`
+  response contains valid HEC JSON with `code: 0`; no ACK request is made.
   Network failures, redirects, `400`, `403`, every other non-success status,
   invalid response bodies, and nonzero HEC codes retain the pending event and
   retry with backoff; no HEC rejection is treated as permission to drop it.
+- Set `SPLUNK_HEC_ACK_ENABLED=true` to require indexer acknowledgement for
+  application audits. The Splunk deployment must support HEC indexer
+  acknowledgement and the token must have it enabled. The gateway sends a GUID
+  in `X-Splunk-Request-Channel` on both event POSTs and ACK polls, using the same
+  channel and token for each delivery. It polls `/services/collector/ack` with
+  the returned `ackId`; only an explicit `true` for that exact ID advances the
+  spool checkpoint. A `code: 0` event response alone is insufficient in this
+  mode. Splunk documents a true ACK as confirmation of the desired replication
+  factor; its parsing pipeline can still discard events, so ACK does not
+  guarantee indexing or searchability. See [Splunk's indexer acknowledgement documentation](https://help.splunk.com/en/splunk-enterprise/get-data-in/collect-http-event-data/about-http-event-collector-indexer-acknowledgment).
+- ACK polling keeps the event pending across `false` or missing status,
+  malformed replies, transport/HTTP errors, and shutdown. Each delivery polls
+  for at most five minutes before the forwarder retries the stored payload
+  with backoff. The ACK URL uses the event URL's scheme and host, preserving
+  any proxy prefix before `/services/collector`. If a load balancer fronts
+  multiple HEC instances, configure affinity so event POSTs and their ACK
+  polls reach the same instance and channel. The client retains affinity
+  cookies; see [Splunk's load-balancer guidance](https://help.splunk.com/en/splunk-cloud-platform/get-data-in/splunk-connect-for-kafka/2.2/configure/load-balancing-configurations-for-splunk-connect-for-kafka).
+  A lost ACK response, timeout or restart can cause a payload to be resent even
+  if Splunk already processed it.
+- ACK mode accepts standard `/services/collector`, `/services/collector/event`
+  or `/services/collector/raw` paths, including `/1.0` variants of event/raw
+  and optional proxy prefixes. A URL without a path uses the standard event
+  endpoint. Other custom paths are rejected at startup when ACK is enabled.
 - Delivery is at-least-once. A crash after Splunk accepts an event but before
   its local checkpoint advances can cause that event to be sent twice.
 - `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool (10 GiB by default). Existing
@@ -590,7 +618,8 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
   not-yet-persisted writes return an operational error so shutdown can finish;
   records already in the spool remain available for replay after restart.
 - The gateway refuses to start when `SPLUNK_HEC_ENDPOINT` is set without
-  `SPLUNK_HEC_TOKEN`, or when a token or index is set without an endpoint.
+  `SPLUNK_HEC_TOKEN`, or when a token, index or enabled ACK setting lacks an
+  endpoint. Leave ACK disabled in file mode.
   Invalid HEC configuration fails startup; it does not select file logging.
 - Splunk's default HEC certificate is self-signed. Prefer installing the CA
   that signed it into the host (or container) trust store; set
@@ -615,6 +644,8 @@ guest events to Splunk HEC, configure:
 SAURON_SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
 SAURON_SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
 SAURON_SPLUNK_HEC_INDEX=devbox_sauron
+# Independent of SPLUNK_HEC_ACK_ENABLED; requires this token's ACK support.
+SAURON_SPLUNK_HEC_ACK_ENABLED=false
 ```
 
 - Every newly created VM gets a virtio-vsock device, for which libvirt picks a
@@ -640,9 +671,11 @@ SAURON_SPLUNK_HEC_INDEX=devbox_sauron
   clock; its timestamp stays in `event.timestamp`).
 - Delivery to Splunk is store and forward. The gateway acknowledges an event to
   its guest — which then deletes its own copy — as soon as the event is written
-  and fsynced to the gateway's spool (`SAURON_SPOOL_DIR`). A guest never waits
-  for Splunk, and a VM deleted while Splunk is down loses nothing. A background
-  forwarder delivers the spool to Splunk in order, in batches, retrying with
+  and fsynced to the gateway's spool (`SAURON_SPOOL_DIR`) and accepted by any
+  other configured sink. This guest acknowledgement still means local
+  acceptance when `SAURON_SPLUNK_HEC_ACK_ENABLED=true`; already-spooled records
+  remain after VM deletion. A background forwarder delivers the spool to Splunk
+  in order, in batches, retrying with
   backoff (at most 30s apart) for however long Splunk is unreachable — days if
   need be — and resumes from its checkpoint after a gateway restart. A long
   outage is reported in the process log every 5 minutes with the spool's size.
@@ -656,13 +689,20 @@ SAURON_SPLUNK_HEC_INDEX=devbox_sauron
   log line, so it cannot block the backlog; every other refusal — an index the
   token may not write to, an unhealthy or unreachable Splunk — keeps the events
   spooled. Redirects and unconfirmed `2xx` replies keep the checkpoint unchanged;
-  successful delivery requires HEC JSON with `code: 0`. The same HEC token
-  requirement applies as above: indexer acknowledgement must be disabled.
+  successful delivery requires HEC JSON with `code: 0` by default. Set
+  `SAURON_SPLUNK_HEC_ACK_ENABLED=true` to additionally require an explicit
+  `true` ACK for the submitted batch's exact `ackId`, with the token, channel,
+  endpoint affinity and five-minute polling limit described above. ACK errors
+  and unconfirmed ACKs always retain the batch, including malformed ACK
+  replies and shutdown; the permanent-event rejection policy only applies to
+  the event submission. This switch is independent of `SPLUNK_HEC_ACK_ENABLED`.
+  If both streams share an ACK-enabled token, enable both gateway switches;
+  use separate tokens to configure different ACK modes.
 - The gateway refuses to start when the guest-event HEC endpoint lacks a token
-  (or a token or index lacks an endpoint), or when neither the file nor HEC is
-  configured. It also refuses to start when it cannot open the vsock listener:
-  the host needs the `vhost_vsock` kernel module, and must not run `sauronhost`
-  on the same port.
+  (or a token, index or enabled ACK setting lacks an endpoint), or when neither
+  the file nor HEC is configured. It also refuses to start when it cannot open
+  the vsock listener: the host needs the `vhost_vsock` kernel module, and must
+  not run `sauronhost` on the same port.
   The shipped systemd unit allows the `AF_VSOCK` socket family; in Docker, see
   the seccomp note under [Quick start](#quick-start-docker-compose).
 - The collector's stream-loss alert (`sauron.stream.lost`) only watches VMs

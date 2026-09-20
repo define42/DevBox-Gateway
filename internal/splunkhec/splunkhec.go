@@ -30,6 +30,9 @@ type Config struct {
 	Index string
 	// InsecureSkipVerify disables verification of the collector's TLS certificate.
 	InsecureSkipVerify bool
+	// ACKEnabled requires indexer acknowledgement before Post reports success.
+	// Enable it only for a HEC token configured to return acknowledgement IDs.
+	ACKEnabled bool
 }
 
 const (
@@ -54,10 +57,14 @@ type Envelope struct {
 
 // Client posts request bodies to one collector.
 type Client struct {
-	endpoint      *url.URL
-	authorization string
-	index         string
-	http          *http.Client
+	endpoint        *url.URL
+	authorization   string
+	index           string
+	http            *http.Client
+	channel         string
+	ackEndpoint     *url.URL
+	ackPollInterval time.Duration
+	ackTimeout      time.Duration
 }
 
 // New validates config and builds a client for it.
@@ -77,7 +84,7 @@ func New(config Config) (*Client, error) {
 		// #nosec G402 -- InsecureSkipVerify is an explicit operator opt-in via a *_SKIP_TLS_VERIFY setting (default off).
 		InsecureSkipVerify: config.InsecureSkipVerify,
 	}
-	return &Client{
+	client := &Client{
 		endpoint:      endpoint,
 		authorization: "Splunk " + token,
 		index:         strings.TrimSpace(config.Index),
@@ -90,7 +97,14 @@ func New(config Config) (*Client, error) {
 				return http.ErrUseLastResponse
 			},
 		},
-	}, nil
+	}
+	if config.ACKEnabled {
+		if err := client.enableACK(); err != nil {
+			client.CloseIdleConnections()
+			return nil, err
+		}
+	}
+	return client, nil
 }
 
 // EventURL resolves a configured endpoint to the JSON event endpoint URL.
@@ -118,49 +132,67 @@ func (c *Client) PlainHTTP() bool { return c.endpoint.Scheme == "http" }
 // Index is the configured destination index; empty means the token's default.
 func (c *Client) Index() string { return c.index }
 
-// Post sends one request body of concatenated envelopes. A non-nil error that
-// IsRejected reports as permanent means retrying the same body cannot succeed.
+// Post sends one request body of concatenated envelopes. With ACKEnabled it
+// also polls until Splunk confirms that batch, or cancellation/the ACK deadline
+// leaves delivery unconfirmed. Callers must retain unconfirmed records.
 func (c *Client) Post(ctx context.Context, body []byte) error {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint.String(), bytes.NewReader(body))
+	reply, err := c.post(ctx, c.endpoint, body)
 	if err != nil {
-		return fmt.Errorf("build splunk hec request: %w", err)
+		return err
+	}
+	if code := replyCode(reply); code != 0 {
+		return fmt.Errorf("splunk hec did not confirm acceptance with code 0 (reply code %d)", code)
+	}
+	if c.channel == "" {
+		return nil
+	}
+	id, err := acknowledgementID(reply)
+	if err != nil {
+		return err
+	}
+	return c.waitACK(ctx, id)
+}
+
+func (c *Client) post(ctx context.Context, endpoint *url.URL, body []byte) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("build splunk hec request: %w", err)
 	}
 	request.Header.Set("Authorization", c.authorization)
 	request.Header.Set("Content-Type", "application/json")
+	if c.channel != "" {
+		request.Header.Set("X-Splunk-Request-Channel", c.channel)
+	}
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("post to splunk hec: %w", err)
+		return nil, fmt.Errorf("post to splunk hec: %w", err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		return confirmAccepted(response.Body)
+		return readReply(response.Body)
 	}
 
 	detail, _ := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
 	statusErr := fmt.Errorf("splunk hec responded %s: %s", response.Status, strings.TrimSpace(string(detail)))
 	if retryableStatus(response.StatusCode) {
-		return statusErr
+		return nil, statusErr
 	}
-	return &rejectedError{err: statusErr, status: response.StatusCode, code: replyCode(detail)}
+	return nil, &rejectedError{err: statusErr, status: response.StatusCode, code: replyCode(detail)}
 }
 
-// confirmAccepted requires HEC's success code before callers can discard their
-// copy of an event. An unknown reply is retryable: a proxy's HTML page, a torn
-// response, or a nonzero code does not establish that HEC accepted the data.
-func confirmAccepted(body io.Reader) error {
+// readReply bounds both ingestion and ACK replies. A truncated or oversized
+// response cannot establish acceptance or acknowledgement.
+func readReply(body io.Reader) ([]byte, error) {
 	reply, err := io.ReadAll(io.LimitReader(body, successBodyLimit+1))
 	if err != nil {
-		return fmt.Errorf("read splunk hec acknowledgement: %w", err)
+		return nil, fmt.Errorf("read splunk hec response: %w", err)
 	}
 	if len(reply) > successBodyLimit {
-		return fmt.Errorf("splunk hec acknowledgement exceeds %d bytes", successBodyLimit)
+		return nil, fmt.Errorf("splunk hec response exceeds %d bytes", successBodyLimit)
 	}
-	if code := replyCode(reply); code != 0 {
-		return fmt.Errorf("splunk hec did not confirm acceptance with code 0 (reply code %d)", code)
-	}
-	return nil
+	return reply, nil
 }
 
 // replyCode extracts the HEC status code from a collector reply such as

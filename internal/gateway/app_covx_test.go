@@ -361,6 +361,7 @@ func TestMcovAuditOptionsMapsSettings(t *testing.T) {
 	t.Setenv(config.SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
 	t.Setenv(config.SPLUNK_HEC_TOKEN, "hec-token")
 	t.Setenv(config.SPLUNK_HEC_INDEX, "devbox_audit")
+	t.Setenv(config.SPLUNK_HEC_ACK_ENABLED, "true")
 	t.Setenv(config.SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 
 	want := audit.Options{
@@ -371,6 +372,7 @@ func TestMcovAuditOptionsMapsSettings(t *testing.T) {
 			Endpoint:           "https://splunk.example.test:8088",
 			Token:              "hec-token",
 			Index:              "devbox_audit",
+			ACKEnabled:         true,
 			InsecureSkipVerify: true,
 		},
 	}

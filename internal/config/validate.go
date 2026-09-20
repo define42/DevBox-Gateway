@@ -71,14 +71,14 @@ func ValidateRDPPort(settings *Settings) error {
 }
 
 // ValidateSplunkHEC rejects a partial Splunk HEC configuration. Forwarding is
-// enabled by SPLUNK_HEC_ENDPOINT, which then requires SPLUNK_HEC_TOKEN; a token
-// or index without an endpoint means forwarding was intended but would
-// silently never happen, so the boot fails instead of dropping audit events.
+// enabled by SPLUNK_HEC_ENDPOINT, which then requires SPLUNK_HEC_TOKEN. A token,
+// index or enabled indexer acknowledgement without an endpoint indicates an
+// incomplete forwarding configuration, so startup fails.
 func ValidateSplunkHEC(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}
-	if err := validateHECSettings(settings, SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, "audit events"); err != nil {
+	if err := validateHECSettings(settings, SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, SPLUNK_HEC_ACK_ENABLED, "audit events"); err != nil {
 		return err
 	}
 	if mib := settings.Int(DEVBOX_GATEWAY_SPOOL_MAX_MIB); mib > 0 && int64(mib) > math.MaxInt64>>20 {
@@ -94,7 +94,7 @@ func ValidateSauron(settings *Settings) error {
 		return fmt.Errorf("settings is nil")
 	}
 	endpointSet := strings.TrimSpace(settings.Get(SAURON_SPLUNK_HEC_ENDPOINT)) != ""
-	if err := validateHECSettings(settings, SAURON_SPLUNK_HEC_ENDPOINT, SAURON_SPLUNK_HEC_TOKEN, SAURON_SPLUNK_HEC_INDEX, "SauronAgent guest events"); err != nil {
+	if err := validateHECSettings(settings, SAURON_SPLUNK_HEC_ENDPOINT, SAURON_SPLUNK_HEC_TOKEN, SAURON_SPLUNK_HEC_INDEX, SAURON_SPLUNK_HEC_ACK_ENABLED, "SauronAgent guest events"); err != nil {
 		return err
 	}
 	if !endpointSet && strings.TrimSpace(settings.Get(SAURON_EVENT_LOG_FILE)) == "" {
@@ -104,15 +104,17 @@ func ValidateSauron(settings *Settings) error {
 }
 
 // validateHECSettings rejects a partial set of Splunk HEC settings: an
-// endpoint needs a token, and a token or index without an endpoint means
-// forwarding was intended but would silently never happen.
-func validateHECSettings(settings *Settings, endpointKey, tokenKey, indexKey, forwarded string) error {
+// endpoint needs a token, and a token, index or enabled acknowledgement
+// without an endpoint means forwarding was intended but would never happen.
+func validateHECSettings(settings *Settings, endpointKey, tokenKey, indexKey, ackKey, forwarded string) error {
 	endpointSet := strings.TrimSpace(settings.Get(endpointKey)) != ""
 	tokenSet := strings.TrimSpace(settings.Get(tokenKey)) != ""
 	indexSet := strings.TrimSpace(settings.Get(indexKey)) != ""
 	switch {
 	case endpointSet && !tokenSet:
 		return fmt.Errorf("%s is set but %s is empty; splunk hec forwarding requires a token", endpointKey, tokenKey)
+	case !endpointSet && settings.Bool(ackKey):
+		return fmt.Errorf("%s is true but %s is empty; splunk hec acknowledgement requires an endpoint", ackKey, endpointKey)
 	case !endpointSet && (tokenSet || indexSet):
 		return fmt.Errorf("%s or %s is set but %s is empty; set the endpoint to forward %s to splunk hec, or remove the other %s settings", tokenKey, indexKey, endpointKey, forwarded, strings.TrimSuffix(endpointKey, "ENDPOINT")+"*")
 	}

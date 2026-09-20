@@ -201,6 +201,7 @@ func (s *Settings) setAuditDefaults() {
 	s.SetString(SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL used instead of AUDIT_LOG_FILE, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Empty selects local file logging. HEC delivery is durably buffered under <DATA_ROOT_DIR>/audit-spool", "")
 	s.SetSecretString(SPLUNK_HEC_TOKEN, "Splunk HEC token; required when SPLUNK_HEC_ENDPOINT is set", "")
 	s.SetString(SPLUNK_HEC_INDEX, "Splunk index for forwarded audit events; empty uses the HEC token's default index", "")
+	s.SetBool(SPLUNK_HEC_ACK_ENABLED, "Require Splunk indexer acknowledgement before advancing the application-audit spool; requires SPLUNK_HEC_ENDPOINT and an ACK-enabled HEC token. False accepts HEC code 0 without ACK polling", false)
 	s.SetBool(SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SPLUNK_HEC_ENDPOINT", false)
 	s.SetInt(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "Disk space in MiB the application-audit HEC spool under <DATA_ROOT_DIR>/audit-spool may use. When full, new audit writes wait for space instead of dropping pending events. Values <=0 fall back to the default", DefaultDevBoxGatewaySpoolMaxMiB)
 }
@@ -210,6 +211,7 @@ func (s *Settings) setSauronDefaults() {
 	s.SetString(SAURON_SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL that also receives every SauronAgent guest event, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Events are acknowledged to the guest once they are in the gateway's spool (SAURON_SPOOL_DIR) and delivered from there whenever HEC is reachable. Empty disables HEC forwarding", "")
 	s.SetSecretString(SAURON_SPLUNK_HEC_TOKEN, "Splunk HEC token for SauronAgent guest events; required when SAURON_SPLUNK_HEC_ENDPOINT is set", "")
 	s.SetString(SAURON_SPLUNK_HEC_INDEX, "Splunk index for SauronAgent guest events; empty uses the HEC token's default index", "")
+	s.SetBool(SAURON_SPLUNK_HEC_ACK_ENABLED, "Require Splunk indexer acknowledgement before advancing the guest-event spool; requires SAURON_SPLUNK_HEC_ENDPOINT and an ACK-enabled HEC token. Guest acknowledgement still means local spool acceptance. False accepts HEC code 0 without ACK polling", false)
 	s.SetBool(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SAURON_SPLUNK_HEC_ENDPOINT", false)
 	s.SetString(SAURON_SPOOL_DIR, "Directory where SauronAgent guest events wait, durably and across gateway restarts, until Splunk HEC accepts them. Empty -> <DATA_ROOT_DIR>/sauron-spool", "")
 	s.SetInt(SAURON_SPOOL_MAX_MIB, "Disk space in MiB SAURON_SPOOL_DIR may use; size it for the longest Splunk outage to ride out. When full, new guest events are no longer acknowledged and wait in the guests' own spools. Values <=0 fall back to the default", DefaultSauronSpoolMaxMiB)
@@ -628,6 +630,7 @@ const (
 	MAX_CONNECTIONS_PER_USER          = "MAX_CONNECTIONS_PER_USER"
 	MAX_CONNECTIONS_PER_SOURCE        = "MAX_CONNECTIONS_PER_SOURCE"
 	SAURON_EVENT_LOG_FILE             = "SAURON_EVENT_LOG_FILE"
+	SAURON_SPLUNK_HEC_ACK_ENABLED     = "SAURON_SPLUNK_HEC_ACK_ENABLED"
 	SAURON_SPLUNK_HEC_ENDPOINT        = "SAURON_SPLUNK_HEC_ENDPOINT"
 	SAURON_SPLUNK_HEC_INDEX           = "SAURON_SPLUNK_HEC_INDEX"
 	SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY = "SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY"
@@ -635,6 +638,7 @@ const (
 	SAURON_SPOOL_DIR                  = "SAURON_SPOOL_DIR"
 	SAURON_SPOOL_MAX_MIB              = "SAURON_SPOOL_MAX_MIB"
 	SNI_HASH_SECRET                   = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
+	SPLUNK_HEC_ACK_ENABLED            = "SPLUNK_HEC_ACK_ENABLED"
 	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
 	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"
 	SPLUNK_HEC_SKIP_TLS_VERIFY        = "SPLUNK_HEC_SKIP_TLS_VERIFY"

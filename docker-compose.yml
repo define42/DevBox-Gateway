@@ -34,6 +34,11 @@ services:
       - SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
       - SPLUNK_HEC_INDEX=devbox_audit
+      # Opt in after enabling indexer ACK on the Splunk token. False keeps
+      # delivery confirmation at HEC code 0; true polls /services/collector/ack.
+      # Both streams below share this token, so enable both ACK switches if
+      # indexer ACK is enabled on that token.
+      - SPLUNK_HEC_ACK_ENABLED=${SPLUNK_HEC_ACK_ENABLED:-false}
       # The bundled Splunk serves HEC with its default self-signed certificate.
       - SPLUNK_HEC_SKIP_TLS_VERIFY=true
       - DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
@@ -43,6 +48,9 @@ services:
       - SAURON_SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SAURON_SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
       - SAURON_SPLUNK_HEC_INDEX=devbox_sauron
+      # Independent guest forwarding ACK mode; guest ACK remains local spool
+      # acceptance. Enable indexer ACK on its Splunk token before opting in.
+      - SAURON_SPLUNK_HEC_ACK_ENABLED=${SAURON_SPLUNK_HEC_ACK_ENABLED:-false}
       - SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=true
       - LDAP_SKIP_TLS_VERIFY=true
       - LDAP_URL=ldaps://127.0.0.1:389

@@ -279,6 +279,7 @@ func sauronOptions(settings *config.Settings) sauron.Options {
 			Endpoint:           settings.Get(config.SAURON_SPLUNK_HEC_ENDPOINT),
 			Token:              settings.Get(config.SAURON_SPLUNK_HEC_TOKEN),
 			Index:              settings.Get(config.SAURON_SPLUNK_HEC_INDEX),
+			ACKEnabled:         settings.Bool(config.SAURON_SPLUNK_HEC_ACK_ENABLED),
 			InsecureSkipVerify: settings.Bool(config.SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY),
 		},
 		SpoolDir:      config.SauronSpoolDir(settings),
@@ -357,6 +358,7 @@ func auditOptions(settings *config.Settings) audit.Options {
 			Endpoint:           settings.Get(config.SPLUNK_HEC_ENDPOINT),
 			Token:              settings.Get(config.SPLUNK_HEC_TOKEN),
 			Index:              settings.Get(config.SPLUNK_HEC_INDEX),
+			ACKEnabled:         settings.Bool(config.SPLUNK_HEC_ACK_ENABLED),
 			InsecureSkipVerify: settings.Bool(config.SPLUNK_HEC_SKIP_TLS_VERIFY),
 		},
 	}
