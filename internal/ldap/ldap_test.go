@@ -59,26 +59,6 @@ func TestAuthenticateAccessWithUserDomainSuffix(t *testing.T) {
 	}
 }
 
-func TestAuthenticateAccessWithExplicitEmail(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	ldapURL, cleanup := startGlauth(ctx, t)
-	defer cleanup()
-
-	applyLDAPSettings(t, ldapURL)
-	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettings(false)
-
-	user, err := AuthenticateAccess(t.Context(), "johndoe@example.com", "dogood", settings)
-	if err != nil {
-		t.Fatalf("AuthenticateAccess(): %v", err)
-	}
-	if user == nil || user.Name != "johndoe@example.com" {
-		t.Fatalf("expected explicit email user, got %#v", user)
-	}
-}
-
 func TestAuthenticateAccessSetsAdminFromDirectGroup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

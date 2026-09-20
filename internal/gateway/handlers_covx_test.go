@@ -436,14 +436,24 @@ func TestHcovLoginPostMissingCredentials(t *testing.T) {
 }
 
 func TestHcovLoginPostRejectsInvalidUsername(t *testing.T) {
-	router := NewHandler(session.New(), config.NewSettings(false))
-
-	rec := hcovPostLoginForm(t, router, "", url.Values{"username": {"bad name"}, "password": {"pw"}}.Encode())
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
+	tests := []struct {
+		name     string
+		username string
+	}{
+		{name: "unsupported characters", username: "bad name"},
+		{name: "domain-qualified", username: "alice@example.com"},
 	}
-	if !strings.Contains(rec.Body.String(), "Invalid credentials.") {
-		t.Fatalf("expected invalid credentials message, got %q", rec.Body.String())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			router := NewHandler(session.New(), config.NewSettings(false))
+			rec := hcovPostLoginForm(t, router, "", url.Values{"username": {test.username}, "password": {"pw"}}.Encode())
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "Invalid credentials.") {
+				t.Fatalf("expected invalid credentials message, got %q", rec.Body.String())
+			}
+		})
 	}
 }
 

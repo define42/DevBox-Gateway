@@ -21,6 +21,20 @@ func ValidateLDAPURL(settings *Settings) error {
 	return nil
 }
 
+// ValidateLDAPUserDomain ensures every accepted bare username can be converted
+// to the authoritative mail/UPN form used for LDAP bind and search. Missing or
+// malformed suffixes violate that identity contract, so fail during startup.
+func ValidateLDAPUserDomain(settings *Settings) error {
+	if settings == nil {
+		return fmt.Errorf("settings is nil")
+	}
+	domain := strings.TrimPrefix(strings.TrimSpace(settings.Get(LDAP_USER_DOMAIN)), "@")
+	if domain == "" || strings.ContainsRune(domain, '@') || strings.ContainsAny(domain, " \t\r\n") {
+		return fmt.Errorf("%s must contain one non-empty domain suffix for bare usernames", LDAP_USER_DOMAIN)
+	}
+	return nil
+}
+
 // ValidateFrontDomain ensures FRONT_DOMAIN is set. It is required for RDP SNI
 // routing: every VM is reached at an opaque "<label>.<FRONT_DOMAIN>" host, and
 // the RDP front handler resolves a connection by stripping that suffix to

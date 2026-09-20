@@ -218,7 +218,7 @@ func (s *Settings) setAuthDefaults() {
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
 	s.SetString(LDAP_REQUIRED_GROUPS, "List of groups (bare names or full DNs, DNs must be ';'-delimited, bare names may use ',' too); when non-empty, LDAP login also requires the user's memberOf attribute to contain at least one listed group", "")
 	s.SetString(ADMIN_GROUP, "LDAP group (bare name or full DN) whose direct members receive administrator access at login; empty disables administrator access", "")
-	s.SetString(LDAP_USER_DOMAIN, "LDAP user mail domain", "@example.com")
+	s.SetString(LDAP_USER_DOMAIN, "Required LDAP domain suffix appended to every bare login username", "@example.com")
 	s.SetBool(LDAP_STARTTLS, "Use StartTLS when connecting to LDAP", false)
 	s.SetBool(LDAP_SKIP_TLS_VERIFY, "Skip TLS verification when connecting to LDAP", false)
 	s.SetInt(LOGIN_RATE_LIMIT_MAX_ATTEMPTS, "Maximum failed login attempts allowed per username-and-client-IP pair within LOGIN_RATE_LIMIT_WINDOW; <=0 disables login throttling", 5)

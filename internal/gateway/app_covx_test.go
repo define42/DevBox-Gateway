@@ -242,6 +242,16 @@ func TestMcovBootGatewayConfigFileError(t *testing.T) {
 	}
 }
 
+func TestMcovBootGatewayLDAPUserDomainError(t *testing.T) {
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv(config.LDAP_USER_DOMAIN, "")
+
+	_, err := bootGateway()
+	if err == nil || !strings.Contains(err.Error(), config.LDAP_USER_DOMAIN) {
+		t.Fatalf("expected LDAP_USER_DOMAIN validation error, got %v", err)
+	}
+}
+
 func TestMcovBootGatewayFrontDomainError(t *testing.T) {
 	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
 	t.Setenv(config.FRONT_DOMAIN, "")

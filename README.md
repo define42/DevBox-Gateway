@@ -467,8 +467,8 @@ file**, which keeps container and development overrides working.
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | Required LDAP server URL. The gateway refuses to start when empty.                                |
 | `LDAP_AUTH_TIMEOUT`       | `10s` | Maximum total time for LDAP connection setup, TLS, bind, and search. Request cancellation also aborts authentication. Values `<=0` use the default. |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
-| `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with `<username>@LDAP_USER_DOMAIN`.                          |
-| `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Domain appended to bare usernames before they are substituted into `LDAP_USER_FILTER`.            |
+| `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with the submitted bare username plus `LDAP_USER_DOMAIN`.     |
+| `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Required domain suffix appended to every accepted username for LDAP bind and search. Login names containing `@` are rejected. |
 | `LDAP_REQUIRED_GROUPS`    | _(empty)_                                                                                                        | Groups a user must belong to (any one of them) for LDAP login. Bare group names may be `,`- or `;`-delimited; full group DNs must be `;`-delimited because DNs contain commas. Matched case-insensitively against the user's `memberOf` attribute (full DN or its first RDN value). Empty allows every authenticated user. |
 | `ADMIN_GROUP`             | _(empty)_                                                                                                        | Single LDAP group whose direct members receive administrator access at login. Accepts a bare name or full DN and matches `memberOf` case-insensitively. Empty disables administrator access. |
 | `LDAP_STARTTLS`           | `false`                                                                                                          | When `true`, upgrade plain LDAP connections with StartTLS.                                        |
@@ -664,6 +664,10 @@ For local development, the bundled `glauth` container is configured in
 `ldaps://127.0.0.1:389` (a host-loopback published port). For production, point
 `LDAP_URL` at your own directory and adjust `LDAP_BASE_DN`, `LDAP_USER_FILTER`,
 and `LDAP_USER_DOMAIN` to match.
+Users must enter only their bare username (for example, `alice`). The gateway
+rejects domain-qualified input and always appends `LDAP_USER_DOMAIN` before the
+LDAP bind and search; an empty or malformed `LDAP_USER_DOMAIN` is therefore a
+startup error.
 Prefer `ldaps://` or `LDAP_STARTTLS=true`. Certificate verification is on by
 default; only set `LDAP_SKIP_TLS_VERIFY=true` as a stopgap for a directory
 whose CA chain is not yet trusted (the bundled glauth container uses a

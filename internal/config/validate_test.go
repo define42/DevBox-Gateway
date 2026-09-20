@@ -30,6 +30,44 @@ func TestValidateLDAPURLRejectsNilSettings(t *testing.T) {
 	}
 }
 
+func TestValidateLDAPUserDomainAcceptsDefault(t *testing.T) {
+	if err := ValidateLDAPUserDomain(NewSettings(false)); err != nil {
+		t.Fatalf("expected default LDAP_USER_DOMAIN to be valid, got %v", err)
+	}
+}
+
+func TestValidateLDAPUserDomainRejectsInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty"},
+		{name: "whitespace", value: "   "},
+		{name: "separator only", value: "@"},
+		{name: "multiple separators", value: "@@example.test"},
+		{name: "embedded separator", value: "example@test"},
+		{name: "embedded whitespace", value: "example test"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(LDAP_USER_DOMAIN, test.value)
+			err := ValidateLDAPUserDomain(NewSettings(false))
+			if err == nil {
+				t.Fatalf("expected invalid LDAP_USER_DOMAIN (%q) to be rejected", test.value)
+			}
+			if !strings.Contains(err.Error(), LDAP_USER_DOMAIN) {
+				t.Fatalf("expected error to name LDAP_USER_DOMAIN, got %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateLDAPUserDomainRejectsNilSettings(t *testing.T) {
+	if err := ValidateLDAPUserDomain(nil); err == nil {
+		t.Fatal("expected nil settings to be rejected")
+	}
+}
+
 func TestValidateFrontDomainAcceptsDefault(t *testing.T) {
 	// The default FRONT_DOMAIN is non-empty, so a freshly built settings object
 	// passes without any override.

@@ -30,7 +30,6 @@ func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
 	// Point at a reserved, non-resolvable host to verify the identifier is
 	// rejected before any LDAP connection is attempted.
 	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
-	t.Setenv(config.LDAP_USER_DOMAIN, "")
 	settings := config.NewSettings(false)
 
 	user, err := AuthenticateAccess(t.Context(), "", "nonempty-password", settings)
@@ -39,6 +38,38 @@ func TestAuthenticateAccessRejectsEmptyIdentifier(t *testing.T) {
 	}
 	if !errors.Is(err, ErrEmptyIdentifier) {
 		t.Fatalf("expected ErrEmptyIdentifier, got %v", err)
+	}
+}
+
+func TestAuthenticateAccessRejectsDomainQualifiedUsername(t *testing.T) {
+	// Authentication must reject the qualified form before dialing; otherwise
+	// it could become a second gateway identity for the same LDAP account.
+	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
+	t.Setenv(config.LDAP_USER_DOMAIN, "@example.test")
+	settings := config.NewSettings(false)
+
+	user, err := AuthenticateAccess(t.Context(), "alice@example.test", "nonempty-password", settings)
+	if user != nil {
+		t.Fatalf("expected no user for a domain-qualified username, got %#v", user)
+	}
+	if !errors.Is(err, ErrDomainQualifiedUsername) {
+		t.Fatalf("expected ErrDomainQualifiedUsername, got %v", err)
+	}
+}
+
+func TestAuthenticateAccessRejectsInvalidUserDomain(t *testing.T) {
+	// Authentication must fail closed even when invoked without boot-time
+	// configuration validation.
+	t.Setenv(config.LDAP_URL, "ldaps://ldap.invalid:636")
+	t.Setenv(config.LDAP_USER_DOMAIN, "")
+	settings := config.NewSettings(false)
+
+	user, err := AuthenticateAccess(t.Context(), "alice", "nonempty-password", settings)
+	if user != nil {
+		t.Fatalf("expected no user without LDAP_USER_DOMAIN, got %#v", user)
+	}
+	if !errors.Is(err, ErrInvalidUserDomain) {
+		t.Fatalf("expected ErrInvalidUserDomain, got %v", err)
 	}
 }
 
@@ -58,7 +89,11 @@ func TestLoginIdentifierAppendsDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "example.test")
 	settings := config.NewSettings(false)
 
-	if got := loginIdentifier("alice", settings); got != "alice@example.test" {
+	got, err := loginIdentifier("alice", settings)
+	if err != nil {
+		t.Fatalf("loginIdentifier(): %v", err)
+	}
+	if got != "alice@example.test" {
 		t.Fatalf("expected alice@example.test, got %q", got)
 	}
 }
@@ -67,26 +102,51 @@ func TestLoginIdentifierAppendsDomainWithAtPrefix(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "@example.test")
 	settings := config.NewSettings(false)
 
-	if got := loginIdentifier("alice", settings); got != "alice@example.test" {
+	got, err := loginIdentifier("alice", settings)
+	if err != nil {
+		t.Fatalf("loginIdentifier(): %v", err)
+	}
+	if got != "alice@example.test" {
 		t.Fatalf("expected alice@example.test, got %q", got)
 	}
 }
 
-func TestLoginIdentifierKeepsExistingDomain(t *testing.T) {
+func TestLoginIdentifierRejectsExistingDomain(t *testing.T) {
 	t.Setenv(config.LDAP_USER_DOMAIN, "example.test")
 	settings := config.NewSettings(false)
 
-	if got := loginIdentifier("alice@other.test", settings); got != "alice@other.test" {
-		t.Fatalf("expected unmodified address, got %q", got)
+	got, err := loginIdentifier("alice@other.test", settings)
+	if got != "" {
+		t.Fatalf("expected no identifier, got %q", got)
+	}
+	if !errors.Is(err, ErrDomainQualifiedUsername) {
+		t.Fatalf("expected ErrDomainQualifiedUsername, got %v", err)
 	}
 }
 
-func TestLoginIdentifierWithoutDomain(t *testing.T) {
-	t.Setenv(config.LDAP_USER_DOMAIN, "")
-	settings := config.NewSettings(false)
+func TestLoginIdentifierRejectsInvalidDomain(t *testing.T) {
+	tests := []struct {
+		name   string
+		domain string
+	}{
+		{name: "empty"},
+		{name: "separator only", domain: "@"},
+		{name: "multiple separators", domain: "@@example.test"},
+		{name: "embedded whitespace", domain: "example test"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(config.LDAP_USER_DOMAIN, test.domain)
+			settings := config.NewSettings(false)
 
-	if got := loginIdentifier("alice", settings); got != "alice" {
-		t.Fatalf("expected unmodified username, got %q", got)
+			got, err := loginIdentifier("alice", settings)
+			if got != "" {
+				t.Fatalf("expected no identifier, got %q", got)
+			}
+			if !errors.Is(err, ErrInvalidUserDomain) {
+				t.Fatalf("expected ErrInvalidUserDomain, got %v", err)
+			}
+		})
 	}
 }
 

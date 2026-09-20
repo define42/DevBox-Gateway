@@ -418,7 +418,7 @@ func TestValidateLoginUsername(t *testing.T) {
 	}{
 		{"simple", "johndoe", "johndoe", false},
 		{"trimmed", "  johndoe  ", "johndoe", false},
-		{"email/upn form", "john.doe+test@example.com", "john.doe+test@example.com", false},
+		{"domain-qualified form", "john.doe+test@example.com", "", true},
 		{"digits and hyphen", "dev-user1", "dev-user1", false},
 		{"uppercase allowed", "JohnDoe", "JohnDoe", false},
 		{"empty", "", "", true},

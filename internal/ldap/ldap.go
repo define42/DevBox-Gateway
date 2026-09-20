@@ -27,6 +27,17 @@ var ErrEmptyPassword = errors.New("ldap: password must not be empty")
 // connection anonymous and allow the subsequent search to run without a bind.
 var ErrEmptyIdentifier = errors.New("ldap: login identifier must not be empty")
 
+// ErrDomainQualifiedUsername rejects a login name that already contains a
+// domain. Gateway usernames are deliberately bare: LDAP_USER_DOMAIN is the
+// single authoritative suffix applied to every LDAP bind and search.
+var ErrDomainQualifiedUsername = errors.New("ldap: username must be bare (without a domain)")
+
+// ErrInvalidUserDomain rejects authentication when LDAP_USER_DOMAIN cannot
+// supply exactly one non-empty domain suffix. Production startup validation
+// catches this configuration error; this guard keeps direct callers from
+// silently authenticating with an unsuffixed or malformed name.
+var ErrInvalidUserDomain = errors.New("ldap: LDAP_USER_DOMAIN must contain a valid domain suffix")
+
 // Configured reports whether the required LDAP directory URL is present. Boot
 // validation rejects an empty URL; this helper also lets login-page rendering
 // fail closed when exercised independently in tests.
@@ -63,9 +74,9 @@ func authenticateAccess(ctx context.Context, username, password string, settings
 		return nil, ErrEmptyPassword
 	}
 
-	mail := loginIdentifier(username, settings)
-	if mail == "" {
-		return nil, ErrEmptyIdentifier
+	mail, err := loginIdentifier(username, settings)
+	if err != nil {
+		return nil, err
 	}
 
 	conn, err := dialLDAP(ctx, settings)
@@ -203,17 +214,18 @@ func searchFilter(template, identifier string) string {
 	return fmt.Sprintf(template, ldap.EscapeFilter(identifier))
 }
 
-func loginIdentifier(username string, settings *config.Settings) string {
-	userMailDomain := settings.Get(config.LDAP_USER_DOMAIN)
-
-	mail := username
-	if !strings.Contains(username, "@") && userMailDomain != "" {
-		domain := userMailDomain
-		if !strings.HasPrefix(domain, "@") {
-			domain = "@" + domain
-		}
-		mail = username + domain
+func loginIdentifier(username string, settings *config.Settings) (string, error) {
+	if username == "" {
+		return "", ErrEmptyIdentifier
+	}
+	if strings.ContainsRune(username, '@') {
+		return "", ErrDomainQualifiedUsername
 	}
 
-	return mail
+	domain := strings.TrimPrefix(strings.TrimSpace(settings.Get(config.LDAP_USER_DOMAIN)), "@")
+	if domain == "" || strings.ContainsRune(domain, '@') || strings.ContainsAny(domain, " \t\r\n") {
+		return "", ErrInvalidUserDomain
+	}
+
+	return username + "@" + domain, nil
 }

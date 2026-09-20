@@ -27,7 +27,7 @@ const loginHTML = `<!doctype html>
                 <label class="form-label" for="username">Username</label>
                 <div class="input-group">
                   <span class="input-group-text"><i class="bi bi-person" aria-hidden="true"></i></span>
-                  <input class="form-control" id="username" name="username" autocomplete="username" required>
+                  <input class="form-control" id="username" name="username" autocomplete="username" pattern="[A-Za-z0-9._+\-]+" maxlength="128" title="Enter your username without a domain." autocapitalize="none" spellcheck="false" required>
                 </div>
               </div>
               <div class="mb-4">

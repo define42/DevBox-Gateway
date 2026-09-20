@@ -78,10 +78,18 @@ func extractCredentials(w http.ResponseWriter, r *http.Request) (string, string,
 
 // validateLoginUsername normalizes and constrains the login username before it
 // is trusted downstream. The username becomes the owner half of every VDI name,
-// so the rules live in the vmname package (the single source of truth) and this
-// is a thin wrapper for the login handler.
+// so its general character and length rules live in the vmname package. Login
+// adds the stricter identity rule that users supply only the bare name; LDAP
+// appends the configured domain itself.
 func validateLoginUsername(username string) (string, error) {
-	return vmname.ValidateUsername(username)
+	username, err := vmname.ValidateUsername(username)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsRune(username, '@') {
+		return "", fmt.Errorf("username must be bare (without a domain)")
+	}
+	return username, nil
 }
 
 type loginAuthenticator func(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error)
