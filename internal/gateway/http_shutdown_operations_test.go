@@ -83,6 +83,14 @@ func TestHTTPShutdownCancelsVMCreationAndWaitsForRollback(t *testing.T) {
 		t.Fatalf("disk-copy progress started without a VM volume: %v", err)
 	}
 	expireHTTPDrain(t, runtime)
+	// Closing the client transport can complete responseDone before the server
+	// handler has returned from rollback, so use the handler as the cleanup
+	// barrier before inspecting libvirt state.
+	select {
+	case <-completed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("VM creation did not finish rollback after cancellation")
+	}
 	<-responseDone
 	if exists, _ := hcovDomainState(t, name); exists {
 		t.Fatal("cancelled provisioning left a domain behind")

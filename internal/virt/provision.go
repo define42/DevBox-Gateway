@@ -281,12 +281,29 @@ func provisionAndStartVM(ctx context.Context, conn *libvirt.Connect, settings *c
 	// domain before its volumes; if domain removal fails, its disks stay intact.
 	defer func() {
 		if err != nil {
-			if cleanupErr := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); cleanupErr != nil {
+			if cleanupErr := rollbackVMArtifacts(spec.poolName, spec.vmName, spec.seedISO); cleanupErr != nil {
 				err = errors.Join(err, fmt.Errorf("rollback failed vm %s: %w", spec.vmName, cleanupErr))
 			}
 		}
 	}()
 	return provisionVMResources(ctx, conn, settings, spec, report)
+}
+
+// rollbackVMArtifacts removes a failed provision through a fresh libvirt
+// connection. Canceling a storage stream can invalidate the connection that
+// performed the upload, so reusing it can make cleanup fail. The caller still
+// holds the VM-name lock while this function runs, keeping rollback atomic with
+// another create or remove of the same VM.
+func rollbackVMArtifacts(poolName, vmName, seedISO string) error {
+	conn, err := connectLibvirt()
+	if err != nil {
+		return fmt.Errorf("connect to libvirt for rollback: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Close()
+	}()
+
+	return resetExistingVMArtifacts(conn, poolName, vmName, seedISO)
 }
 
 func provisionVMResources(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {
