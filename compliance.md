@@ -68,7 +68,7 @@ Syscall rows use `always,exit`, an ABI-specific `arch` filter and the listed key
 
 ## DevBox-Gateway structured audit event inventory
 
-These are DevBox-Gateway's application audit events, separate from SauronAgent guest events and ordinary diagnostic logs. They are written as JSON Lines to `AUDIT_LOG_FILE` (default `/var/log/devbox-gateway/audit.jsonl`) and optionally forwarded using `SPLUNK_HEC_*`. Guest events use the separate `SAURON_EVENT_LOG_FILE` / `SAURON_SPLUNK_HEC_*` outputs. See [audit definitions and writer](internal/audit/audit.go) and [output settings](internal/config/config.go).
+These are DevBox-Gateway's application audit events, separate from SauronAgent guest events and ordinary diagnostic logs. They are written as JSON Lines to `AUDIT_LOG_FILE` (default `/var/log/devbox-gateway/audit.jsonl`) and optionally forwarded using `SPLUNK_HEC_*`. Guest events use the separate `SAURON_EVENT_LOG_FILE` / `SAURON_SPLUNK_HEC_*` outputs. See [audit definitions and writer](internal/audit/audit.go), [output settings](internal/config/config.go), and [Splunk forwarding and examples](#splunk-forwarding-and-index-separation).
 
 Every application audit record has `time`, `level`, `msg="audit"`, `action`, `user` and `result`. `result` is `success` or `failure`; omitted results at call sites default to `success`. Optional fields are `source_ip`, `vm`, `resource_type`, `resource`, `protocol`, `operation`, `administrator` and `duration_ms`. Empty optional strings are omitted; `administrator` appears only when true and duration only when positive. Passwords, password hashes and session tokens are not part of this audit schema. Invalid or unavailable login identities can produce an empty `user`.
 
@@ -96,6 +96,245 @@ Every application audit record has `time`, `level`, `msg="audit"`, `action`, `us
 - Browser-session expiry and IP-mismatch invalidation do not themselves close established RDP/noVNC/serial streams; explicit logout requests closure of the user's tracked connections. Dashboard/admin control WebSockets independently close at the session deadline, but do not emit the connection events above. See [dashboard socket lifetime](internal/console/dashboard_socket.go#L138).
 - Dashboard/page views, VM/base-image listings, health checks, static-file requests, dashboard-control WebSockets, DevBox-Gateway process startup/shutdown and background VM auto-shutdown have no dedicated application audit action. VM resource/configuration changes and external LDAP/AD account, group or password changes are not represented by a dedicated action in this inventory.
 - A successful VM lifecycle event reports the operation's return status, not continuous verification of the guest state. Structured VM/admin failures do not include a general error-reason field; details may only be in diagnostic logs. Connection payloads, terminal output and desktop contents are not captured by these audit events.
+
+## Splunk forwarding and index separation
+
+DevBox-Gateway supports direct forwarding to Splunk's HTTP Event Collector (HEC). The supplied [Docker Compose deployment](docker-compose.yml) routes application audit events and SauronAgent guest events into **two separate indexes**:
+
+| Event stream | Index in the supplied deployment | Index setting | HEC `source` / `sourcetype` | HEC `host` and `time` |
+|---|---|---|---|---|
+| DevBox-Gateway application audits: login/logout, VM lifecycle, connections and base-image administration | `devbox_audit` | `SPLUNK_HEC_INDEX` | `devbox-gateway` / `devbox-gateway:audit` | DevBox-Gateway host's hostname; application forwarding timestamp |
+| SauronAgent guest events and collector-generated `sauron.*` events | `devbox_sauron` | `SAURON_SPLUNK_HEC_INDEX` | `sauronagent` / `devbox-gateway:sauron` | Source VM name when available; collector receive timestamp (`received_at`) |
+
+The index names are configurable, not hard-coded or enforced to be different. Both index settings default to empty, which omits the HEC `index` field and uses the token's default index. Set both explicitly to preserve the separation above. The two streams can use the same Splunk endpoint, with independently configured tokens and indexes. Sources: [application forwarding](internal/audit/hec.go), [guest forwarding](internal/sauron/forward.go), and [HEC envelope](internal/splunkhec/splunkhec.go).
+
+### Forwarding configuration
+
+Set these environment-backed settings on **DevBox-Gateway**, not inside a SauronAgent YAML file. Replace the example endpoint and token placeholders with deployment values; do not commit real tokens.
+
+```ini
+SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
+SPLUNK_HEC_TOKEN=<application-hec-token>
+SPLUNK_HEC_INDEX=devbox_audit
+SPLUNK_HEC_SKIP_TLS_VERIFY=false
+
+SAURON_SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
+SAURON_SPLUNK_HEC_TOKEN=<guest-hec-token>
+SAURON_SPLUNK_HEC_INDEX=devbox_sauron
+SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=false
+```
+
+A URL without a path uses `/services/collector/event`. Provision the indexes and allow the corresponding HEC tokens to write to them; DevBox-Gateway does not create Splunk indexes. The bundled development Splunk instance provisions both through [post-setup tasks](testsplunk/create_index.yml). Use HTTPS with a trusted certificate. For token setup, including the current client's requirement to disable HEC indexer acknowledgement, see the [HEC setup instructions](README.md#forwarding-to-splunk-hec).
+
+HEC forwarding is optional and disabled when its endpoint is unset; remove the associated token/index settings as well when disabling it. This does not disable SauronAgent collection: DevBox-Gateway always starts the collector on AF_VSOCK port 9000. `AUDIT_LOG_FILE` remains enabled alongside application HEC forwarding. The guest JSON Lines output is independently controlled by `SAURON_EVENT_LOG_FILE`; at least that file or guest HEC forwarding must be configured.
+
+### Delivery and compliance boundaries
+
+- **Application audits:** HEC forwarding is best-effort, using an in-memory queue of up to 10,000 events. Retryable failures are retried with backoff, but queue overflow, process termination, an exhausted shutdown flush or non-retryable responses can lose the forwarded copy. The local audit file is written separately; the HEC forwarder does not automatically replay that file. See [application delivery](internal/audit/hec.go).
+- **Guest events:** forwarding uses the persistent `SAURON_SPOOL_DIR` spool and resumes after DevBox-Gateway restarts. With HEC enabled, guest acknowledgement requires acceptance into this spool and any other configured sink, not receipt by Splunk. Delivery is at-least-once, so duplicates are possible. The spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default); a full spool stops new acknowledgements, leaving events in the guests' bounded spools. Permanently invalid or oversized HEC events can be dropped with diagnostics. This is not an unlimited or loss-free retention guarantee. See [guest spool and forwarding](internal/sauron/forward.go) and [guest spool limits](SauronAgent/internal/spool/spool.go).
+
+Separate indexes permit different access and retention policies, but forwarding alone does not establish those policies, tamper protection, review procedures or full NATO compliance. Verify both streams end to end in the deployed Splunk instance, including failure/recovery behaviour and the controls identified under [related requirements](#related-requirements-outside-this-comparison).
+
+### JSON event examples
+
+The following values are **synthetic examples**, not captured production events or evidence of successful delivery. Timestamps, usernames, IP addresses, VM identifiers and sequence numbers are illustrative. The HEC wrapper's `index`, `source`, `sourcetype`, `host` and numeric Unix-seconds `time` are routing metadata; its `event` value is the JSON payload sent for indexing.
+
+#### DevBox-Gateway application events: `devbox_audit`
+
+A successful login, shown as a complete HEC event object:
+
+```json
+{
+  "time": 1789898400,
+  "host": "hypervisor-01",
+  "source": "devbox-gateway",
+  "sourcetype": "devbox-gateway:audit",
+  "index": "devbox_audit",
+  "event": {
+    "time": "2026-09-20T10:00:00Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "user.login",
+    "user": "alice",
+    "result": "success",
+    "source_ip": "192.0.2.10"
+  }
+}
+```
+
+Additional application payload examples show a failed login, VM creation, an RDP connection and disconnection, browser-session expiry, and administrator image upload. Each object below is a separate event body, written as one JSON Lines record locally and placed in its own HEC wrapper like the one above with `index=devbox_audit`. The array groups examples for documentation only: actual HEC batches concatenate wrapped event objects, not a JSON array.
+
+```json
+[
+  {
+    "time": "2026-09-20T09:59:00Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "user.login",
+    "user": "alice",
+    "result": "failure",
+    "source_ip": "192.0.2.10",
+    "operation": "authentication_failed"
+  },
+  {
+    "time": "2026-09-20T10:01:00Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "vm.create",
+    "user": "alice",
+    "result": "success",
+    "source_ip": "192.0.2.10",
+    "vm": "alice.dev"
+  },
+  {
+    "time": "2026-09-20T10:01:30Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "connection.connect",
+    "user": "alice",
+    "result": "success",
+    "source_ip": "192.0.2.10",
+    "vm": "alice.dev",
+    "protocol": "rdp"
+  },
+  {
+    "time": "2026-09-20T10:16:30Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "connection.disconnect",
+    "user": "alice",
+    "result": "success",
+    "source_ip": "192.0.2.10",
+    "vm": "alice.dev",
+    "protocol": "rdp",
+    "duration_ms": 900000
+  },
+  {
+    "time": "2026-09-20T10:30:00Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "user.logout",
+    "user": "alice",
+    "result": "success",
+    "source_ip": "192.0.2.10",
+    "operation": "timeout"
+  },
+  {
+    "time": "2026-09-20T11:00:00Z",
+    "level": "INFO",
+    "msg": "audit",
+    "action": "admin.base_image.upload",
+    "user": "operator",
+    "result": "success",
+    "source_ip": "192.0.2.20",
+    "resource_type": "base_image",
+    "resource": "ubuntu.qcow2",
+    "administrator": true
+  }
+]
+```
+
+#### SauronAgent guest events: `devbox_sauron`
+
+Guest HEC payloads retain an additional collector envelope: `received_at`, trusted `source` identity and the normalized guest `event`. The examples below are shortened native x86-64 audit events. Raw records, record-type lists, additional syscall/path details and some process and guest-reported identity fields are omitted for readability; production output preserves raw records by default. The VM owner in `source.labels.owner` identifies the DevBox-Gateway owner, whereas `uid` and `auid` identify guest accounts and must be resolved against guest identity records. Guest-supplied identity under `source.reported` is not authoritative VM attribution.
+
+Program execution (`process.exec`):
+
+```json
+{
+  "time": 1789898520.318,
+  "host": "alice.dev",
+  "source": "sauronagent",
+  "sourcetype": "devbox-gateway:sauron",
+  "index": "devbox_sauron",
+  "event": {
+    "received_at": "2026-09-20T10:02:00.318Z",
+    "source": {
+      "cid": 7,
+      "vm": "alice.dev",
+      "host": "hypervisor-01",
+      "uuid": "287548af-9df6-4829-8890-0d8678481827",
+      "labels": { "owner": "alice" },
+      "known": true,
+      "reported": { "hostname": "dev" }
+    },
+    "event": {
+      "version": 1,
+      "sequence": 1201,
+      "timestamp": "2026-09-20T10:02:00.312Z",
+      "type": "process.exec",
+      "severity": "info",
+      "audit_id": "1789898520.312:8421",
+      "boot_id": "8f1d0c1e-2b4a-4a7e-9f31-0d5c6b2a7e10",
+      "pid": 4821,
+      "uid": 1000,
+      "gid": 1000,
+      "auid": 1000,
+      "exe": "/usr/bin/id",
+      "command": "id",
+      "result": "success",
+      "fields": {
+        "arch": "c000003e",
+        "syscall": "59",
+        "syscall_name": "execve",
+        "key": "exec",
+        "argv": ["id"],
+        "exit": 0
+      }
+    }
+  }
+}
+```
+
+Credential-store replacement (`file.modify`): this example represents a successful `rename` replacing `/etc/shadow`, selected by the `sauron_credentials` watch. It records the operation and paths, not a password, hash, file-content diff or proof of a particular account's password change. `uid=0` with `auid=1000` illustrates an elevated process retaining its original login identity.
+
+```json
+{
+  "time": 1789898580.418,
+  "host": "alice.dev",
+  "source": "sauronagent",
+  "sourcetype": "devbox-gateway:sauron",
+  "index": "devbox_sauron",
+  "event": {
+    "received_at": "2026-09-20T10:03:00.418Z",
+    "source": {
+      "cid": 7,
+      "vm": "alice.dev",
+      "host": "hypervisor-01",
+      "uuid": "287548af-9df6-4829-8890-0d8678481827",
+      "labels": { "owner": "alice" },
+      "known": true,
+      "reported": { "hostname": "dev" }
+    },
+    "event": {
+      "version": 1,
+      "sequence": 1242,
+      "timestamp": "2026-09-20T10:03:00.412Z",
+      "type": "file.modify",
+      "severity": "info",
+      "audit_id": "1789898580.412:8490",
+      "boot_id": "8f1d0c1e-2b4a-4a7e-9f31-0d5c6b2a7e10",
+      "pid": 4890,
+      "uid": 0,
+      "gid": 0,
+      "auid": 1000,
+      "exe": "/usr/bin/passwd",
+      "command": "passwd alice",
+      "result": "success",
+      "fields": {
+        "arch": "c000003e",
+        "syscall": "82",
+        "syscall_name": "rename",
+        "key": "sauron_credentials",
+        "exit": 0
+      },
+      "paths": ["/etc/shadow+", "/etc/shadow"]
+    }
+  }
+}
+```
+
+For both guest examples, HEC `time` matches the collector's `received_at`, not the guest-controlled `event.timestamp`. Inside the indexed JSON payload, the normalized type is `event.type` and the audit key is `event.fields.key`; the extra outer `event` in the examples belongs to the HEC wrapper. `result=success` describes the audited syscall, not the eventual exit status of the launched program. See the [collector envelope](SauronAgent/internal/output/sink.go), [event schema](SauronAgent/internal/event/event.go), and [normalizer](SauronAgent/internal/event/normalize.go).
 
 ## Remaining work before claiming compliance
 

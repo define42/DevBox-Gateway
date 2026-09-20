@@ -489,6 +489,10 @@ syntax (e.g. `15s`, `2m`, `500ms`).
 
 ### Audit logs and Splunk
 
+See [compliance.md](compliance.md) for the NATO AC/35-D/2003-REV5 §26.3.1
+coverage comparison, audit-rule and event inventories, Splunk index routing,
+JSON event examples and remaining compliance gaps.
+
 Security-relevant activity is appended to `AUDIT_LOG_FILE` as JSON Lines
 (NDJSON): each physical line is an independently parseable JSON event. The
 native packages default to `/var/log/devbox-gateway/audit.jsonl`; systemd
