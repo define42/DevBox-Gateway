@@ -27,8 +27,8 @@ listen:
   # here would make the collector deaf to all the others.
   cid: 4294967295
 
-  # VSOCK port guests dial. Must match vsock.port in the agent configuration.
-  # Ports below 1024 would require CAP_NET_BIND_SERVICE; 9000 does not.
+  # VSOCK port guests dial. The agent's compiled-in port is 9000. Ports below
+  # 1024 would require CAP_NET_BIND_SERVICE; 9000 does not.
   port: 9000
 
   # host:port used when kind is "tcp". Ignored for vsock.
@@ -145,8 +145,8 @@ monitor:
   # has for an agent that was killed inside a compromised guest.
   enabled: true
   # Silence tolerated from an expected VM before reporting it lost. Must be
-  # larger than the agent's heartbeat.interval (30s by default) plus a margin
-  # for a reconnect with backoff.
+  # larger than the agent's built-in 30s heartbeat interval plus a margin for a
+  # reconnect with backoff.
   timeout: 90s
   # How often stream health is evaluated.
   check_interval: 15s
@@ -168,7 +168,7 @@ limits:
   handshake_timeout: 10s
 
   # A connection that sends nothing at all, not even heartbeats, is closed
-  # after this long. Keep it above the agent's heartbeat.interval.
+  # after this long. Keep it above the agent's built-in heartbeat interval.
   idle_timeout: 5m
 
   # Acknowledge every N events. Larger batches cost fewer frames but leave
@@ -183,8 +183,8 @@ limits:
   # Recent sequence numbers remembered per (CID, boot ID) for duplicate
   # suppression. Delivery is at-least-once, so a reconnect legitimately
   # replays events; this window is what keeps them from being written twice.
-  # It must exceed the agent's transport.max_unacked (1024 by default) by a
-  # wide margin.
+  # It must exceed the agent's built-in 1024-event unacked window by a wide
+  # margin.
   dedup_window: 65536
 
   # SECURITY. Accept guests with no entry in the vms list above. They are

@@ -3,7 +3,7 @@
 #   make build     both binaries into ./bin
 #   make test      unit tests
 #   make fuzz      a short run of every fuzz target in the tree
-#   make install   binaries, systemd units, sysusers/tmpfiles, example configs
+#   make install   binaries, systemd units, sysusers/tmpfiles, collector example config
 #
 # Nothing here needs a tool that is not in the Go distribution: a security
 # agent whose build depends on a linter downloaded at build time has a supply
@@ -117,7 +117,7 @@ cover:
 clean:
 	rm -rf $(BINDIR) $(COVERPROFILE)
 
-# The agent runs on its built-in defaults and needs no configuration file. The
+# The agent runs on its built-in defaults and accepts no configuration file. The
 # collector's example is installed as a .example file: overwriting a running
 # deployment's configuration from a package upgrade could silently re-enable
 # something an operator turned off.

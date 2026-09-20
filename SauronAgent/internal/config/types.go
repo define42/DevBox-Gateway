@@ -1,5 +1,5 @@
-// Package config defines and loads the YAML configuration for both the guest
-// agent and the host collector.
+// Package config defines the guest agent's built-in settings and loads the
+// host collector's YAML configuration.
 package config
 
 import (

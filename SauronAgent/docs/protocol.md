@@ -16,8 +16,9 @@ A session is one `AF_VSOCK` `SOCK_STREAM` connection. The guest dials
 `VMADDR_CID_HOST` (CID 2) on the collector's port, 9000 by default. The
 collector binds `VMADDR_CID_ANY` and accepts from any CID.
 
-A TCP transport exists for development (`transport.kind: tcp`). The framing is
-identical; what is lost is the authoritative peer identity, because a TCP peer
+A TCP transport implementation exists for development and integration tests.
+The production agent's compiled settings select VSOCK. The framing is identical
+over TCP; what is lost is the authoritative peer identity, because a TCP peer
 address is a claim and a CID is not.
 
 Nothing is layered under or over the framing: the connection carries a stream
@@ -193,7 +194,7 @@ events is still released from the guest's spool promptly.
 
 ### 4.5 `PING` and `PONG`
 
-The agent's heartbeat, sent every `heartbeat.interval` (default 30s).
+The agent's heartbeat, sent every 30 seconds by the compiled policy.
 
 ```json
 {"uptime":86400,"events_received":1502334,"events_sent":1502290,"events_spooled":44,"events_dropped":0,"audit_enabled":true,"queue_depth":12,"spool_bytes":262144}
@@ -247,16 +248,16 @@ worth investigating.
 
 ## 5. Size limits
 
-| Limit | Default | Configured by |
+| Limit | Default | Defined by |
 |---|---|---|
-| Maximum payload, agent | 1 MiB | `transport.max_payload_size` |
-| Maximum payload, host | 1 MiB | `limits.max_payload_size` |
+| Maximum payload, agent | 1 MiB | compiled `config.DefaultAgent` value |
+| Maximum payload, host | 1 MiB | SauronHost `limits.max_payload_size` |
 | Absolute ceiling | 64 MiB | compiled in (`MaxPayloadCeiling`) |
 
-Both ends enforce their own limit on receive, and a configured value above the
-ceiling is clamped to it, so a configuration mistake cannot switch the
-protection off. A sender that would exceed its own limit MUST fail the send
-locally rather than emit a frame the peer is certain to reject.
+Both ends enforce their own receive limit. A value above the absolute ceiling
+is clamped to it, so neither an agent build nor a host configuration mistake can
+switch the protection off. A sender that would exceed its own limit MUST fail
+the send locally rather than emit a frame the peer is certain to reject.
 
 ## 6. Sequence numbers, boot ids and deduplication
 
@@ -283,8 +284,8 @@ Delivery is **at-least-once**. After a reconnect the agent re-sends everything
 its spool still holds above `resume_from`, so duplicates are normal and
 expected; the host suppresses them using a window of recent sequence numbers
 per (CID, boot id) (`limits.dedup_window`, default 65536). The window must be
-larger than the agent's `transport.max_unacked` by a wide margin, or a replay
-after a long outage will be written twice.
+larger than the agent's built-in 1024-event unacked window by a wide margin, or
+a replay after a long outage will be written twice.
 
 A **gap** in received sequences is not the same as a duplicate and must not be
 discarded quietly. Either the agent reported the loss itself -- a
@@ -310,7 +311,7 @@ range -- or nobody did, and that is a finding.
           |----------------------------------->|
           |                        ACK seq=N+1 |
           |<-----------------------------------|
-          |  PING                              |   every heartbeat.interval
+          |  PING                              |   every 30 seconds
           |----------------------------------->|
           |                               PONG |
           |<-----------------------------------|
@@ -336,11 +337,10 @@ Rules:
 
 ### Reconnection
 
-The agent reconnects with exponential backoff and jitter
-(`reconnect.initial_delay` 100ms, doubling to `reconnect.max_delay` 10s, with
-20% jitter). It keeps reading audit records and spooling them throughout the
-outage. Jitter exists so that a fleet of guests does not reconnect to a
-restarted collector in lockstep.
+The agent reconnects with compiled exponential-backoff values and 20% jitter:
+100ms initially, doubling to a 10s maximum. It keeps reading audit records and
+spooling them throughout the outage. Jitter exists so that a fleet of guests
+does not reconnect to a restarted collector in lockstep.
 
 ## 8. Error handling summary
 

@@ -19,9 +19,8 @@ import (
 
 // These tests drive run() in process. Spawning the built binary is the
 // end-to-end test's job; what matters here is the surface the packaging
-// depends on -- the three flags, the built-in defaults the shipped unit runs
-// on, a configuration the agent does not understand stopping it before it starts,
-// and the two signals doing two different things.
+// depends on -- the two flags, the built-in configuration the shipped unit
+// runs on, and the two signals doing two different things.
 //
 // Nothing here sleeps to synchronise: the shutdown test polls for a state with
 // a deadline, and the signal tests drive an injected channel.
@@ -53,16 +52,6 @@ func (w *syncWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String()
-}
-
-// writeConfig writes a configuration file into the test's temporary directory.
-func writeConfig(t *testing.T, contents string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "sauronagent.yaml")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("writing config: %v", err)
-	}
-	return path
 }
 
 // waitFor polls cond until it holds or the deadline passes.
@@ -119,10 +108,13 @@ func TestHelpFlagIsNotAFailure(t *testing.T) {
 	if code := run(context.Background(), []string{"-h"}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit status = %d, want %d", code, exitOK)
 	}
-	for _, want := range []string{"-config", "-check-config", "-version"} {
+	for _, want := range []string{"-check-config", "-version"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("usage does not mention %s:\n%s", want, stderr.String())
 		}
+	}
+	if strings.Contains(stderr.String(), "\n  -config ") {
+		t.Errorf("usage still advertises the removed -config flag:\n%s", stderr.String())
 	}
 }
 
@@ -133,6 +125,19 @@ func TestUnknownFlagIsAUsageError(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not-a-flag") {
 		t.Errorf("stderr does not name the flag:\n%s", stderr.String())
+	}
+}
+
+func TestConfigFlagIsAUsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"-config", "ignored"}, &stdout, &stderr); code != exitUsage {
+		t.Fatalf("exit status = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr.String(), "-config") {
+		t.Errorf("stderr does not name the removed flag:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing", stdout.String())
 	}
 }
 
@@ -156,111 +161,19 @@ func TestUnexpectedArgumentIsAUsageError(t *testing.T) {
 // -check-config
 // ---------------------------------------------------------------------------
 
-func TestCheckConfigAcceptsAGoodFile(t *testing.T) {
-	spool := filepath.Join(t.TempDir(), "spool")
-	path := writeConfig(t, fmt.Sprintf(`
-audit:
-  preserve_raw: false
-  manage_rules: false
-vsock:
-  cid: 2
-  port: 9100
-queue:
-  capacity: 2048
-spool:
-  path: %s
-`, spool))
-
-	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"-check-config", "-config", path}, &stdout, &stderr); code != exitOK {
-		t.Fatalf("exit status = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
-	}
-	out := stdout.String()
-	for _, want := range []string{path, "is valid", "vsock cid 2 port 9100", "2048 events", spool, "preserve_raw=false", "manage_rules=false"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("summary does not report %q:\n%s", want, out)
-		}
-	}
-	// Validating a configuration must not have side effects: an operator runs
-	// this against a file a running agent owns.
-	if _, err := os.Stat(spool); !os.IsNotExist(err) {
-		t.Errorf("-check-config created the spool directory (stat error: %v)", err)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want nothing", stderr.String())
-	}
-}
-
-func TestCheckConfigWithNoFileReportsTheDefaults(t *testing.T) {
+func TestCheckConfigReportsTheBuiltInConfiguration(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run(context.Background(), []string{"-check-config"}, &stdout, &stderr); code != exitOK {
 		t.Fatalf("exit status = %d, want %d (stderr: %s)", code, exitOK, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "built-in default configuration") {
-		t.Errorf("stdout does not say the defaults were used:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "built-in configuration") {
+		t.Errorf("stdout does not identify the built-in configuration:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "manage_rules=true") {
 		t.Errorf("defaults do not enable automatic rule setup:\n%s", stdout.String())
 	}
-}
-
-// A typo in a security-relevant key must not leave the default silently in
-// place, so the loader rejects unknown fields and the agent refuses to start.
-func TestCheckConfigRejectsAMisspelledKey(t *testing.T) {
-	path := writeConfig(t, "audit:\n  preserv_raw: true\n")
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"-check-config", "-config", path}, &stdout, &stderr)
-	if code == exitOK {
-		t.Fatalf("exit status = %d, want non-zero (stdout: %s)", code, stdout.String())
-	}
-	msg := stderr.String()
-	if !strings.Contains(msg, "preserv_raw") || !strings.Contains(msg, path) {
-		t.Errorf("stderr does not name the key and the file:\n%s", msg)
-	}
-	if strings.Contains(stdout.String(), "is valid") {
-		t.Errorf("a rejected configuration was reported as valid:\n%s", stdout.String())
-	}
-}
-
-func TestCheckConfigRejectsAnImpossibleValue(t *testing.T) {
-	path := writeConfig(t, "transport:\n  kind: quic\n")
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"-check-config", "-config", path}, &stdout, &stderr)
-	if code == exitOK {
-		t.Fatalf("exit status = %d, want non-zero", code)
-	}
-	if !strings.Contains(stderr.String(), "transport.kind") {
-		t.Errorf("stderr does not name the setting:\n%s", stderr.String())
-	}
-}
-
-func TestMissingConfigFileIsFatal(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "absent.yaml")
-
-	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"-config", path}, &stdout, &stderr)
-	if code == exitOK {
-		t.Fatalf("exit status = %d, want non-zero", code)
-	}
-	if !strings.Contains(stderr.String(), path) {
-		t.Errorf("stderr does not name the file:\n%s", stderr.String())
-	}
-}
-
-// A logging destination that cannot be opened is a configuration error too: an
-// agent whose diagnostics go nowhere is an agent nobody can troubleshoot.
-func TestUnusableLogDestinationIsFatal(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "no-such-dir", "agent.log")
-	path := writeConfig(t, fmt.Sprintf("logging:\n  output: %s\n", logPath))
-
-	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"-config", path}, &stdout, &stderr); code == exitOK {
-		t.Fatalf("exit status = %d, want non-zero", code)
-	}
-	if !strings.Contains(stderr.String(), logPath) {
-		t.Errorf("stderr does not name the log file:\n%s", stderr.String())
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing", stderr.String())
 	}
 }
 
@@ -274,37 +187,33 @@ func TestUnusableLogDestinationIsFatal(t *testing.T) {
 func TestRunStopsCleanlyWhenTheContextIsCancelled(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "agent.log")
-	// No netlink socket is opened (audit.enabled: false), and the collector
+	// No netlink socket is opened, and the collector
 	// address is a port nothing listens on, so the sender spends the test
 	// failing to connect -- which is the state a real guest is in whenever the
 	// hypervisor's collector is down, and it must still stop cleanly.
-	path := writeConfig(t, fmt.Sprintf(`
-audit:
-  enabled: false
-transport:
-  kind: tcp
-  tcp_address: %q
-queue:
-  capacity: 64
-spool:
-  path: %s
-  max_size: 1MiB
-  segment_size: 64KiB
-reconnect:
-  initial_delay: 20ms
-  max_delay: 20ms
-logging:
-  level: info
-  format: text
-  output: %s
-`, deadTCPAddress(t), filepath.Join(dir, "spool"), logPath))
+	cfg := config.DefaultAgent()
+	cfg.Audit.Enabled = false
+	cfg.Transport.Kind = config.TransportTCP
+	cfg.Transport.TCPAddress = deadTCPAddress(t)
+	cfg.Queue.Capacity = 64
+	cfg.Spool.Path = filepath.Join(dir, "spool")
+	cfg.Spool.MaxSize = config.Size(1 << 20)
+	cfg.Spool.SegmentSize = config.Size(64 << 10)
+	cfg.Reconnect.InitialDelay = config.Duration(20 * time.Millisecond)
+	cfg.Reconnect.MaxDelay = config.Duration(20 * time.Millisecond)
+	cfg.Logging.Level = "info"
+	cfg.Logging.Format = "text"
+	cfg.Logging.Output = logPath
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("test configuration is invalid: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var stdout, stderr syncWriter
 	done := make(chan int, 1)
-	go func() { done <- run(ctx, []string{"-config", path}, &stdout, &stderr) }()
+	go func() { done <- runAgent(ctx, cfg, &stdout, &stderr) }()
 
 	// Wait for the agent to be up before stopping it, so the test covers a
 	// running pipeline being torn down rather than a context that was already
@@ -331,8 +240,8 @@ logging:
 	log := string(data)
 	// The startup line is what ties a journal to a guest, the boot id is what
 	// scopes the sequence numbers the collector deduplicates on, and the config
-	// is how an operator tells a drop-in's file from the built-in defaults.
-	for _, want := range []string{"boot_id=", "target=", "config=" + path, "sauronagent stopped"} {
+	// records that the executable's built-in policy is in force.
+	for _, want := range []string{"boot_id=", "target=", "config=built-in", "sauronagent stopped"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log does not contain %q:\n%s", want, log)
 		}
@@ -478,10 +387,13 @@ func TestStartupHintNamesTheCapabilityAndTheUnit(t *testing.T) {
 func TestStartupHintForAuditControl(t *testing.T) {
 	err := fmt.Errorf("audit: configure rules requires CAP_AUDIT_CONTROL: %w", syscall.EPERM)
 	hint := startupHint(defaultTestConfig(t), err)
-	for _, want := range []string{"CAP_AUDIT_CONTROL", "sauronagent.service", "audit.manage_rules: false"} {
+	for _, want := range []string{"CAP_AUDIT_CONTROL", "sauronagent.service"} {
 		if !strings.Contains(hint, want) {
 			t.Errorf("hint does not mention %q: %s", want, hint)
 		}
+	}
+	if strings.Contains(hint, "audit.manage_rules") {
+		t.Errorf("hint recommends a removed configuration setting: %s", hint)
 	}
 }
 
@@ -512,9 +424,9 @@ func TestStartupHintIsSilentForOtherFailures(t *testing.T) {
 // already been shown to accept.
 func defaultTestConfig(t *testing.T) config.Agent {
 	t.Helper()
-	cfg, err := config.LoadAgent("")
-	if err != nil {
-		t.Fatalf("loading the default configuration: %v", err)
+	cfg := config.DefaultAgent()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validating the built-in configuration: %v", err)
 	}
 	return cfg
 }

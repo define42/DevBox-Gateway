@@ -13,7 +13,7 @@ Two programs:
 
 | Program | Runs on | Needs | Does |
 |---|---|---|---|
-| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, a virtio-vsock device | configures execution auditing, reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
+| `sauronagent` | inside each guest | `CAP_AUDIT_READ`, `CAP_AUDIT_CONTROL`, a virtio-vsock device | configures the managed audit baseline, reads `NETLINK_AUDIT`, correlates, normalizes, spools, sends |
 | `sauronhost` | the hypervisor | no capabilities at all | accepts VSOCK connections, identifies each guest by its CID, enriches, writes events onward |
 
 ## Data path
@@ -67,9 +67,9 @@ to both ends:
 * **The transport carries identity.** See below. An IP address is a claim; a
   CID is assigned by the hypervisor.
 
-`transport.kind: tcp` exists for development and integration tests. It is
-never the right choice in a deployment: it reintroduces every dependency above
-and it gives the collector no trustworthy way to say which VM it is talking to.
+A TCP transport implementation exists for development and integration tests.
+The production agent is compiled to use VSOCK: TCP would reintroduce every
+dependency above and gives the collector no trustworthy way to identify a VM.
 
 ## The CID is the identity
 
@@ -138,19 +138,22 @@ systemctl daemon-reload
 systemctl enable --now sauronagent
 ```
 
-The agent needs no configuration file. Its built-in defaults dial `CID 2`
-(`VMADDR_CID_HOST`) port 9000 and spool to `/var/lib/sauronagent/spool`, which
-is what a guest needs. To change a setting, see
-[docs/deployment.md](docs/deployment.md#changing-an-agent-setting).
+The agent accepts no configuration file. All guest-agent settings are compiled
+into `config.DefaultAgent`: it dials `CID 2` (`VMADDR_CID_HOST`) port 9000 and
+spools to `/var/lib/sauronagent/spool`. Run `sauronagent -check-config` to
+validate and inspect those built-in settings without starting collection.
 
 On startup, the agent enables kernel auditing and ensures `execve`/`execveat`
-rules are loaded, including the 32-bit compatibility ABI on x86_64. Commands
-such as `nmap` then produce process execution events. Setup uses netlink
-directly; no rules file, `auditd`, or audit tools are required. The RPM and DEB
-install both components without starting them, so enable the guest unit as
-shown above. Every subsequent start reapplies the execution baseline as needed.
-See [guest audit rules](docs/deployment.md#guest-audit-rules) for conflicting
-policy and the `audit.manage_rules: false` option for external rule management.
+rules are loaded, including the 32-bit compatibility ABI on x86_64. It also
+installs write/attribute-change watches for `/etc/passwd`, `/etc/shadow`,
+`/etc/group`, `/etc/gshadow`, and `/etc/security/opasswd`. Commands such as
+`nmap` then produce process execution events, while account database changes
+produce file events. Setup uses netlink directly; no rules file, `auditd`, or
+audit tools are required. The RPM and DEB install both components without
+starting them, so enable the guest unit as shown above. Every subsequent start
+reapplies the managed baseline as needed. See
+[guest audit rules](docs/deployment.md#guest-audit-rules) for exact keys,
+conflicting-policy handling, and optional broader coverage.
 
 ## The normalized event
 
@@ -165,7 +168,8 @@ Categories: `process.exec`, `process.exit`, `file.access`, `file.create`,
 `audit.configuration`, `firewall.configuration`, `selinux.denial`,
 `system.security`.
 
-`cat /etc/shadow`, as the agent emits it (real output, `preserve_raw: false`):
+`cat /etc/shadow`, with the built-in raw-record array omitted here for
+readability:
 
 ```json
 {
@@ -197,7 +201,7 @@ Categories: `process.exec`, `process.exit`, `file.access`, `file.create`,
     "comm": "cat",
     "tty": "pts0",
     "ses": "7",
-    "key": "exec-watch",
+    "key": "exec",
     "euid": "0", "suid": "0", "fsuid": "0",
     "egid": "0", "sgid": "0", "fsgid": "0",
     "items": "3",
@@ -229,10 +233,9 @@ Three properties of that document are deliberate:
   indistinguishable from an attacker suppressing it.
 * **The kernel's own words survive.** Where the agent interprets a value it
   stores the interpretation *next to* the literal: `syscall: "59"` keeps its
-  company in `syscall_name: "execve"`. With the default `preserve_raw: true`
-  the event additionally carries a `raw` array with the original record text
-  verbatim, which is what forensic review and parser regressions are checked
-  against.
+  company in `syscall_name: "execve"`. The built-in policy additionally carries
+  a `raw` array with the original record text verbatim, which is what forensic
+  review and parser regressions are checked against.
 * **`uid: 0` is not the same as "no uid".** The identity fields are omitted
   when the records do not carry them and are present when they do, so the most
   security-relevant value in the model cannot be confused with a default.
@@ -298,14 +301,11 @@ inside a guest is to silence its telemetry, and only the host can notice that.
 The agent runs as the `sauronagent` system user with `CAP_AUDIT_READ` and
 `CAP_AUDIT_CONTROL`, granted ambiently and bounded by its systemd unit.
 `CAP_AUDIT_READ` permits joining the `NETLINK_AUDIT` read-log multicast group;
-`CAP_AUDIT_CONTROL` permits enabling auditing and installing execution rules.
-Both capabilities remain available for the process lifetime. The agent never
-registers as the audit daemon and can coexist with `auditd`. It has no
-`CAP_SYS_ADMIN` and the service never runs as root.
-
-For externally managed audit policy, set `audit.manage_rules: false` and
-restrict the unit to `CAP_AUDIT_READ`; see the deployment guide. This mode
-collects the events produced by the existing policy without changing it.
+`CAP_AUDIT_CONTROL` permits enabling auditing and installing the managed
+process-execution and identity/credential file rules. Both capabilities remain
+available for the process lifetime. The agent never registers as the audit
+daemon and can coexist with `auditd`. It has no `CAP_SYS_ADMIN` and the service
+never runs as root.
 
 The collector runs with an empty capability bounding set. It parses frames sent
 by guests that must be assumed hostile, so the process doing that parsing is
@@ -339,7 +339,7 @@ make test-race       # the same with the race detector
 make vet             # go vet (also "make lint"; no external linters)
 make fuzz            # a short run of every fuzz target
 make cover           # coverage summary
-make install         # binaries, units, sysusers/tmpfiles, example configs
+make install         # binaries, units, sysusers/tmpfiles, collector example config
 ```
 
 `VERSION` is compiled in and reported to the collector in HELLO, so the host
@@ -362,4 +362,4 @@ standard library.
 | [docs/security.md](docs/security.md) | threat model, stated honestly: what this does and does not protect against |
 | [docs/deployment.md](docs/deployment.md) | installing, sizing, monitoring and troubleshooting |
 | [examples/qemu-vsock.md](examples/qemu-vsock.md) | giving a VM a vsock device and verifying it |
-| [examples/sauronagent.yaml](examples/sauronagent.yaml), [examples/sauronhost.yaml](examples/sauronhost.yaml) | every setting, commented, at its default |
+| [examples/sauronhost.yaml](examples/sauronhost.yaml) | collector settings, commented, at their defaults |

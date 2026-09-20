@@ -5,16 +5,12 @@
 // Usage:
 //
 //	sauronagent
-//	sauronagent -config /etc/sauronagent/sauronagent.yaml
-//	sauronagent -check-config [-config file]
+//	sauronagent -check-config
 //	sauronagent -version
 //
-// With no -config the agent runs on its built-in defaults, which is how the
-// shipped unit starts it. The flag set is deliberately this small. Everything
-// that changes what the agent collects, keeps or sends lives in the defaults or
-// in the one configuration file, where it is reviewable, version controlled and
-// exactly what -check-config validated. A fleet whose agents are each tuned by
-// a different ExecStart= line is a fleet whose audit coverage nobody can state.
+// Everything that changes what the agent collects, keeps or sends is compiled
+// into the binary. The agent does not read a configuration file. -check-config
+// validates and reports those built-in settings without starting collection.
 package main
 
 import (
@@ -71,9 +67,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	flags.Usage = func() { usage(stderr, flags) }
 
-	configPath := flags.String("config", "", "configuration `file` to load")
 	showVersion := flags.Bool("version", false, "print the version and exit")
-	checkConfig := flags.Bool("check-config", false, "load and validate the configuration, report the result and exit")
+	checkConfig := flags.Bool("check-config", false, "validate and report the built-in configuration, then exit")
 
 	switch err := flags.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
@@ -97,20 +92,28 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
-	// A configuration the agent did not understand is worse than no agent: it
-	// looks like collection while some setting the operator wrote is not in
-	// force. The loader rejects unknown keys and invalid values, and both are
-	// fatal here.
-	cfg, err := config.LoadAgent(*configPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", progName, err)
-		return exitFailure
-	}
+	cfg := config.DefaultAgent()
 
 	if *checkConfig {
-		fmt.Fprintf(stdout, "%s: %s is valid\n", progName, configDescription(*configPath))
+		if err := cfg.Validate(); err != nil {
+			fmt.Fprintf(stderr, "%s: built-in configuration is invalid: %v\n", progName, err)
+			return exitFailure
+		}
+		fmt.Fprintf(stdout, "%s: built-in configuration is valid\n", progName)
 		writeSummary(stdout, cfg)
 		return exitOK
+	}
+
+	return runAgent(ctx, cfg, stdout, stderr)
+}
+
+// runAgent starts the collection pipeline with an already constructed
+// configuration. Production always passes DefaultAgent; accepting the value
+// here keeps the runtime path testable without restoring external configuration.
+func runAgent(ctx context.Context, cfg config.Agent, stdout, stderr io.Writer) int {
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(stderr, "%s: built-in configuration is invalid: %v\n", progName, err)
+		return exitFailure
 	}
 
 	logger, closer, err := logging.New(cfg.Logging)
@@ -128,7 +131,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	// Logged before anything is opened, so that a guest whose agent fails to
 	// start still says in the journal which guest it is and where it was
 	// trying to send.
-	logStartup(logger, *configPath, cfg, id)
+	logStartup(logger, cfg, id)
 
 	// New opens the netlink socket and the spool, so a missing CAP_AUDIT_READ
 	// or an unwritable state directory fails here, while an operator is
@@ -192,30 +195,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-// usage prints the command line. It says that the shipped unit passes no
-// -config, because an operator looking for the file it reads needs to know
-// there is none until they add one.
+// usage prints the deliberately small command line and makes the absence of an
+// external agent configuration explicit.
 func usage(w io.Writer, flags *flag.FlagSet) {
-	fmt.Fprintf(w, "usage: %s [-config file] [-check-config] [-version]\n", progName)
+	fmt.Fprintf(w, "usage: %s [-check-config] [-version]\n", progName)
 	fmt.Fprintf(w, "\nSauronAgent forwards the guest's Linux audit stream to the hypervisor's\n")
-	fmt.Fprintf(w, "collector over AF_VSOCK. The shipped systemd unit runs it without -config,\n")
-	fmt.Fprintf(w, "on the built-in defaults.\n\n")
+	fmt.Fprintf(w, "collector over AF_VSOCK. All agent settings are compiled into the binary;\n")
+	fmt.Fprintf(w, "there is no agent configuration file.\n\n")
 	flags.PrintDefaults()
 }
 
-// configDescription names the configuration being reported on, including the
-// case where there is no file at all.
-func configDescription(path string) string {
-	if path == "" {
-		return "the built-in default configuration"
-	}
-	return path
-}
-
 // writeSummary prints the settings that decide what is collected, where it
-// goes and what survives a failure. It is what -check-config reports on top of
-// "valid": a file that parses can still say something the operator did not
-// mean, and these are the values worth reading back.
+// goes and what survives a failure. It lets an operator inspect the settings
+// compiled into the installed binary without starting collection.
 func writeSummary(w io.Writer, cfg config.Agent) {
 	fmt.Fprintf(w, "  collector:  %s\n", targetDescription(cfg))
 	fmt.Fprintf(w, "  audit:      enabled=%t preserve_raw=%t correlation_timeout=%s manage_rules=%t\n",
@@ -248,22 +240,22 @@ func spoolDescription(cfg config.Agent) string {
 		cfg.Spool.Path, cfg.Spool.MaxSize, cfg.Spool.SegmentSize, cfg.Spool.SyncOnWrite)
 }
 
-// logStartup records the guest's identity and a summary of the configuration,
-// including where that configuration came from.
+// logStartup records the guest's identity and a summary of the built-in
+// configuration.
 //
 // The identity is what ties a journal to a VM, and the boot id is what scopes
 // the sequence numbers the collector deduplicates on, so both belong in the
 // first line of every run. It is a summary and not a dump: -check-config
 // prints the configuration, and an agent that logs all of it at info level
 // only teaches operators to skim.
-func logStartup(log *slog.Logger, configPath string, cfg config.Agent, id identity.Identity) {
+func logStartup(log *slog.Logger, cfg config.Agent, id identity.Identity) {
 	attrs := []any{
 		"version", id.Version,
 		"hostname", id.Hostname,
 		"boot_id", id.BootID,
 		"machine_id", id.MachineID,
 		"kernel", id.Kernel,
-		"config", configDescription(configPath),
+		"config", "built-in",
 		"transport", string(cfg.Transport.Kind),
 	}
 	if cfg.Transport.Kind == config.TransportTCP {
@@ -296,7 +288,7 @@ func startupHint(cfg config.Agent, err error) string {
 	if strings.Contains(err.Error(), "CAP_AUDIT_CONTROL") {
 		return "kernel audit rule setup needs CAP_AUDIT_CONTROL. The shipped sauronagent.service " +
 			"grants CAP_AUDIT_READ and CAP_AUDIT_CONTROL through AmbientCapabilities and " +
-			"CapabilityBoundingSet. For externally managed audit policy, set audit.manage_rules: false"
+			"CapabilityBoundingSet; run the agent through that unit or grant both capabilities"
 	}
 	if strings.Contains(err.Error(), "CAP_AUDIT_READ") {
 		return "the kernel refused the audit socket. Grant CAP_AUDIT_READ: the shipped unit " +

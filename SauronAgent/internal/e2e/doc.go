@@ -23,7 +23,8 @@
 // handshake, cumulative acknowledgement, at-least-once delivery with
 // deduplication on (CID, boot id, sequence), the collector's rejection of a
 // malformed peer, trusted host enrichment, and the shipped commands' -version
-// and -check-config paths against the example configuration files.
+// and -check-config paths against the agent's built-in configuration and the
+// host's example configuration file.
 //
 // # What does not run
 //

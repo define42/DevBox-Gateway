@@ -210,7 +210,7 @@ func New(opts Options) (*Agent, error) {
 		if cfg.Audit.ManageRules {
 			a.configureRules = opts.ConfigureRules
 			if a.configureRules == nil && opts.Source == nil {
-				a.configureRules = audit.EnsureExecutionRules
+				a.configureRules = audit.EnsureManagedRules
 			}
 		}
 	}
@@ -241,9 +241,8 @@ func New(opts Options) (*Agent, error) {
 }
 
 // buildDialer turns the configured transport into a Dialer. VSOCK is the
-// production transport; TCP exists for development and is refused a silent
-// default, because reaching the collector over IP is a deployment mistake that
-// has to be written down in the configuration file to happen.
+// compiled production transport; TCP exists only for development and tests and
+// is never selected as a silent fallback.
 func buildDialer(cfg config.Agent) (transport.Dialer, error) {
 	switch cfg.Transport.Kind {
 	case config.TransportVSOCK:
@@ -331,7 +330,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("agent: configure kernel audit rules: %w", err)
 		}
-		a.log.Info("kernel audit execution rules are active")
+		a.log.Info("kernel audit managed rules are active")
 	}
 
 	records := make(chan *audit.Record, recordChanCap)

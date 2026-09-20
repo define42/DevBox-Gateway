@@ -72,12 +72,12 @@ func (c *auditControlClient) enabled(ctx context.Context) (uint32, error) {
 	return enabled, nil
 }
 
-func (c *auditControlClient) rules(ctx context.Context) ([]kernelRule, error) {
+func (c *auditControlClient) rules(ctx context.Context) ([]auditRule, error) {
 	replies, err := c.exchange(ctx, unix.AUDIT_LIST_RULES, nil)
 	if err != nil {
 		return nil, controlError("listing kernel audit rules", err)
 	}
-	rules := make([]kernelRule, 0, len(replies))
+	rules := make([]auditRule, 0, len(replies))
 	for _, payload := range replies {
 		rule, err := parseKernelRule(payload)
 		if err != nil {

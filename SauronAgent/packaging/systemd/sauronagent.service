@@ -29,15 +29,9 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=exec
-# No configuration file: the built-in defaults dial the host (CID 2) on port
-# 9000 and spool to /var/lib/sauronagent/spool, which is what a guest needs.
-# To change a setting, write only the keys that change to a file (every key is
-# listed in examples/sauronagent.yaml) and point the agent at it with a drop-in
-# from `systemctl edit sauronagent`:
-#
-#   [Service]
-#   ExecStart=
-#   ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
+# The agent accepts no configuration file. Its compiled settings dial the host
+# (CID 2) on port 9000 and spool to /var/lib/sauronagent/spool. Inspect and
+# validate them without starting collection with `sauronagent -check-config`.
 ExecStart=/usr/bin/sauronagent
 
 Restart=always
@@ -53,11 +47,10 @@ Group=sauronagent
 #
 # CAP_AUDIT_READ is what lets a process join the NETLINK_AUDIT read-log
 # multicast group. CAP_AUDIT_CONTROL enables auditing and installs the built-in
-# execve/execveat rules at startup, so auditd and auditctl are not required.
-# The agent never claims the audit daemon PID. If auditd is present, ordering
-# after it lets startup detect conflicts with its loaded policy. After= does
-# not start auditd or require it to exist.
-# For audit.manage_rules=false, both capability lists may omit AUDIT_CONTROL.
+# process-execution and identity/credential file rules at startup, so auditd
+# and auditctl are not required. The agent never claims the audit daemon PID.
+# If auditd is present, ordering after it lets startup detect conflicts with
+# its loaded policy. After= does not start auditd or require it to exist.
 #
 # The bounding set is the ceiling: even a successful exploit of this process
 # cannot acquire a capability that is not listed here.
@@ -147,8 +140,8 @@ RestrictAddressFamilies=AF_NETLINK AF_VSOCK AF_UNIX
 
 # The agent never speaks IP. Denying it outright means a compromised agent
 # cannot be turned into an exfiltration path over the guest's network, and it
-# costs nothing to a VSOCK deployment. Set transport.kind: tcp for development
-# only, and then this line must be removed.
+# costs nothing to a VSOCK deployment. The test-only TCP transport cannot be
+# used under this production unit.
 IPAddressDeny=any
 
 # --- system calls -----------------------------------------------------------
@@ -168,8 +161,8 @@ LimitNOFILE=4096
 
 # Under guest memory pressure the OOM killer must not silence the audit trail
 # before it touches the workload that is actually consuming memory. The agent's
-# own footprint is bounded by queue.capacity and spool.segment_size, so this
-# protects a small process rather than hiding a leak.
+# own footprint is bounded by its compiled queue and spool segment sizes, so
+# this protects a small process rather than hiding a leak.
 OOMScoreAdjust=-250
 
 # --- verifying this unit ----------------------------------------------------

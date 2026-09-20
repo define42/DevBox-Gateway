@@ -54,17 +54,19 @@ Sauron host collector
 The primary event source is `NETLINK_AUDIT`. Linux provides `CAP_AUDIT_READ`
 specifically for reading the audit stream through a multicast Netlink socket.
 SauronAgent subscribes to that multicast stream without claiming the audit
-daemon PID, so it can coexist with `auditd`. By default it also enables kernel
-auditing and ensures execution rules through netlink when it starts. This
-makes command execution visible when SauronAgent is the only audit service.
+daemon PID, so it can coexist with `auditd`. At startup it also enables kernel
+auditing and ensures a managed baseline of process-execution rules and
+identity/credential file watches through netlink when it starts. This makes
+command execution and account database changes visible when SauronAgent is the
+only audit service.
 
 # 5. Linux Capabilities
 
 The guest service holds `CAP_AUDIT_READ` for collection and `CAP_AUDIT_CONTROL`
-for automatic execution-rule setup. Both remain available while it runs.
-`audit.manage_rules: false` disables setup and allows a service override that
-grants only `CAP_AUDIT_READ` when policy is managed externally. The collector
-needs no capabilities, and neither service receives `CAP_SYS_ADMIN`.
+for automatic managed-rule setup. Both remain available while it runs. The
+agent's audit policy is compiled into `config.DefaultAgent`; there is no
+guest-side configuration file or reduced-capability operating mode. The
+collector needs no capabilities, and neither service receives `CAP_SYS_ADMIN`.
 
 # 6. Audit Events
 
@@ -162,8 +164,8 @@ and transport are separate goroutines:
 Audit reader -> Correlator -> Event queue -> Spool -> VSOCK sender
 ```
 
-Bounded in-memory queue (e.g. 10,000 events, configurable). Explicit behavior
-for queue exhaustion; never silently lose events; generate
+Bounded in-memory queue (10,000 events in `config.DefaultAgent`). Explicit
+behavior for queue exhaustion; never silently lose events; generate
 `sauron.queue.overflow` with events_dropped, first_missing_sequence,
 last_missing_sequence.
 
@@ -174,7 +176,7 @@ delete acknowledged data.
 Delivery guarantee is at-least-once. The host deduplicates on
 (source CID, boot ID, sequence).
 
-Reconnection uses exponential backoff with configurable maximum, e.g.
+Reconnection uses exponential backoff with a compiled maximum, e.g.
 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s. The agent continues reading and spooling
 during the outage.
 

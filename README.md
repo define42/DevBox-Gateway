@@ -319,8 +319,9 @@ creates the users and directories (`systemd-sysusers`, `systemd-tmpfiles`) but
 enables and starts **neither** unit: only you know whether a machine is a guest
 or the hypervisor. Upgrades restart whichever unit is running; removal stops and
 disables both but never deletes the agent spool or the collector's output.
-The guest agent enables kernel auditing and installs its execution rules when
-it starts. No audit rules file, `auditd`, or audit tools are needed.
+The guest agent enables kernel auditing and installs its managed
+process-execution and identity/credential file rules when it starts. No audit
+rules file, `auditd`, or audit tools are needed.
 
 On a DevBox Gateway host the gateway itself is the collector: set
 `SAURON_ENABLE=true` (see [SauronAgent guest events](#sauronagent-guest-events))
@@ -330,24 +331,26 @@ VM from libvirt, so there is no `vms:` CID map to maintain. The standalone
 `sauronhost` is for hypervisors that do not run the gateway.
 
 Inside the guests — typically baked into the base images — install the package
-and enable the agent. It needs no configuration file: its built-in defaults
-already dial the host (CID 2) on port 9000:
+and enable the agent. It accepts no configuration file: its settings are
+compiled into the binary and dial the host (CID 2) on port 9000:
 
 ```sh
 sudo dnf install ./sauronagent-<version>-1.x86_64.rpm    # or: sudo apt install ./sauronagent_<version>_amd64.deb
 sudo systemctl enable --now sauronagent
 ```
 
-Starting the agent automatically enables `execve`/`execveat` auditing, including
-64-bit and 32-bit process execution on x86_64 guests, so commands such as `nmap`
-produce execution events. The agent checks and applies the rules on every
-start, including after reboot. It preserves unrelated rules and reports a
-startup error if an immutable or conflicting policy prevents setup. See the
+Starting the agent automatically applies its managed baseline: `execve` and
+`execveat` auditing (including 64-bit and 32-bit execution on x86_64) plus the
+five identity/credential file watches. Commands such as `nmap` produce
+execution events, while account database writes produce file events. The agent
+checks and applies the baseline on every start, including after reboot. It
+preserves unrelated rules and reports a startup error if an immutable or
+conflicting policy prevents setup. See the
 [SauronAgent deployment guide](SauronAgent/docs/deployment.md#guest-audit-rules)
-for externally managed policy and optional broader coverage.
+for the exact paths and keys, policy-conflict handling, and broader coverage.
 
-To remove it: `sudo apt remove devbox-gateway` (add `--purge` to also delete the
-config file).
+To remove it: `sudo apt remove sauronagent` or `sudo dnf remove sauronagent`.
+Package removal leaves the guest spool intact.
 
 > Building the deb yourself instead of downloading it is covered under
 > [Building from source](#building-from-source).
@@ -449,7 +452,7 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
 | `SAURON_ENABLE`           | `false`                                                                                                          | Collect SauronAgent guest audit events: new VMs get a virtio-vsock device and the gateway accepts the agents over AF_VSOCK. See [SauronAgent guest events](#sauronagent-guest-events). |
-| `SAURON_VSOCK_PORT`       | `9000`                                                                                                           | AF_VSOCK port the agents dial on the host (CID 2). Must match the agents' configuration.          |
+| `SAURON_VSOCK_PORT`       | `9000`                                                                                                           | AF_VSOCK port the agents dial on the host (CID 2). Must remain 9000 to match the agent's compiled-in port. |
 | `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |

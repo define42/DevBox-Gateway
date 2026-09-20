@@ -7,7 +7,7 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 | | Hypervisor | Each guest |
 |---|---|---|
 | Binary | `/usr/bin/sauronhost` | `/usr/bin/sauronagent` |
-| Config | `/etc/sauronhost/sauronhost.yaml` | none (built-in defaults) |
+| Config | `/etc/sauronhost/sauronhost.yaml` | none (compiled settings) |
 | Unit | `sauronhost.service` | `sauronagent.service` |
 | User | `sauronhost` | `sauronagent` |
 | State | `/var/log/sauronhost` (if the file output is enabled) | `/var/lib/sauronagent/spool` |
@@ -18,8 +18,8 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 * Linux 4.8 or newer on both ends for virtio-vsock (`vhost_vsock` on the host,
   `vmw_vsock_virtio_transport` in the guest).
 * `CAP_AUDIT_READ` and the audit read-log multicast group: Linux 3.16 or newer.
-* `CAP_AUDIT_CONTROL` for the default automatic execution-rule setup. No
-  `auditd` or audit command-line tools are required.
+* `CAP_AUDIT_CONTROL` for automatic managed-rule setup. No `auditd`
+  or audit command-line tools are required.
 * systemd 247 or newer for the units as shipped. Older systemd ignores the
   directives it does not know (`ProtectProc=`, `ProcSubset=`) with a warning;
   everything else applies.
@@ -84,46 +84,57 @@ systemctl enable --now sauronagent
 journalctl -u sauronagent -n 50
 ```
 
-The agent needs no configuration file. The shipped unit runs it on the built-in
-defaults, which dial CID 2 port 9000 and spool to `/var/lib/sauronagent/spool`.
-Most guests never need anything else.
+The agent accepts no configuration file. The shipped unit uses the complete
+settings compiled into `config.DefaultAgent`, which dial CID 2 port 9000 and
+spool to `/var/lib/sauronagent/spool`. This keeps every guest on the same
+auditable policy and removes configuration-file drift.
 
-### Changing an agent setting
+### Inspecting the built-in agent settings
 
-Write only the keys that change to a file --
-[../examples/sauronagent.yaml](../examples/sauronagent.yaml) lists every key at
-its default -- and point the agent at it with a drop-in:
+Run the read-only configuration check to validate the compiled settings and
+print the security-relevant summary without opening the spool, netlink, or
+transport:
 
 ```sh
-mkdir -p /etc/sauronagent
-printf 'spool:\n  sync_on_write: true\n' > /etc/sauronagent/sauronagent.yaml
-sauronagent -check-config -config /etc/sauronagent/sauronagent.yaml
-systemctl edit sauronagent
-#   [Service]
-#   ExecStart=
-#   ExecStart=/usr/bin/sauronagent -config /etc/sauronagent/sauronagent.yaml
-systemctl restart sauronagent
+sauronagent -check-config
 ```
 
-The startup line in the journal names the configuration in force
-(`config=/etc/sauronagent/sauronagent.yaml`, or
-`config="the built-in default configuration"`).
+There is no agent `-config` flag. Changing an agent setting requires changing
+`config.DefaultAgent`, rebuilding the binary, and deploying that build to the
+intended guests. The startup journal entry identifies the configuration as
+`built-in`.
 
 ### Guest audit rules
 
-With the defaults `audit.enabled: true` and `audit.manage_rules: true`, the
-agent enables kernel auditing and ensures `execve`/`execveat` rules through
-`NETLINK_AUDIT` when it starts. On x86_64 these cover both native 64-bit and
-32-bit compatibility execution, without filtering by user or success. Other
-supported architectures use their native ABI. Unsupported architectures report
-a startup error; externally managed rules can be used instead.
+The built-in agent policy enables kernel auditing and ensures its managed rule
+baseline through `NETLINK_AUDIT` when it starts. The execution portion covers `execve` and
+`execveat` without filtering by user or success. On x86_64 it covers both the
+native 64-bit and 32-bit compatibility ABIs; other supported architectures use
+their native ABI. Unsupported architectures report a startup error.
+
+The baseline also contains these write/attribute-change watches. The keys are
+part of the event and distinguish identity data from password credential data:
+
+```text
+-w /etc/passwd          -p wa -k sauron_identity
+-w /etc/shadow          -p wa -k sauron_credentials
+-w /etc/group           -p wa -k sauron_identity
+-w /etc/gshadow         -p wa -k sauron_credentials
+-w /etc/security/opasswd -p wa -k sauron_credentials
+```
+
+`w` covers writes and `a` covers metadata/attribute changes; these watches do
+not emit on reads. A watched file may be absent when the rule is installed: the
+kernel watches its existing parent and attaches the file when it is created.
+The parent path must exist and be accessible.
 
 Commands such as `nmap` produce execution events containing the executable and
 arguments. These events do not contain terminal output or a port-scan detection
-alert. The agent preserves unrelated rules, does not lock policy, and never
-claims the audit daemon PID. Repeated starts do not duplicate its rules. The
-rules remain active when the agent stops and are reapplied as needed on the
-next start, including after reboot.
+alert. File-watch events contain audit metadata, not file contents or a
+before/after diff. The agent preserves unrelated rules, does not lock policy,
+and never claims the audit daemon PID. Repeated starts do not duplicate its
+rules. The rules remain active when the agent stops and are reapplied as needed
+on the next start, including after reboot.
 
 The package installs both guest and collector components without enabling or
 starting either unit. In each guest, `systemctl enable --now sauronagent`
@@ -131,11 +142,16 @@ activates collection and automatic rule setup. There is no packaged audit rules
 file and no dependency on `auditd`, `auditctl`, or `augenrules`.
 
 Startup fails with an actionable error if the agent cannot establish its
-execution baseline: for example, missing `CAP_AUDIT_CONTROL`, immutable policy
-without the required rules, or a conflicting `never,task` rule. Resolve the
-existing policy rather than having the agent delete unrelated rules. Immutable
-policy changes require a reboot. After removing `never,task`, start a new login
-session or reboot so newly created processes receive syscall auditing.
+managed baseline: for example, missing `CAP_AUDIT_CONTROL`, immutable policy
+without all required rules, a missing watch parent, or a conflicting
+`never,task`/`never,exit`/`never,filesystem` rule. New managed watches are
+inserted at high priority so an older generic exit rule cannot hide the
+requested `sauron_*` key. When reusing an already-loaded watch, an earlier
+potentially matching exit rule with a different key is rejected for the same
+reason. Resolve the existing policy rather than having the agent delete
+unrelated rules. Immutable policy changes require a reboot. After removing
+`never,task`, start a new login session or reboot so newly created processes
+receive syscall auditing.
 
 Optional diagnostics, if audit tools are already installed:
 
@@ -150,43 +166,17 @@ If the kernel was booted with `audit=0` and `NETLINK_AUDIT` is unavailable,
 remove that boot argument and reboot. Runtime setup can enable an initialized
 audit subsystem, but cannot restore one disabled during kernel initialization.
 
-#### Externally managed policy
-
-To collect an existing policy without configuring the kernel, set:
-
-```yaml
-audit:
-  manage_rules: false
-```
-
-Load that configuration using the service drop-in described above. To also
-remove rule-management privilege, add this to the drop-in:
-
-```ini
-[Service]
-AmbientCapabilities=
-AmbientCapabilities=CAP_AUDIT_READ
-CapabilityBoundingSet=
-CapabilityBoundingSet=CAP_AUDIT_READ
-```
-
-Restart the agent after changing the unit. This mode requires the external
-policy to enable auditing and supply the execution rules. With
-`audit.enabled: false`, the agent performs neither rule setup nor collection.
-
 #### Optional broader coverage
 
-The agent manages execution rules only. If your detection needs file and
-privilege activity, manage additional rules separately with your audit policy
-tools. For example, an existing `augenrules` deployment can load rules such as
-these from `/etc/audit/rules.d/sauron-local.rules`. If its reload clears active
-rules, restart SauronAgent afterwards to restore the execution baseline:
+The built-in watches cover the five account and credential files listed above.
+If detection needs other configuration files or privilege activity, manage
+additional rules separately with the audit policy tools. For example, an
+existing `augenrules` deployment can load rules such as these from
+`/etc/audit/rules.d/sauron-local.rules`. If its reload clears active rules,
+restart SauronAgent afterwards to restore the managed baseline:
 
 ```text
-## identity and privilege files
--w /etc/passwd     -p wa -k identity
--w /etc/shadow     -p wa -k identity
--w /etc/group      -p wa -k identity
+## privilege configuration
 -w /etc/sudoers    -p wa -k identity
 -w /etc/sudoers.d/ -p wa -k identity
 
@@ -201,31 +191,37 @@ rules, restart SauronAgent afterwards to restore the execution baseline:
 ```
 
 Syscall rules are not free. `-S execve` on a build server is a large volume of
-records; start with the execution baseline, then add what your detection
-actually uses.
+records; start with the managed baseline, then add what your detection actually
+uses.
 
 ## 5. Sizing
 
 Measured on the `cat /etc/shadow` example in the README, a normalized exec
 event is about **1.0 KiB** of JSON, or about **1.8 KiB** with
-`preserve_raw: true`. Events with long argument vectors or many PATH records
-are larger; a frame is capped at `transport.max_payload_size` (1 MiB).
+raw records preserved. Events with long argument vectors or many PATH records
+are larger; the built-in maximum frame payload is 1 MiB.
+
+The limits below are compiled into `config.DefaultAgent`, not loaded from a
+guest file. `sauronagent -check-config` prints the effective queue, spool,
+collector, audit, and logging settings. A different limit requires a source
+change, a rebuild, and deployment of that binary.
 
 ### Queue
 
-`queue.capacity` (default 10,000) bounds the events held in memory between the
-netlink reader and the sender. Worst-case memory is roughly
+The built-in queue capacity of 10,000 bounds the events held in memory between
+the netlink reader and the sender. Worst-case memory is roughly
 `capacity x event size`: 10,000 x 1.8 KiB is about 18 MiB.
 
 The queue exists to absorb **bursts**, not outages -- a package upgrade, a
 build, a fork storm. When it fills, the oldest events are dropped and a
 `sauron.queue.overflow` event names exactly which sequence numbers went. Size
 it so that a normal burst fits; if overflows happen while the host is up and
-acknowledging, the queue is too small (or the audit rules are too broad).
+acknowledging, narrow the additional audit rules or deploy a build with a larger
+built-in queue.
 
 ### Spool
 
-`spool.max_size` (default 1 GiB) is what carries you through a **host outage**:
+The built-in 1 GiB spool is what carries you through a **host outage**:
 
 ```text
 max_size  >=  outage seconds  x  events per second  x  event size  x  1.3
@@ -236,24 +232,22 @@ At 50 events/second with raw preserved, an hour of collector downtime is about
 day at that rate. On reaching the limit the agent emits `sauron.spool.full`
 and discards the oldest unsent data, with the sequence range.
 
-`spool.segment_size` (default 16 MiB) is the granularity at which acknowledged
-data is reclaimed: smaller segments return disk space sooner and use more file
-handles.
-
-`spool.sync_on_write: false` (the default) survives an agent crash;
-`true` survives a guest power loss, at a large cost in throughput. Consider
-`true` for guests whose last seconds of audit trail are the interesting part --
-which, after an attacker triggers a reboot, they are.
+The built-in 16 MiB segment size is the granularity at which acknowledged data
+is reclaimed: smaller segments return disk space sooner and use more file
+handles. The built-in spool syncs periodically rather than after every write;
+that survives an agent crash but not necessarily a guest power loss. Enabling
+sync-on-write in `config.DefaultAgent` improves power-loss durability at a large
+throughput cost.
 
 ### Netlink receive buffer
 
-`audit.socket_receive_buffer` (default 8 MiB) is the kernel's queue for this
-socket. Records that do not fit are **dropped by the kernel**, not queued, and
-the agent can only count them (`sauron.audit.lost`). The agent does not hold
-`CAP_NET_ADMIN`, so the request is clamped by `net.core.rmem_max`:
+The agent requests an 8 MiB receive buffer for its audit socket. Records that do
+not fit are **dropped by the kernel**, not queued, and the agent can only count
+them (`sauron.audit.lost`). The agent does not hold `CAP_NET_ADMIN`, so the
+request is clamped by `net.core.rmem_max`:
 
 ```sh
-sysctl net.core.rmem_max                 # must be >= audit.socket_receive_buffer
+sysctl net.core.rmem_max                 # must be >= the agent's 8 MiB request
 sysctl -w net.core.rmem_max=16777216     # persist in /etc/sysctl.d/
 ```
 
@@ -266,10 +260,11 @@ auditctl -b 16384
 
 ### Collector
 
-`limits.max_connections` (1024) and `limits.max_connections_per_cid` (4) bound
+SauronHost's `limits.max_connections` (1024) and
+`limits.max_connections_per_cid` (4) bound
 what the guests can consume. `limits.dedup_window` (65536 sequence numbers per
-(CID, boot id)) must stay well above the agent's `transport.max_unacked`
-(1024), or a replay after a long outage will be written twice.
+(CID, boot id)) must stay well above the agent's built-in 1024-event unacked
+window, or a replay after a long outage will be written twice.
 
 ## 6. What to monitor
 
@@ -378,20 +373,21 @@ unit))
   `setcap cap_audit_read,cap_audit_control+ep /usr/bin/sauronagent`.
 * A container needs the capabilities granted to the container itself
   (`--cap-add=AUDIT_READ --cap-add=AUDIT_CONTROL`) and a non-user-namespaced
-  runtime. With `audit.manage_rules: false`, only `AUDIT_READ` is needed.
+  runtime.
 
 ### The agent runs but there are no audit events
 
 `journalctl -u sauronagent` shows a connection and heartbeats; the host sees
 `sauron.*` events but nothing about the guest.
 
-* Check `audit.enabled` and `audit.manage_rules` in the active configuration.
-  Automatic setup is performed on startup; an external policy reload can later
-  disable auditing or remove rules. Restart the agent to restore its baseline.
+* Run `sauronagent -check-config` to confirm the built-in audit policy is
+  enabled. Automatic setup is performed on startup; an external policy reload
+  can later disable auditing or remove rules. Restart the agent to restore its
+  baseline.
 * If audit tools are installed, `auditctl -s` shows whether auditing is enabled
   and `auditctl -l` lists active rules. `No rules` means no syscall auditing.
   Also check for `never,task`, which suppresses syscall events despite loaded
-  execution rules. See section 4 for policy conflicts and external management.
+  managed rules. See section 4 for policy conflicts.
 * `auditctl -s` showing a rising `lost` means the kernel is dropping records
   before anyone reads them: raise `-b` and `net.core.rmem_max`.
 
@@ -402,10 +398,11 @@ group**; it never sends
 `AUDIT_SET` with an audit pid, so it never becomes the audit daemon and never
 displaces one. `auditctl -s` continues to show auditd's pid.
 
-By default, the agent also enables auditing and adds execution rules. If
-`auditd`'s policy should control all rules, set `audit.manage_rules: false` and
-provide the desired execution rules there. If an external reload clears the
-agent's rules, restart SauronAgent to restore them.
+The agent always enables auditing and reconciles its built-in execution and file
+rules at startup. `auditd` may load additional policy, but its policy must not
+conflict with the managed baseline. If an external reload clears the agent's
+rules, restart SauronAgent to restore them. An immutable policy must already
+contain the complete baseline or the agent refuses to start.
 
 Consequences worth knowing:
 
@@ -428,8 +425,8 @@ Work down the path:
    `sauron.transport.connected` / `disconnected`.
 2. Guest: is the spool growing? `du -sh /var/lib/sauronagent/spool`. Growth
    means the agent is collecting but not delivering.
-3. Hypervisor: `systemctl status sauronhost`. Is it listening on the port the
-   guest dials (`listen.port` vs `vsock.port`, both 9000 by default)?
+3. Hypervisor: `systemctl status sauronhost`. Its `listen.port` must match the
+   agent's compiled-in port, 9000.
 4. Hypervisor: `listen.cid` must be `4294967295` (`VMADDR_CID_ANY`). Bound to a
    specific CID, the collector is deaf to every other guest.
 5. Hypervisor: check the unit's `RestrictAddressFamilies=` lists `AF_VSOCK`.
@@ -443,39 +440,38 @@ Work down the path:
 
 | Symptom | Cause | Response |
 |---|---|---|
-| `sauron.queue.overflow` while the host is up | burst larger than `queue.capacity` | raise capacity, or narrow the audit rules |
-| `sauron.queue.overflow` while the host is down | the spool is not keeping up or is disabled | enable the spool; check disk throughput |
-| `sauron.spool.full` | the outage outlasted `spool.max_size` | raise it, or fix the outage faster |
-| `sauron.audit.lost` | the kernel dropped records | raise `audit.socket_receive_buffer` **and** `net.core.rmem_max`, and `auditctl -b` |
+| `sauron.queue.overflow` while the host is up | burst larger than the built-in queue | narrow additional audit rules, or rebuild with a larger queue |
+| `sauron.queue.overflow` while the host is down | spool writes are not keeping up | check disk throughput; rebuild only if the built-in spool settings are inadequate |
+| `sauron.spool.full` | the outage outlasted the built-in 1 GiB spool | fix the outage faster, or rebuild with a larger spool |
+| `sauron.audit.lost` | the kernel dropped records | raise `net.core.rmem_max` and `auditctl -b`; rebuild only if the agent's 8 MiB request is also too small |
 | `sauron.parse.failure` | a record the parser does not understand | the text is in the event; it is a bug report |
 
 ### "payload exceeds maximum size"
 
-One event exceeded `transport.max_payload_size` or the host's
+One event exceeded the agent's built-in 1 MiB maximum or the host's
 `limits.max_payload_size` -- usually a process with an enormous argument
-vector. Raise both (they are independent limits and the smaller one wins), or
-accept the loss knowingly. The agent fails such a send locally rather than
-emitting a frame the host is certain to reject.
+vector. The limits are independent and the smaller one wins. Raising the agent
+limit requires a rebuild; raising the host limit is a SauronHost configuration
+change. The agent fails such a send locally rather than emitting a frame the
+host is certain to reject.
 
-### The configuration is rejected at startup
+### Inspecting the built-in agent settings
 
-```text
-parsing agent config /etc/sauronagent/sauronagent.yaml: yaml: unmarshal errors:
-  line 12: field preserv_raw not found in type config.AuditSection
+```sh
+sauronagent -check-config
 ```
 
-Unknown keys are refused on purpose: a typo in a security-relevant setting must
-not silently leave the default in place. Check the spelling against
-[../examples/sauronagent.yaml](../examples/sauronagent.yaml), which lists every
-key at its default value.
+This command validates `config.DefaultAgent`, prints its effective summary, and
+exits without starting collection. The agent accepts neither a YAML file nor a
+`-config` flag; unknown flags are rejected with usage information.
 
-Two more startup failures worth recognising:
+SauronHost still loads YAML and rejects invalid collector configuration. One
+startup failure worth recognising is:
 
 ```text
-invalid agent config ...: transport.kind must be "vsock" or "tcp", got "quic"
 invalid host config ...: vms[1]: CID 100 is already mapped to "a"; a CID identifies exactly one VM
 ```
 
-The second one is a safety net, not a nuisance: two VMs sharing a CID would
+This is a safety net, not a nuisance: two VMs sharing a CID would
 make every event from either of them unattributable, so the collector refuses
 to start rather than mislabel an audit trail.

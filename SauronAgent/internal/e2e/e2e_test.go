@@ -911,17 +911,14 @@ func header(t *testing.T, h protocol.Header) []byte {
 }
 
 // ---------------------------------------------------------------------------
-// 9. the shipped binaries and the shipped configurations
+// 9. the shipped binaries and their configurations
 // ---------------------------------------------------------------------------
 
-// TestShippedCommandsAndExampleConfigurations builds both commands and runs
-// them the two ways an operator does before a deployment: -version, and
-// -check-config against the configuration files this repository ships.
-//
-// It is the only test here that proves examples/sauronagent.yaml and
-// examples/sauronhost.yaml actually load. A shipped example that no longer
-// parses is a support incident on somebody's first day.
-func TestShippedCommandsAndExampleConfigurations(t *testing.T) {
+// TestShippedCommandsAndConfigurations builds both commands and runs them the
+// two ways an operator does before a deployment: -version, and -check-config.
+// The agent checks its built-in configuration; the host checks the example
+// configuration file this repository ships.
+func TestShippedCommandsAndConfigurations(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatalf("locating the repository root: %v", err)
@@ -945,19 +942,27 @@ func TestShippedCommandsAndExampleConfigurations(t *testing.T) {
 			t.Errorf("%s -version does not report the Go version:\n%s", cmd, version)
 		}
 
-		example := filepath.Join(root, "examples", cmd+".yaml")
-		if _, err := os.Stat(example); err != nil {
-			t.Fatalf("the shipped example configuration is missing: %v", err)
+		var check string
+		if cmd == "sauronagent" {
+			check = run(t, binary, "-check-config")
+			if !strings.Contains(check, "built-in") {
+				t.Errorf("sauronagent -check-config did not identify its built-in configuration:\n%s", check)
+			}
+		} else {
+			example := filepath.Join(root, "examples", "sauronhost.yaml")
+			if _, err := os.Stat(example); err != nil {
+				t.Fatalf("the shipped example configuration is missing: %v", err)
+			}
+			check = run(t, binary, "-check-config", "-config", example)
+			if !strings.Contains(check, example) {
+				t.Errorf("sauronhost -check-config did not name the file it read:\n%s", check)
+			}
 		}
-		check := run(t, binary, "-check-config", "-config", example)
 		if !strings.Contains(check, "is valid") {
-			t.Errorf("%s -check-config did not accept %s:\n%s", cmd, example, check)
-		}
-		if !strings.Contains(check, example) {
-			t.Errorf("%s -check-config did not name the file it read:\n%s", cmd, check)
+			t.Errorf("%s -check-config did not accept its configuration:\n%s", cmd, check)
 		}
 		// The summary is the part an operator reads back before trusting the
-		// file, so an empty "valid" is not enough.
+		// effective settings, so an empty "valid" is not enough.
 		if !strings.Contains(check, "logging:") {
 			t.Errorf("%s -check-config printed no summary:\n%s", cmd, check)
 		}

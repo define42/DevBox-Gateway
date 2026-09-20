@@ -72,9 +72,11 @@ allocates nothing from a length field it has not validated.
 
 **Auditing keeps working alongside auditd.** The agent is a consumer on the
 audit multicast group. It never registers as the audit daemon, so deploying it
-does not displace an existing `auditd`. By default it enables auditing and
-ensures execution rules at startup, preserving unrelated rules. Set
-`audit.manage_rules: false` when the complete policy is managed externally.
+does not displace an existing `auditd`. At startup it enables auditing and
+ensures process-execution rules plus write/attribute-change watches for the
+system identity and credential files at startup, preserving unrelated rules.
+That managed baseline is compiled into the agent and cannot be disabled with a
+configuration file.
 
 ## 3. What the design does not protect against
 
@@ -83,10 +85,9 @@ root and kernel control in the guest an attacker can:
 
 * disable auditing (`auditctl -e 0`), delete audit rules, or set the audit
   backlog so small that records are dropped;
-* kill, `SIGSTOP`, `ptrace`, patch or replace the agent process and its binary;
-* start the agent on a configuration of their own (a unit drop-in adding
-  `-config`), for example to exclude the record types their next action would
-  produce;
+* kill, `SIGSTOP`, or `ptrace` the agent process;
+* patch or replace the agent binary, or change the service command, to exclude
+  the record types their next action would produce;
 * delete or rewrite `/var/lib/sauronagent/spool` -- everything not yet
   acknowledged by the host is still inside the guest and is still theirs;
 * unload `vmw_vsock_virtio_transport` or otherwise break the path to the host;
@@ -111,8 +112,9 @@ guest as authenticated -- only as what that guest reported.
 
 **The window before acknowledgement is lost on a guest compromise.** Events in
 the queue or spool that the host has not yet acknowledged can be destroyed by
-an attacker who reaches root in that moment. `spool.sync_on_write: true` and a
-short `limits.ack_max_delay` narrow the window; nothing closes it.
+an attacker who reaches root in that moment. The agent's built-in spool syncs
+periodically; compiling it to sync on every write and setting a short
+SauronHost `limits.ack_max_delay` narrow the window, but nothing closes it.
 
 **There is no confidentiality boundary on the wire.** vsock traffic is carried
 by the host kernel. Anyone with root on the hypervisor can read it -- but they
@@ -138,26 +140,22 @@ host's clock so drift is detectable. Correlation across VMs should use
 
 | Component | Runs as | Capabilities | Why |
 |---|---|---|---|
-| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ` and `CAP_AUDIT_CONTROL`, ambient and bounded | joining the audit multicast group and configuring execution auditing |
+| `sauronagent` | `sauronagent` (system user) | `CAP_AUDIT_READ` and `CAP_AUDIT_CONTROL`, ambient and bounded | joining the audit multicast group and configuring the managed audit baseline |
 | `sauronhost` | `sauronhost` (system user) | none; empty bounding set | it parses hostile input and needs no privilege to do so |
 
 `CAP_AUDIT_READ` permits receiving audit events. `CAP_AUDIT_CONTROL` permits
-enabling auditing and installing execution rules without a separate audit
-service. Both capabilities remain available throughout the process lifetime.
-A compromise of the agent therefore exposes audit contents and also grants
-the ability to change rules or disable auditing when policy is mutable.
-
-For externally managed policy, `audit.manage_rules: false` disables automatic
-setup. Also override `AmbientCapabilities` and `CapabilityBoundingSet` to
-`CAP_AUDIT_READ` to remove control privilege; changing the configuration alone
-does not remove a capability. See the deployment guide for the drop-in.
+enabling auditing and installing the managed execution and identity/credential
+file rules without a separate audit service. Both capabilities remain
+available throughout the process lifetime. A compromise of the agent therefore
+exposes audit contents and also grants the ability to change rules or disable
+auditing when policy is mutable.
 
 The service does not get:
 
 * `CAP_AUDIT_WRITE` -- it cannot inject user-space audit records.
 * `CAP_NET_ADMIN` -- which means `SO_RCVBUFFORCE` on the netlink socket falls
   back to `SO_RCVBUF`, clamped by `net.core.rmem_max`. That is a deliberate
-  trade: see `audit.socket_receive_buffer` in the deployment guide.
+  trade: see the built-in receive-buffer value in the deployment guide.
 * `CAP_SYS_ADMIN` -- never, for anything.
 
 Note what `CAP_AUDIT_READ` *does* give an attacker who compromises the agent
@@ -177,9 +175,10 @@ fuzz`).
 | Protocol frames | a compromised guest, at the collector | full header validation before any payload byte is read, payload length checked against the receiver's own limit before allocation, one JSON document per frame with trailing data rejected |
 | Spool segments | anyone with write access inside the guest | per-record magic to resynchronise on, CRC32C on every payload, a record-size ceiling, so a tampered or truncated spool file cannot dictate an allocation |
 
-Configuration is parsed strictly: an unknown YAML key is a startup failure, not
-a warning. A typo in `preserve_raw` must not silently disable forensic
-evidence.
+The guest agent accepts no configuration file; its security settings come from
+the compiled `config.DefaultAgent` value. SauronHost still parses its YAML
+strictly, so an unknown collector key is a startup failure rather than a
+silently ignored setting.
 
 ## 6. Hardening in the unit files
 
@@ -228,6 +227,5 @@ break it silently rather than loudly:
   of every audited process on every VM, which routinely include things that
   should never have been typed on a command line. `/var/log/sauronhost` is 0750
   for that reason; give a log shipper group membership, not write access.
-* **Keep `preserve_raw: true` unless you have measured that you cannot
-  afford it.** The normalized fields are an interpretation; the raw records are
-  the evidence.
+* **Keep raw-record preservation enabled in `config.DefaultAgent`.** The
+  normalized fields are an interpretation; the raw records are the evidence.

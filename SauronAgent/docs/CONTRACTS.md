@@ -13,7 +13,7 @@ be modified:
 - `internal/event/categories.go`   — normalized category constants
 - `internal/protocol/frame.go`     — `Magic`, `Version`, `HeaderSize`, `Header`, `Frame`, `MessageType`, `Flags`, `MarshalHeader`, `UnmarshalHeader`, errors
 - `internal/protocol/message.go`   — `Hello`, `Ready`, `EventMessage`, `Ack`, `Ping`, `Pong`, `ErrorMessage`, `Shutdown`
-- `internal/config/*`              — `Agent`, `Host` and their sections
+- `internal/config/*`              — compiled-in `Agent`, YAML-loaded `Host`, and their sections
 - `internal/output/sink.go`        — `Sink`, `Envelope`, `Source`, `Reported`
 - `internal/transport/transport.go`— `Dialer`, `Listener`
 - `internal/metrics/metrics.go`    — `Agent`, `Host` counters
@@ -34,8 +34,12 @@ func (c *NetlinkConn) Receive() ([]RawMessage, error)
 func (c *NetlinkConn) Close() error
 func (c *NetlinkConn) SetReceiveDeadline(t time.Time) error
 
-// Startup policy: enable auditing and idempotently ensure execution rules.
-// Requires CAP_AUDIT_CONTROL; does not register the audit daemon PID.
+// Startup policy: enable auditing and idempotently ensure the managed
+// process-execution and identity/credential file rules. Requires
+// CAP_AUDIT_CONTROL; does not register the audit daemon PID.
+func EnsureManagedRules(ctx context.Context) error
+
+// Compatibility name; ensures the complete managed baseline.
 func EnsureExecutionRules(ctx context.Context) error
 
 // Listener: netlink receiver + parser, emitting parsed records on a channel.

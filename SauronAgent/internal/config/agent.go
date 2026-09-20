@@ -1,13 +1,8 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 )
 
 // TransportKind selects how the agent reaches the host.
@@ -52,8 +47,9 @@ type AuditSection struct {
 	Enabled bool `yaml:"enabled"`
 
 	// ManageRules enables kernel auditing and installs the built-in process
-	// execution rules at startup. Disable only when another service owns the
-	// guest's audit policy. Requires CAP_AUDIT_CONTROL in addition to READ.
+	// execution and identity/credential file rules at startup. The production
+	// configuration enables it and requires CAP_AUDIT_CONTROL in addition to
+	// CAP_AUDIT_READ.
 	ManageRules bool `yaml:"manage_rules"`
 
 	// PreserveRaw keeps the original kernel record text on every event.
@@ -170,8 +166,8 @@ type LoggingSection struct {
 	Output string `yaml:"output"`
 }
 
-// DefaultAgent returns the built-in agent configuration. Every field is set,
-// so a configuration file only needs to state what it changes.
+// DefaultAgent returns the complete configuration compiled into sauronagent.
+// Production startup uses this value directly and does not layer a file over it.
 func DefaultAgent() Agent {
 	return Agent{
 		Agent: AgentSection{Name: "sauronagent"},
@@ -212,41 +208,6 @@ func DefaultAgent() Agent {
 		},
 		Logging: LoggingSection{Level: "info", Format: "text", Output: "stderr"},
 	}
-}
-
-// LoadAgent reads an agent configuration file layered over the defaults.
-// An empty path returns the defaults unchanged.
-func LoadAgent(path string) (Agent, error) {
-	cfg := DefaultAgent()
-	if path == "" {
-		return cfg, cfg.Validate()
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return cfg, fmt.Errorf("reading agent config %s: %w", path, err)
-	}
-	if err := unmarshalStrict(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("parsing agent config %s: %w", path, err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return cfg, fmt.Errorf("invalid agent config %s: %w", path, err)
-	}
-	return cfg, nil
-}
-
-// unmarshalStrict decodes YAML and rejects unknown fields, so that a typo in a
-// security-relevant setting fails loudly instead of silently keeping a default.
-func unmarshalStrict(data []byte, out any) error {
-	dec := yaml.NewDecoder(strictReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(out); err != nil {
-		// An empty file is a legitimate "use every default".
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		return err
-	}
-	return nil
 }
 
 // Validate checks the configuration for values that cannot work.
