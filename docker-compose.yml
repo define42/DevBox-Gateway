@@ -25,11 +25,11 @@ services:
       # default is /var/lib/libvirt/devbox-gateway for native (RPM) installs.
       - DATA_ROOT_DIR=/data
       - BASE_IMAGE_DIR=/data/baseimages
-      # Keep the JSON Lines audit stream on the host-mounted /data volume so a
-      # Splunk agent can tail it outside the container.
+      # Used only if application HEC is disabled; ignored with the endpoint below.
+      # In file mode, the JSON Lines audit stream is on the host-mounted /data.
       - AUDIT_LOG_FILE=/data/logs/audit.jsonl
-      # Also forward every audit event to the bundled Splunk over HEC. The
-      # token must match the splunk service's SPLUNK_HEC_TOKEN.
+      # Send application audits only to Splunk HEC, with no local audit file.
+      # The token must match the splunk service's SPLUNK_HEC_TOKEN.
       - SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}
       - SPLUNK_HEC_INDEX=devbox_audit
@@ -67,7 +67,7 @@ services:
   # Local Splunk Enterprise receiving the gateway's audit events over HEC
   # (https://127.0.0.1:8088 on the host). Splunk Web: http://localhost:8000,
   # user admin, password SPLUNK_PASSWORD. The first start takes a few minutes;
-  # the gateway queues and retries audit events until HEC is up.
+  # the gateway queues application audits in memory (up to 10,000 events).
   splunk:
     image: splunk/splunk:10.4
     container_name: splunk

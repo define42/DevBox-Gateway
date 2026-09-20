@@ -102,11 +102,11 @@ type Event struct {
 
 // Options selects where audit records are written.
 type Options struct {
-	// FilePath is the append-only JSON Lines audit file. It is required and
-	// remains the durable record even when HEC forwarding is enabled.
+	// FilePath is the append-only JSON Lines audit file used when HEC is
+	// disabled. It is required in file-only mode and ignored in HEC-only mode.
 	FilePath string
-	// HEC additionally forwards every record to a Splunk HTTP Event Collector
-	// when its Endpoint is set.
+	// HEC forwards records exclusively to a Splunk HTTP Event Collector when
+	// its Endpoint is set. It uses a bounded in-memory queue, not a disk spool.
 	HEC HECConfig
 }
 
@@ -121,44 +121,45 @@ type configuredSink struct {
 	closeErr          error
 }
 
-// Configure directs audit records to options.FilePath as newline-delimited
-// JSON and, when options.HEC.Endpoint is set, also to a Splunk HEC.
+// Configure directs audit records exclusively to Splunk HEC when its Endpoint
+// is set, or to options.FilePath as newline-delimited JSON otherwise.
 //
-// The file is opened in append mode and created with mode 0640 when absent.
-// Missing parent directories are created with mode 0750. HEC delivery happens
-// in the background and never blocks or fails audit logging. Ordinary log
-// package output continues to use its existing destination. The returned
-// closer must remain open while audit records can be emitted; closing it
-// restores the previous slog logger and standard log destination, flushes
-// queued HEC events, and closes the file.
+// HEC-only mode never opens or modifies FilePath and does not fall back to it
+// during delivery failures. HEC delivery happens in the background through a
+// bounded in-memory queue; overflow and process termination can lose events.
+// File-only mode requires FilePath, opens it in append mode with mode 0640 when
+// absent, and creates missing parent directories with mode 0750. Ordinary log
+// package output keeps its existing destination. Keep the returned closer open
+// while audit records can be emitted; closing it restores the previous logging
+// state and flushes the HEC queue or closes the file.
 func Configure(options Options) (io.Closer, error) {
-	path := options.FilePath
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("configure audit JSON file: path is empty")
-	}
-
+	var file *os.File
 	var forwarder *hecForwarder
+	var handler slog.Handler
 	if strings.TrimSpace(options.HEC.Endpoint) != "" {
 		var err error
 		if forwarder, err = newHECForwarder(options.HEC); err != nil {
 			return nil, fmt.Errorf("configure splunk hec forwarding: %w", err)
 		}
-	}
-
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o750); err != nil {
-		return nil, fmt.Errorf("create audit log directory %q: %w", directory, err)
-	}
-
-	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302,G304 -- operator-configured path; group-readable mode allows a log collector to ingest the audit stream
-	if err != nil {
-		return nil, fmt.Errorf("open audit log file %q: %w", path, err)
-	}
-
-	handler := slog.Handler(slog.NewJSONHandler(file, nil))
-	if forwarder != nil {
 		forwarder.start()
-		handler = slog.NewMultiHandler(handler, slog.NewJSONHandler(forwarder, nil))
+		handler = slog.NewJSONHandler(forwarder, nil)
+	} else {
+		path := options.FilePath
+		if strings.TrimSpace(path) == "" {
+			return nil, fmt.Errorf("configure audit JSON file: path is empty")
+		}
+
+		directory := filepath.Dir(path)
+		if err := os.MkdirAll(directory, 0o750); err != nil {
+			return nil, fmt.Errorf("create audit log directory %q: %w", directory, err)
+		}
+
+		var err error
+		file, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302,G304 -- operator-configured path; group-readable mode allows a log collector to ingest the audit stream
+		if err != nil {
+			return nil, fmt.Errorf("open audit log file %q: %w", path, err)
+		}
+		handler = slog.NewJSONHandler(file, nil)
 	}
 
 	previousLogger := slog.Default()
@@ -176,8 +177,8 @@ func Configure(options Options) (io.Closer, error) {
 	}, nil
 }
 
-// Close restores the previous process logging state, flushes queued HEC
-// events, and closes the audit file.
+// Close restores the previous process logging state and flushes queued HEC
+// events or closes the audit file, according to the configured destination.
 func (sink *configuredSink) Close() error {
 	sink.once.Do(func() {
 		slog.SetDefault(sink.previousLogger)
@@ -186,7 +187,11 @@ func (sink *configuredSink) Close() error {
 		if sink.forwarder != nil {
 			forwarderErr = sink.forwarder.Close()
 		}
-		sink.closeErr = errors.Join(forwarderErr, sink.file.Close())
+		var fileErr error
+		if sink.file != nil {
+			fileErr = sink.file.Close()
+		}
+		sink.closeErr = errors.Join(forwarderErr, fileErr)
 	})
 	return sink.closeErr
 }

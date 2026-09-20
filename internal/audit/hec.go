@@ -69,7 +69,7 @@ func newHECForwarder(config HECConfig) (*hecForwarder, error) {
 	if client.PlainHTTP() {
 		log.Printf("audit: splunk hec endpoint uses plain http; the hec token and audit events are sent unencrypted")
 	}
-	log.Printf("audit: forwarding audit events to splunk hec at %s (index %q)", client.Endpoint(), client.Index())
+	log.Printf("audit: forwarding audit events to splunk hec at %s (index %q); local audit file is disabled", client.Endpoint(), client.Index())
 
 	host, _ := os.Hostname()
 	return &hecForwarder{
@@ -94,7 +94,7 @@ func (f *hecForwarder) start() {
 // exactly one complete, newline-terminated record per call. Write never blocks
 // and never fails, so a slow or unreachable collector cannot stall audit
 // logging: when the queue is full the record is dropped and counted for the
-// next drop report. The local audit file is unaffected.
+// next drop report. No local audit file or durable spool retains a copy.
 func (f *hecForwarder) Write(record []byte) (int, error) {
 	// Marshal copies the record, which slog reuses once Write returns.
 	payload, err := json.Marshal(splunkhec.Envelope{
@@ -201,7 +201,7 @@ func (f *hecForwarder) deliver(ctx context.Context, batch [][]byte) {
 
 func (f *hecForwarder) reportDropped() {
 	if dropped := f.dropped.Swap(0); dropped > 0 {
-		log.Printf("audit: %d audit event(s) could not be forwarded to splunk hec and were dropped; the local audit file is unaffected", dropped)
+		log.Printf("audit: %d audit event(s) could not be forwarded to splunk hec and were dropped; no local audit copy is kept", dropped)
 	}
 }
 

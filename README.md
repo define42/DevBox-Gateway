@@ -63,8 +63,9 @@ else is treated as an RDP X.224 Connection Request.
 - **Libvirt integration** for managing QEMU/KVM virtual machines from a
   configurable storage pool, with base image auto-download.
 - **Single port** (`:443`) for everything: dashboard, websockets, and RDP.
-- **JSON Lines audit trail** for authentication, VM lifecycle, console/RDP
-  connections, and administrator actions, ready for file-based ingestion.
+- **Structured JSON audit events** for authentication, VM lifecycle,
+  console/RDP connections, and administrator actions, sent directly to Splunk
+  HEC when configured or written as JSON Lines to a local file otherwise.
 
 ## Architecture
 
@@ -122,7 +123,7 @@ Requirements on the host:
   gateway creates its dedicated `devbox` NAT network and `virbr-devbox` bridge
   during startup; no pre-existing bridge or macvlan is needed.
 - Write access to `/data/` on the host (used for ACME data, VM images, serial /
-  VNC sockets, and the persistent audit log at `/data/logs/audit.jsonl`).
+  VNC sockets, the SauronAgent guest log and its Splunk forwarding spool).
 - At least one QCOW2 base disk image in `/data/baseimages`, named with an
   `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
   valid QCOW2 image — see
@@ -140,15 +141,18 @@ This stops any previous stack, rebuilds the images, and starts:
   `https://localhost` (port `443`).
 - `ldap` — a `glauth/glauth` LDAP server pre-populated from
   `testldap/default-config.cfg` for local development.
-- `splunk` — a `splunk/splunk` Splunk Enterprise instance that receives every
-  audit event from the gateway over HEC (see
+- `splunk` — a `splunk/splunk` Splunk Enterprise instance that receives
+  application audit events from the gateway over HEC (see
   [Forwarding to Splunk HEC](#forwarding-to-splunk-hec)), and every SauronAgent
   event from inside the VMs (see
   [SauronAgent guest events](#sauronagent-guest-events)). Starting it accepts
   the [Splunk General Terms](https://www.splunk.com/en_us/legal/splunk-general-terms.html).
 
 The first Splunk start takes a few minutes; the gateway queues and retries
-audit events until HEC is reachable. Then open Splunk Web at
+application audit events in memory, up to its 10,000-event queue limit. This
+Compose setup uses HEC-only application logging and does not write
+`/data/logs/audit.jsonl`. Guest events keep their separate local log and spool.
+Then open Splunk Web at
 `http://localhost:8000` (user `admin`, password `devbox-splunk`) and search
 `index=devbox_audit`, or `index=devbox_sauron` for the guest events of VMs whose
 base image runs SauronAgent. The admin password and the shared HEC token are
@@ -171,14 +175,14 @@ built and installation-tested against the current Rocky Linux 9 repositories;
 other RPM distributions are not part of the native compatibility baseline.
 
 The package installs its binary, unit, and config; the service creates the
-audit file at runtime:
+application audit file at runtime only when `SPLUNK_HEC_ENDPOINT` is unset:
 
 | Path                                            | Purpose                                              |
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                        | The gateway binary.                                  |
 | `/usr/lib/systemd/system/devbox-gateway.service` | systemd unit (runs as root, binds `:443`).           |
 | `/etc/devbox-gateway/devbox-gateway.conf`        | Config file (installed `0640 root:root` as it may hold credential digests), marked `%config(noreplace)` so your edits survive upgrades. |
-| `/var/log/devbox-gateway/audit.jsonl`             | Append-only JSON Lines audit log, created when the gateway starts. |
+| `/var/log/devbox-gateway/audit.jsonl`             | Default JSON Lines application audit log, created when HEC forwarding is disabled. |
 
 It requires `libvirt-libs`, `ca-certificates`, `libvirt-daemon-kvm`,
 `libvirt-daemon-driver-nwfilter`, and `qemu-kvm`. The nwfilter driver supplies
@@ -263,14 +267,14 @@ Debian 12 libraries. Other Debian-based distributions are not part of the
 native compatibility baseline.
 
 The package installs its binary, unit, and config; the service creates the
-audit file at runtime:
+application audit file at runtime only when `SPLUNK_HEC_ENDPOINT` is unset:
 
 | Path                                            | Purpose                                              |
 |-------------------------------------------------|------------------------------------------------------|
 | `/usr/bin/devbox-gateway`                     | The gateway binary.                                  |
 | `/lib/systemd/system/devbox-gateway.service`  | systemd unit (runs as root, binds `:443`).           |
 | `/etc/devbox-gateway/devbox-gateway.conf`     | Config file (installed `0640 root:root` as it may hold credential digests), registered as a `conffile` so your edits survive upgrades. |
-| `/var/log/devbox-gateway/audit.jsonl`          | Append-only JSON Lines audit log, created when the gateway starts. |
+| `/var/log/devbox-gateway/audit.jsonl`          | Default JSON Lines application audit log, created when HEC forwarding is disabled. |
 
 It depends on `libvirt0`, `ca-certificates`, `libvirt-daemon-system`,
 `libvirt-daemon-config-nwfilter`, `iptables`, and `qemu-system-x86`. On Debian
@@ -449,8 +453,8 @@ file**, which keeps container and development overrides working.
 | `ACME_CA`                 | _(empty)_                                                                                                        | ACME directory URL, or `staging` for the Let's Encrypt staging endpoint.                          |
 | `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Domain served by the dashboard and used as the suffix for VM SNI routing labels.                  |
 | `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
-| `AUDIT_LOG_FILE`          | `/var/log/devbox-gateway/audit.jsonl`                                                                            | Append-only audit destination. Every event is one complete JSON object followed by a newline, suitable for Splunk file monitoring. The Docker Compose setup overrides this to `/data/logs/audit.jsonl`. |
-| `SPLUNK_HEC_ENDPOINT`     | _(empty)_                                                                                                        | Splunk HTTP Event Collector URL that also receives every audit event, e.g. `https://splunk.example.com:8088`. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. See [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
+| `AUDIT_LOG_FILE`          | `/var/log/devbox-gateway/audit.jsonl`                                                                            | Required JSON Lines application audit destination when `SPLUNK_HEC_ENDPOINT` is unset; ignored when HEC is configured. The Docker Compose value `/data/logs/audit.jsonl` is used only if application HEC is disabled. |
+| `SPLUNK_HEC_ENDPOINT`     | _(empty)_                                                                                                        | Splunk HTTP Event Collector URL, e.g. `https://splunk.example.com:8088`. A nonblank value selects HEC as the sole application audit output and disables local audit-file writes. A URL without a path uses `/services/collector/event`. Empty selects `AUDIT_LOG_FILE`. See [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
@@ -493,15 +497,22 @@ See [compliance.md](compliance.md) for the NATO AC/35-D/2003-REV5 §26.3.1
 coverage comparison, audit-rule and event inventories, Splunk index routing,
 JSON event examples and remaining compliance gaps.
 
-Security-relevant activity is appended to `AUDIT_LOG_FILE` as JSON Lines
-(NDJSON): each physical line is an independently parseable JSON event. The
-native packages default to `/var/log/devbox-gateway/audit.jsonl`; systemd
-creates its parent directory before starting the gateway. Docker Compose writes
-the same stream to `/data/logs/audit.jsonl`, which is visible at that path on
-the host through the existing `/data` bind mount.
+Application audit events use one output: Splunk HEC when
+`SPLUNK_HEC_ENDPOINT` is nonblank, or `AUDIT_LOG_FILE` when it is unset.
+In HEC mode the file setting is ignored. Existing audit files remain on disk;
+the gateway does not open or append to them.
 
-Configure the Splunk Universal Forwarder with a file monitor for the selected
-path and set the source type to `_json`. For example:
+With HEC disabled, events are appended to the required `AUDIT_LOG_FILE` as
+JSON Lines (NDJSON): each physical line is an independently parseable JSON
+event. The native packages default to `/var/log/devbox-gateway/audit.jsonl`;
+systemd creates its parent directory before starting the gateway. Docker
+Compose configures `/data/logs/audit.jsonl` for use if application HEC is
+disabled, visible on the host through the `/data` bind mount. The supplied
+Compose deployment enables HEC, so it does not write this application file.
+
+With application HEC disabled, configure the Splunk Universal Forwarder with
+a file monitor for the selected path and set the source type to `_json`.
+For example:
 
 ```ini
 [monitor:///var/log/devbox-gateway/audit.jsonl]
@@ -521,12 +532,12 @@ sudo setfacl -m u:splunk:r /var/log/devbox-gateway/audit.jsonl
 ```
 
 Ordinary process diagnostics remain available through `journalctl` (or Docker
-logs); `AUDIT_LOG_FILE` is the dedicated security-event stream.
+logs); application audit events go to the selected audit output.
 
 #### Forwarding to Splunk HEC
 
-As an alternative to a Universal Forwarder, the gateway can send every audit
-event directly to a Splunk HTTP Event Collector. Set the endpoint and token
+As an alternative to a Universal Forwarder, the gateway can send application
+audit events directly to a Splunk HTTP Event Collector. Set the endpoint and token
 (and optionally the index):
 
 ```ini
@@ -535,11 +546,12 @@ SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
 SPLUNK_HEC_INDEX=devbox_audit
 ```
 
-- `AUDIT_LOG_FILE` is still written; HEC is an additional destination, so the
-  local file remains the complete record if Splunk is unreachable.
+- HEC is the sole application audit destination. `AUDIT_LOG_FILE` is ignored,
+  even if empty or unwritable. Existing files are left in place, but no local
+  application audit file is created, opened or appended in HEC mode.
 - Each event arrives on the JSON event endpoint with `source=devbox-gateway`,
   `sourcetype=devbox-gateway:audit`, the gateway's hostname as `host`, and the
-  same JSON object that is written to the file as the event body. The token
+  same JSON schema used in file mode as the event body. The token
   must be allowed to write to `SPLUNK_HEC_INDEX`, and must have indexer
   acknowledgement disabled (otherwise Splunk rejects every request with
   "Data channel is missing").
@@ -553,9 +565,15 @@ SPLUNK_HEC_INDEX=devbox_audit
   `4xx` responses drop that batch. Up to 10,000 events are held in memory while
   the collector is unavailable; beyond that, new events are dropped. Drops and
   failures are reported in the process log (`journalctl` / Docker logs).
+- This best-effort delivery cannot guarantee retention of every application
+  audit event. The queue is volatile: overflow, process termination,
+  non-retryable responses or an exhausted shutdown flush can lose events.
+  There is no application disk spool, file fallback or replay of old audit
+  files. SauronAgent guest logging and its forwarding spool are separate.
 - On shutdown the gateway waits up to 5s for queued events to be delivered.
 - The gateway refuses to start when `SPLUNK_HEC_ENDPOINT` is set without
   `SPLUNK_HEC_TOKEN`, or when a token or index is set without an endpoint.
+  Invalid HEC configuration fails startup; it does not select file logging.
 - Splunk's default HEC certificate is self-signed. Prefer installing the CA
   that signed it into the host (or container) trust store; set
   `SPLUNK_HEC_SKIP_TLS_VERIFY=true` only as a stopgap. A plain `http://`

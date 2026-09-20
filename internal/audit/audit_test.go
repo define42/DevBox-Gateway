@@ -146,7 +146,7 @@ func TestConfigureAppendsOneJSONRecordPerLine(t *testing.T) {
 		t.Fatalf("seed audit file: %v", err)
 	}
 
-	closer, err := Configure(Options{FilePath: path})
+	closer, err := Configure(Options{FilePath: path, HEC: HECConfig{Endpoint: " \t "}})
 	if err != nil {
 		t.Fatalf("configure audit file: %v", err)
 	}
@@ -254,12 +254,29 @@ func TestConfigurePreservesOperationalLogAndRestoresLogging(t *testing.T) {
 }
 
 func TestConfigureRejectsEmptyPath(t *testing.T) {
-	closer, err := Configure(Options{FilePath: " \t "})
-	if err == nil {
-		if closer != nil {
-			_ = closer.Close()
-		}
-		t.Fatal("Configure() error = nil, want non-nil")
+	tests := []struct {
+		name    string
+		options Options
+	}{
+		{name: "empty", options: Options{}},
+		{name: "whitespace", options: Options{FilePath: " \t "}},
+		{name: "blank HEC endpoint", options: Options{HEC: HECConfig{Endpoint: " \t "}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			previousLogger := slog.Default()
+			previousLogWriter := log.Writer()
+			closer, err := Configure(test.options)
+			if err == nil {
+				if closer != nil {
+					_ = closer.Close()
+				}
+				t.Fatal("Configure() error = nil, want non-nil")
+			}
+			if slog.Default() != previousLogger || log.Writer() != previousLogWriter {
+				t.Error("failed Configure replaced a logging destination")
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -169,7 +170,7 @@ func TestNewHECForwarderRejectsInvalidConfig(t *testing.T) {
 
 func TestConfigureForwardsAuditRecordsToHEC(t *testing.T) {
 	collector := newFakeCollector(t)
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
 
 	closer, err := Configure(Options{
 		FilePath: path,
@@ -219,30 +220,189 @@ func TestConfigureForwardsAuditRecordsToHEC(t *testing.T) {
 		"source_ip": "192.0.2.10",
 	})
 
-	// The audit file remains the complete local record.
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("HEC-only logging created the local audit directory: %v", err)
+	}
+}
+
+func TestConfigureHECRejectionDoesNotCreateLocalFile(t *testing.T) {
+	collector := newFakeCollector(t, http.StatusBadRequest)
+	path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
+	closer, err := Configure(Options{
+		FilePath: path,
+		HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+	})
+	if err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+
+	Log(context.Background(), Event{Action: ActionUserLogin, User: "rejected"})
+	if err := closer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	requests := collector.received()
+	if len(requests) != 1 || strings.Join(eventUsers(requests), ",") != "rejected" {
+		t.Fatalf("collector requests = %#v, want one rejected event without a retry", requests)
+	}
+	collector.mu.Lock()
+	remainingStatuses := len(collector.statuses)
+	collector.mu.Unlock()
+	if remainingStatuses != 0 {
+		t.Fatal("collector did not return the scripted HTTP 400 rejection")
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("HEC rejection created a local audit directory: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("HEC rejection created a local audit file: %v", err)
+	}
+}
+
+func TestConfigureHECLeavesExistingFileUntouched(t *testing.T) {
+	collector := newFakeCollector(t)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	const existing = "{\"existing\":true}\n"
+	if err := os.WriteFile(path, []byte(existing), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	closer, err := Configure(Options{
+		FilePath: path,
+		HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+	})
+	if err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	Log(context.Background(), Event{Action: ActionUserLogin, User: "alice"})
+	if err := closer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if got := strings.Join(eventUsers(collector.received()), ","); got != "alice" {
+		t.Errorf("collector users = %q, want alice", got)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("read audit file: %v", err)
+		t.Fatal(err)
 	}
-	if lines := strings.Count(string(raw), "\n"); lines != 2 {
-		t.Errorf("audit file has %d lines, want 2: %s", lines, raw)
+	if string(raw) != existing {
+		t.Errorf("HEC-only logging changed existing audit file: %q", raw)
+	}
+	assertPathMode(t, path, 0o640)
+}
+
+func TestConfigureHECIgnoresUnusableFilePaths(t *testing.T) {
+	directory := t.TempDir()
+	parentFile := filepath.Join(directory, "regular-file")
+	if err := os.WriteFile(parentFile, []byte("existing"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "empty", path: ""},
+		{name: "whitespace", path: " \t "},
+		{name: "directory", path: directory},
+		{name: "parent is a file", path: filepath.Join(parentFile, "audit.jsonl")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collector := newFakeCollector(t)
+			closer, err := Configure(Options{
+				FilePath: test.path,
+				HEC:      HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+			})
+			if err != nil {
+				t.Fatalf("Configure() with ignored file path %q: %v", test.path, err)
+			}
+			t.Cleanup(func() { _ = closer.Close() })
+			Log(context.Background(), Event{Action: ActionUserLogin, User: "alice"})
+			if err := closer.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+			if got := strings.Join(eventUsers(collector.received()), ","); got != "alice" {
+				t.Errorf("collector users = %q, want alice", got)
+			}
+		})
+	}
+}
+
+func TestConfigureHECPreservesOperationalLogAndRestoresLogging(t *testing.T) {
+	collector := newFakeCollector(t)
+	previousLogger := slog.Default()
+	previousLogWriter := log.Writer()
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+		log.SetOutput(previousLogWriter)
+	})
+	var restoredSlog, operationalLog bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&restoredSlog, nil))
+	slog.SetDefault(logger)
+	log.SetOutput(&operationalLog)
+
+	closer, err := Configure(Options{
+		HEC: HECConfig{Endpoint: collector.server.URL, Token: "token", InsecureSkipVerify: true},
+	})
+	if err != nil {
+		t.Fatalf("Configure() error = %v", err)
+	}
+	t.Cleanup(func() { _ = closer.Close() })
+	log.Print("ordinary service event")
+	Log(context.Background(), Event{Action: ActionUserLogout, User: "alice"})
+	for range 2 {
+		if err := closer.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}
+	Log(context.Background(), Event{Action: ActionUserLogout, User: "after-close"})
+	log.Print("ordinary event after close")
+
+	if slog.Default() != logger || log.Writer() != &operationalLog {
+		t.Error("Close() did not restore the previous logging destinations")
+	}
+	if got := strings.Join(eventUsers(collector.received()), ","); got != "alice" {
+		t.Errorf("collector users = %q, want only alice", got)
+	}
+	if !strings.Contains(restoredSlog.String(), `"user":"after-close"`) {
+		t.Errorf("previous slog logger did not receive the post-close event: %q", restoredSlog.String())
+	}
+	if !strings.Contains(operationalLog.String(), "ordinary service event") ||
+		!strings.Contains(operationalLog.String(), "ordinary event after close") {
+		t.Errorf("standard log destination was not preserved and restored: %q", operationalLog.String())
 	}
 }
 
 func TestConfigureRejectsInvalidHECWithoutTouchingLogging(t *testing.T) {
-	previousLogger := slog.Default()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-
-	closer, err := Configure(Options{FilePath: path, HEC: HECConfig{Endpoint: "https://splunk.example.test"}})
-	if err == nil {
-		_ = closer.Close()
-		t.Fatal("Configure() error = nil, want missing-token error")
+	tests := []struct {
+		name   string
+		config HECConfig
+	}{
+		{name: "missing token", config: HECConfig{Endpoint: "https://splunk.example.test"}},
+		{name: "whitespace token", config: HECConfig{Endpoint: "https://splunk.example.test", Token: " \t "}},
+		{name: "invalid endpoint", config: HECConfig{Endpoint: "splunk.example.test", Token: "token"}},
 	}
-	if slog.Default() != previousLogger {
-		t.Error("failed Configure replaced the default slog logger")
-	}
-	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
-		t.Errorf("failed Configure created the audit file: %v", statErr)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			previousLogger := slog.Default()
+			previousLogWriter := log.Writer()
+			path := filepath.Join(t.TempDir(), "unused", "audit.jsonl")
+			closer, err := Configure(Options{FilePath: path, HEC: test.config})
+			if err == nil {
+				_ = closer.Close()
+				t.Fatal("Configure() error = nil, want HEC configuration error")
+			}
+			if !strings.Contains(err.Error(), "hec") {
+				t.Errorf("Configure() error = %v, want HEC configuration error", err)
+			}
+			if slog.Default() != previousLogger || log.Writer() != previousLogWriter {
+				t.Error("failed Configure replaced a logging destination")
+			}
+			if _, statErr := os.Stat(filepath.Dir(path)); !errors.Is(statErr, os.ErrNotExist) {
+				t.Errorf("failed Configure created the audit directory: %v", statErr)
+			}
+		})
 	}
 }
 
