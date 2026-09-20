@@ -98,6 +98,14 @@ with the CID mapping. It is never used to decide which VM an event came from.
 
 ### On the hypervisor
 
+On a DevBox Gateway host, use the gateway's always-on collector on AF_VSOCK
+port 9000 and leave `sauronhost` disabled to avoid a port conflict. The gateway
+adds vsock devices to new VMs and resolves their CIDs through libvirt; existing
+VMs without a vsock device are not automatically migrated. See the
+[gateway guest-event guide](../README.md#sauronagent-guest-events).
+
+For a hypervisor without DevBox Gateway, install the standalone collector:
+
 ```sh
 make install PREFIX=/usr                 # or install the package
 systemd-sysusers && systemd-tmpfiles --create

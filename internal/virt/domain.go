@@ -106,7 +106,8 @@ const vsockDeviceXML = `
 // runtime dir, and the serial console is a PTY. The gateway reaches both only
 // through libvirt (OpenVNCConn / OpenSerialConsole), never the host filesystem.
 // Every interpolated value is XML-escaped so a name can never alter the document.
-// vsock adds the virtio-vsock device SauronAgent needs (see SAURON_ENABLE).
+// vsock adds the virtio-vsock device SauronAgent needs. Gateway-created VDIs
+// always include it; the parameter also supports standalone libvirt callers.
 func DomainXML(name, seedISO, storagePoolName string, vcpu int, memoryMiB int, vsock bool, identity NetworkIdentity) string {
 	vsockDevice := ""
 	if vsock {

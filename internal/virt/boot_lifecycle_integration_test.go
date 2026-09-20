@@ -346,6 +346,7 @@ func TestStartVMRollsBackOnStartFailure(t *testing.T) {
 }
 
 func TestBootNewVMRejectsExistingName(t *testing.T) {
+	requireVHostVSock(t)
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)
@@ -399,6 +400,7 @@ func TestBootNewVMRejectsExistingName(t *testing.T) {
 }
 
 func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
+	requireVHostVSock(t)
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)
@@ -461,6 +463,7 @@ func TestBootNewVMEnforcesPerUserVDILimit(t *testing.T) {
 }
 
 func TestBootNewVMPersistsOwnerMetadata(t *testing.T) {
+	requireVHostVSock(t)
 	conn := newTestLibvirtConn(t)
 	settings := newBootTestSettings(t)
 	configureIsolatedBootStorage(t, settings)

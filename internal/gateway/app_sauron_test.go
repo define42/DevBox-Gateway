@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +18,10 @@ import (
 )
 
 func TestSauronOptionsMapsSettings(t *testing.T) {
-	t.Setenv(config.SAURON_ENABLE, "true")
-	t.Setenv(config.SAURON_VSOCK_PORT, "9100")
+	// Leftover deployment variables must neither disable collection nor
+	// redirect the listener away from the agent's compiled-in port.
+	t.Setenv("SAURON_ENABLE", "false")
+	t.Setenv("SAURON_VSOCK_PORT", "9100")
 	t.Setenv(config.SAURON_EVENT_LOG_FILE, "/srv/sauron/events.jsonl")
 	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
 	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "sauron-token")
@@ -30,8 +31,8 @@ func TestSauronOptionsMapsSettings(t *testing.T) {
 	t.Setenv(config.SAURON_SPOOL_MAX_MIB, "2048")
 
 	got := sauronOptions(config.NewSettings(false))
-	if got.Port != 9100 || got.EventLogFile != "/srv/sauron/events.jsonl" {
-		t.Errorf("sauronOptions() port %d, event log %q; want 9100 and /srv/sauron/events.jsonl", got.Port, got.EventLogFile)
+	if got.Port != 9000 || got.EventLogFile != "/srv/sauron/events.jsonl" {
+		t.Errorf("sauronOptions() port %d, event log %q; want 9000 and /srv/sauron/events.jsonl", got.Port, got.EventLogFile)
 	}
 	wantHEC := splunkhec.Config{
 		Endpoint:           "https://splunk.example.test:8088",
@@ -50,36 +51,51 @@ func TestSauronOptionsMapsSettings(t *testing.T) {
 	}
 }
 
-func TestStartSauronCollectorIsOffByDefault(t *testing.T) {
-	collector, err := startSauronCollector(config.NewSettings(false))
-	if err != nil || collector != nil {
-		t.Fatalf("startSauronCollector() = %v, %v; want nothing started", collector, err)
+func TestStartSauronCollectorIsMandatory(t *testing.T) {
+	for _, tc := range []struct{ name, legacyEnabled string }{
+		{name: "default"},
+		{name: "legacy disabled", legacyEnabled: "false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SAURON_ENABLE", tc.legacyEnabled)
+			// A directory cannot be opened as the event file. Reaching this
+			// failure proves setup is attempted without needing AF_VSOCK.
+			t.Setenv(config.SAURON_EVENT_LOG_FILE, t.TempDir())
+			collector, err := startSauronCollector(config.NewSettings(false))
+			if collector != nil {
+				_ = collector.Close()
+				t.Fatal("collector started with an unusable output")
+			}
+			if err == nil || !strings.Contains(err.Error(), "start sauron collector: open sauron event log") {
+				t.Fatalf("collector startup error = %v, want the mandatory output failure", err)
+			}
+		})
 	}
 }
 
-func TestMcovBootGatewayRejectsSauronHECWithoutEnable(t *testing.T) {
+func TestMcovBootGatewayRequiresSauronOutput(t *testing.T) {
 	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
-	t.Setenv(config.SAURON_ENABLE, "false")
-	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "https://splunk.example.test:8088")
-	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "sauron-token")
+	t.Setenv("SAURON_ENABLE", "false")
+	t.Setenv(config.SAURON_EVENT_LOG_FILE, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_INDEX, "")
 
 	_, err := bootGateway()
-	if err == nil || !strings.Contains(err.Error(), config.SAURON_ENABLE) {
-		t.Fatalf("expected a SAURON_ENABLE validation error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), config.SAURON_EVENT_LOG_FILE) {
+		t.Fatalf("expected a mandatory collector output validation error, got %v", err)
 	}
 }
 
 // TestMcovBootGatewayForwardsSauronEventsToSplunkHEC boots the gateway with the
-// SauronAgent collector enabled and plays a guest over AF_VSOCK loopback. The
+// mandatory SauronAgent collector and plays a guest over AF_VSOCK loopback. The
 // loopback CID (1) belongs to no libvirt domain, so the live libvirt resolver
 // records the guest as unknown -- which also proves it is consulted.
 func TestMcovBootGatewayForwardsSauronEventsToSplunkHEC(t *testing.T) {
-	port := freeVSockPort(t)
+	requireSauronVSock(t)
 	mcovBootEnv(t)
 	collector := newMcovHECCollector(t)
 	eventLog := filepath.Join(t.TempDir(), "sauron.jsonl")
-	t.Setenv(config.SAURON_ENABLE, "true")
-	t.Setenv(config.SAURON_VSOCK_PORT, strconv.FormatUint(uint64(port), 10))
 	t.Setenv(config.SAURON_EVENT_LOG_FILE, eventLog)
 	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, collector.server.URL)
 	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "mcov-sauron-token")
@@ -92,10 +108,10 @@ func TestMcovBootGatewayForwardsSauronEventsToSplunkHEC(t *testing.T) {
 	}
 	defer func() { _ = gateway.Close() }()
 	if gateway.sauron == nil {
-		t.Fatal("SAURON_ENABLE=true booted without a collector")
+		t.Fatal("gateway booted without its mandatory collector")
 	}
 
-	conn, err := vsock.Dial(1, port, nil)
+	conn, err := vsock.Dial(1, config.SauronVSockPort, nil)
 	if err != nil {
 		t.Fatalf("dial the collector over vsock loopback: %v", err)
 	}
@@ -141,23 +157,21 @@ func waitForHECBody(t *testing.T, collector *mcovHECCollector, want string) (str
 	}
 }
 
-// freeVSockPort returns a vsock port nothing listens on, or skips the test on a
-// host without a loopback-capable AF_VSOCK transport.
-func freeVSockPort(t *testing.T) uint32 {
+// requireSauronVSock checks the fixed production port before a live boot test.
+// No collector-disable or port override is introduced for test environments.
+func requireSauronVSock(t *testing.T) {
 	t.Helper()
-	listener, err := vsock.ListenContextID(0xFFFFFFFF, 0, nil)
+	listener, err := vsock.ListenContextID(0xFFFFFFFF, config.SauronVSockPort, nil)
 	if err != nil {
-		t.Skipf("no AF_VSOCK listener on this host: %v", err)
+		t.Skipf("AF_VSOCK port 9000 is unavailable for a live gateway boot: %v", err)
 	}
-	port := listener.Addr().(*vsock.Addr).Port
-	probe, err := vsock.Dial(1, port, nil)
+	probe, err := vsock.Dial(1, config.SauronVSockPort, nil)
 	if err != nil {
 		_ = listener.Close()
 		t.Skipf("no AF_VSOCK loopback transport on this host: %v", err)
 	}
 	_ = probe.Close()
 	_ = listener.Close()
-	return port
 }
 
 // sauronGuest speaks the guest side of the SAUR wire protocol (SauronAgent

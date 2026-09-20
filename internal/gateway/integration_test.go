@@ -12,6 +12,7 @@ import (
 )
 
 func TestIntegrationLogin(t *testing.T) {
+	requireSauronVSock(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 

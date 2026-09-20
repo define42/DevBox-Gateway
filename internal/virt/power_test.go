@@ -10,6 +10,7 @@ import (
 )
 
 func TestPowerOperationsWaitForRemoval(t *testing.T) {
+	requireVHostVSock(t)
 	operations := []struct {
 		name string
 		run  func(string) error

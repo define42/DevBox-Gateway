@@ -62,9 +62,9 @@ const (
 	// DefaultAuditLogFile is the default append-only JSON Lines audit log used
 	// by log collectors such as the Splunk Universal Forwarder.
 	DefaultAuditLogFile = "/var/log/devbox-gateway/audit.jsonl"
-	// DefaultSauronVSockPort is the AF_VSOCK port SauronAgent guests dial on
-	// the host by default. Override with SAURON_VSOCK_PORT.
-	DefaultSauronVSockPort = 9000
+	// SauronVSockPort is the fixed AF_VSOCK port shared by the gateway's
+	// mandatory collector and the agent's compiled-in transport settings.
+	SauronVSockPort uint32 = 9000
 	// DefaultSauronEventLogFile is the default JSON Lines file that receives
 	// every SauronAgent guest event. Override with SAURON_EVENT_LOG_FILE.
 	DefaultSauronEventLogFile = "/var/log/devbox-gateway/sauron.jsonl"
@@ -200,8 +200,6 @@ func (s *Settings) setAuditDefaults() {
 }
 
 func (s *Settings) setSauronDefaults() {
-	s.SetBool(SAURON_ENABLE, "Collect SauronAgent guest audit events: every new VM gets a virtio-vsock device, and the gateway accepts SauronAgent connections on SAURON_VSOCK_PORT and attributes each one to its VM by the CID libvirt assigned", false)
-	s.SetInt(SAURON_VSOCK_PORT, "AF_VSOCK port on the host (CID 2) that SauronAgent guests dial; must match the agents' transport port", DefaultSauronVSockPort)
 	s.SetString(SAURON_EVENT_LOG_FILE, "Append-only JSON Lines file that receives every SauronAgent guest event, rotated at 256 MiB with 8 files kept; empty disables the file, which then requires SAURON_SPLUNK_HEC_ENDPOINT", DefaultSauronEventLogFile)
 	s.SetString(SAURON_SPLUNK_HEC_ENDPOINT, "Splunk HTTP Event Collector URL that also receives every SauronAgent guest event, for example https://splunk.example.com:8088; a URL without a path uses /services/collector/event. Events are acknowledged to the guest once they are in the gateway's spool (SAURON_SPOOL_DIR) and delivered from there whenever HEC is reachable. Empty disables HEC forwarding", "")
 	s.SetSecretString(SAURON_SPLUNK_HEC_TOKEN, "Splunk HEC token for SauronAgent guest events; required when SAURON_SPLUNK_HEC_ENDPOINT is set", "")
@@ -245,26 +243,6 @@ func RDPPort(settings *Settings) int {
 		}
 	}
 	return 443
-}
-
-// SauronEnabled reports whether the gateway collects SauronAgent guest events
-// and gives new VMs the virtio-vsock device the agent needs.
-func SauronEnabled(settings *Settings) bool {
-	return settings != nil && settings.Bool(SAURON_ENABLE)
-}
-
-// SauronVSockPort resolves the AF_VSOCK port the SauronAgent collector
-// listens on. ValidateSauron rejects out-of-range values at boot; this falls
-// back to DefaultSauronVSockPort for them.
-func SauronVSockPort(settings *Settings) uint32 {
-	if settings == nil {
-		return DefaultSauronVSockPort
-	}
-	port := settings.Int(SAURON_VSOCK_PORT)
-	if port < 1 || int64(port) > maxVSockPort {
-		return DefaultSauronVSockPort
-	}
-	return uint32(port)
 }
 
 // SauronSpoolDir resolves the directory where guest events wait for Splunk
@@ -623,7 +601,6 @@ const (
 	MAX_VDI_PER_USER                  = "MAX_VDI_PER_USER"
 	MAX_CONNECTIONS_PER_USER          = "MAX_CONNECTIONS_PER_USER"
 	MAX_CONNECTIONS_PER_SOURCE        = "MAX_CONNECTIONS_PER_SOURCE"
-	SAURON_ENABLE                     = "SAURON_ENABLE"
 	SAURON_EVENT_LOG_FILE             = "SAURON_EVENT_LOG_FILE"
 	SAURON_SPLUNK_HEC_ENDPOINT        = "SAURON_SPLUNK_HEC_ENDPOINT"
 	SAURON_SPLUNK_HEC_INDEX           = "SAURON_SPLUNK_HEC_INDEX"
@@ -631,7 +608,6 @@ const (
 	SAURON_SPLUNK_HEC_TOKEN           = "SAURON_SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
 	SAURON_SPOOL_DIR                  = "SAURON_SPOOL_DIR"
 	SAURON_SPOOL_MAX_MIB              = "SAURON_SPOOL_MAX_MIB"
-	SAURON_VSOCK_PORT                 = "SAURON_VSOCK_PORT"
 	SNI_HASH_SECRET                   = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
 	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
 	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"

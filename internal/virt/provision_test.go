@@ -94,6 +94,7 @@ func TestBootNewVMReportsRollbackFailure(t *testing.T) {
 }
 
 func TestBootNewVMPreservesSuccessfulArtifacts(t *testing.T) {
+	requireVHostVSock(t)
 	fixture := newProvisionTestFixture(t)
 	name, err := BootNewVM(fixture.request, fixture.settings)
 	if err != nil {

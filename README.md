@@ -323,9 +323,9 @@ The guest agent enables kernel auditing and installs its built-in execution,
 privilege, configuration, persistence, and system-change rules when it starts.
 No audit rules file, `auditd`, or audit tools are needed.
 
-On a DevBox Gateway host the gateway itself is the collector: set
-`SAURON_ENABLE=true` (see [SauronAgent guest events](#sauronagent-guest-events))
-and leave `sauronhost` disabled — the two would compete for the same vsock port.
+On a DevBox Gateway host the gateway itself always runs the collector on
+AF_VSOCK port 9000 (see [SauronAgent guest events](#sauronagent-guest-events)).
+Leave `sauronhost` disabled — the two would compete for the same vsock port.
 The gateway gives every new VM its vsock device and maps each connection to its
 VM from libvirt, so there is no `vms:` CID map to maintain. The standalone
 `sauronhost` is for hypervisors that do not run the gateway.
@@ -454,8 +454,6 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
-| `SAURON_ENABLE`           | `false`                                                                                                          | Collect SauronAgent guest audit events: new VMs get a virtio-vsock device and the gateway accepts the agents over AF_VSOCK. See [SauronAgent guest events](#sauronagent-guest-events). |
-| `SAURON_VSOCK_PORT`       | `9000`                                                                                                           | AF_VSOCK port the agents dial on the host (CID 2). Must remain 9000 to match the agent's compiled-in port. |
 | `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
@@ -568,20 +566,23 @@ configuration: Splunk extracts the JSON fields at search time.
 [SauronAgent](SauronAgent/README.md), running inside the VMs, reads the guest
 kernel's audit stream (process executions, logins, privilege changes, audit and
 firewall configuration changes, …) and streams it to the hypervisor over
-virtio-vsock — no guest networking involved. With `SAURON_ENABLE=true` the
-gateway embeds SauronAgent's host collector and receives those events itself:
+virtio-vsock — no guest networking involved. The gateway always runs
+SauronAgent's host collector on fixed AF_VSOCK port 9000 and receives those
+events itself. No enable switch or port setting is needed. To also forward
+guest events to Splunk HEC, configure:
 
 ```ini
-SAURON_ENABLE=true
 SAURON_SPLUNK_HEC_ENDPOINT=https://splunk.example.com:8088
 SAURON_SPLUNK_HEC_TOKEN=11111111-2222-3333-4444-555555555555
 SAURON_SPLUNK_HEC_INDEX=devbox_sauron
 ```
 
-- Every VM created from then on gets a virtio-vsock device, for which libvirt
-  picks a CID that is unique among the running domains. VMs created while the
-  setting was off have no such device; recreate them to collect their events.
-- The gateway listens on AF_VSOCK port `SAURON_VSOCK_PORT` and attributes each
+- Every newly created VM gets a virtio-vsock device, for which libvirt picks a
+  CID that is unique among the running domains. Existing VMs without a vsock
+  device are not automatically migrated; recreate them or add the device
+  through libvirt before collecting their events. SauronAgent must also be
+  installed and running inside each guest.
+- The gateway listens on AF_VSOCK port 9000 and attributes each
   connection to the running VM libvirt assigned its CID to. The CID is set by the
   hypervisor, so a guest cannot pass its events off as another VM's; what the
   guest says about itself (hostname, machine-id, …) is recorded under
@@ -617,11 +618,11 @@ SAURON_SPLUNK_HEC_INDEX=devbox_sauron
   spooled. Redirects and unconfirmed `2xx` replies keep the checkpoint unchanged;
   successful delivery requires HEC JSON with `code: 0`. The same HEC token
   requirement applies as above: indexer acknowledgement must be disabled.
-- The gateway refuses to start when `SAURON_SPLUNK_HEC_*` is set without
-  `SAURON_ENABLE=true`, when the endpoint lacks a token (or a token or index
-  lacks an endpoint), or when neither the file nor HEC is configured. It also
-  refuses to start when it cannot open the vsock listener: the host needs the
-  `vhost_vsock` kernel module, and must not run `sauronhost` on the same port.
+- The gateway refuses to start when the guest-event HEC endpoint lacks a token
+  (or a token or index lacks an endpoint), or when neither the file nor HEC is
+  configured. It also refuses to start when it cannot open the vsock listener:
+  the host needs the `vhost_vsock` kernel module, and must not run `sauronhost`
+  on the same port.
   The shipped systemd unit allows the `AF_VSOCK` socket family; in Docker, see
   the seccomp note under [Quick start](#quick-start-docker-compose).
 - The collector's stream-loss alert (`sauron.stream.lost`) only watches VMs

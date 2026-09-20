@@ -1,7 +1,7 @@
 // Package sauron runs the SauronAgent host collector inside the gateway.
 //
-// Every VM the gateway boots gets a virtio-vsock device. The SauronAgent
-// inside it reads the guest kernel's audit stream and sends it to the host
+// Every new VM the gateway provisions gets a virtio-vsock device. The
+// SauronAgent inside it reads the guest kernel's audit stream and sends it to the host
 // over AF_VSOCK, so it needs no guest networking at all. The collector
 // attributes each connection to a VM by the CID libvirt assigned to it --
 // never by anything the guest says about itself -- and writes every event to
@@ -72,8 +72,8 @@ type Collector struct {
 }
 
 // Start opens the event outputs, binds the AF_VSOCK listener and starts
-// accepting guests. A collector that cannot listen fails here, so a gateway
-// configured to collect guest events never runs without doing so.
+// accepting guests. A collector that cannot listen fails here, preventing the
+// gateway from starting without its mandatory guest collection.
 func Start(options Options) (*Collector, error) {
 	sink, err := openSinks(options)
 	if err != nil {

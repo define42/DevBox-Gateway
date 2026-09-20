@@ -210,24 +210,25 @@ func TestValidateSauron(t *testing.T) {
 		env     map[string]string
 		wantErr string
 	}{
-		{name: "disabled by default"},
-		{name: "enabled with the default event log", env: map[string]string{SAURON_ENABLE: "true"}},
-		{name: "enabled with hec only", env: map[string]string{
-			SAURON_ENABLE: "true", SAURON_EVENT_LOG_FILE: "",
+		{name: "mandatory collection with default event log"},
+		{name: "hec only", env: map[string]string{
+			SAURON_EVENT_LOG_FILE:      "",
 			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SAURON_SPLUNK_HEC_TOKEN: "token", SAURON_SPLUNK_HEC_INDEX: "sauron",
 		}},
-		{name: "no output at all", env: map[string]string{SAURON_ENABLE: "true", SAURON_EVENT_LOG_FILE: " "}, wantErr: SAURON_EVENT_LOG_FILE},
+		{name: "no output at all", env: map[string]string{SAURON_EVENT_LOG_FILE: " "}, wantErr: SAURON_EVENT_LOG_FILE},
 		{name: "endpoint without token", env: map[string]string{
-			SAURON_ENABLE: "true", SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088",
+			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088",
 		}, wantErr: SAURON_SPLUNK_HEC_TOKEN},
-		{name: "index without endpoint", env: map[string]string{SAURON_ENABLE: "true", SAURON_SPLUNK_HEC_INDEX: "sauron"}, wantErr: SAURON_SPLUNK_HEC_ENDPOINT},
-		{name: "port zero", env: map[string]string{SAURON_ENABLE: "true", SAURON_VSOCK_PORT: "0"}, wantErr: SAURON_VSOCK_PORT},
-		{name: "port is VMADDR_PORT_ANY", env: map[string]string{SAURON_ENABLE: "true", SAURON_VSOCK_PORT: "4294967295"}, wantErr: SAURON_VSOCK_PORT},
-		{name: "hec settings while disabled", env: map[string]string{
+		{name: "index without endpoint", env: map[string]string{SAURON_SPLUNK_HEC_INDEX: "sauron"}, wantErr: SAURON_SPLUNK_HEC_ENDPOINT},
+		{name: "legacy disable cannot bypass output requirement", env: map[string]string{
+			"SAURON_ENABLE": "false", SAURON_EVENT_LOG_FILE: "",
+		}, wantErr: SAURON_EVENT_LOG_FILE},
+		{name: "legacy port cannot change collection", env: map[string]string{"SAURON_VSOCK_PORT": "0"}},
+		{name: "hec and default event log", env: map[string]string{
 			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SAURON_SPLUNK_HEC_TOKEN: "token",
-		}, wantErr: SAURON_ENABLE},
-		{name: "hec token while disabled", env: map[string]string{SAURON_SPLUNK_HEC_TOKEN: "token"}, wantErr: SAURON_ENABLE},
-		{name: "audit hec does not enable sauron", env: map[string]string{
+		}},
+		{name: "token without endpoint", env: map[string]string{SAURON_SPLUNK_HEC_TOKEN: "token"}, wantErr: SAURON_SPLUNK_HEC_ENDPOINT},
+		{name: "audit hec is independent of sauron", env: map[string]string{
 			SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SPLUNK_HEC_TOKEN: "token",
 		}},
 	}

@@ -30,6 +30,14 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 
 ## 2. Install the collector (hypervisor)
 
+DevBox Gateway always runs its own collector on AF_VSOCK port 9000. On a
+gateway host, skip the standalone collector setup below and leave `sauronhost`
+disabled to avoid a port conflict. The gateway resolves guest CIDs through
+libvirt, so no static `vms:` map is needed. Configure output using the
+[gateway guest-event settings](../../README.md#sauronagent-guest-events).
+
+For a hypervisor without DevBox Gateway:
+
 ```sh
 make install PREFIX=/usr
 systemd-sysusers
@@ -65,6 +73,11 @@ instead, enable the file sink (`output.file`) or the syslog sink
 acknowledged to the guest only once **every** enabled sink has accepted it.
 
 ## 3. Give each VM a vsock device
+
+DevBox Gateway adds a vsock device to every new VM. Existing VMs without a
+device are not automatically migrated; recreate them or add the device through
+libvirt. The manual CID allocation and static map below apply to the standalone
+collector.
 
 Assign a CID and add the device -- `-device vhost-vsock-pci,guest-cid=102`, or
 the libvirt `<vsock>` element. Guest CIDs start at 3; 0, 1 and 2 are reserved.

@@ -26,6 +26,10 @@ func newGatewayIntegrationSettings(t *testing.T, ldapURL string) *config.Setting
 	t.Setenv(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-"))
 	t.Setenv(config.VIRT_STORAGE_POOL_NAME, "gateway-test-"+uniqueGatewayVMShortName("pool"))
 	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
+	t.Setenv(config.SAURON_EVENT_LOG_FILE, filepath.Join(t.TempDir(), "sauron.jsonl"))
+	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_INDEX, "")
 
 	settings := config.NewSettings(false)
 	stageExistingBaseImageFromDefaultRoot(t, settings)

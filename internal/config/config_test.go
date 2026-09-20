@@ -712,12 +712,6 @@ func TestNewSettingsSplunkHEC(t *testing.T) {
 
 func TestNewSettingsSauron(t *testing.T) {
 	s := NewSettings(false)
-	if SauronEnabled(s) {
-		t.Fatal("expected SauronAgent collection to be disabled by default")
-	}
-	if got := SauronVSockPort(s); got != DefaultSauronVSockPort {
-		t.Fatalf("expected default SAURON_VSOCK_PORT %d, got %d", DefaultSauronVSockPort, got)
-	}
 	if got := s.String(SAURON_EVENT_LOG_FILE); got != DefaultSauronEventLogFile {
 		t.Fatalf("expected default SAURON_EVENT_LOG_FILE %q, got %q", DefaultSauronEventLogFile, got)
 	}
@@ -727,20 +721,12 @@ func TestNewSettingsSauron(t *testing.T) {
 		}
 	}
 
-	t.Setenv(SAURON_ENABLE, "true")
-	t.Setenv(SAURON_VSOCK_PORT, " 9100 ")
 	t.Setenv(SAURON_SPLUNK_HEC_ENDPOINT, " https://splunk.example.test:8088 ")
 	t.Setenv(SAURON_SPLUNK_HEC_TOKEN, " 11111111-2222-3333-4444-555555555555 ")
 	t.Setenv(SAURON_SPLUNK_HEC_INDEX, " sauron ")
 	t.Setenv(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
 
 	s = NewSettings(false)
-	if !SauronEnabled(s) {
-		t.Fatal("expected SAURON_ENABLE=true from environment")
-	}
-	if got := SauronVSockPort(s); got != 9100 {
-		t.Fatalf("expected SAURON_VSOCK_PORT 9100, got %d", got)
-	}
 	for key, want := range map[string]string{
 		SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088",
 		SAURON_SPLUNK_HEC_TOKEN:    "11111111-2222-3333-4444-555555555555",
@@ -787,17 +773,16 @@ func TestSauronSpoolSettings(t *testing.T) {
 	}
 }
 
-func TestSauronVSockPortFallsBackWhenOutOfRange(t *testing.T) {
-	for _, port := range []string{"0", "-1", "4294967295"} {
-		t.Setenv(SAURON_VSOCK_PORT, port)
-		if got := SauronVSockPort(NewSettings(false)); got != DefaultSauronVSockPort {
-			t.Errorf("SauronVSockPort(%s) = %d, want the default %d", port, got, DefaultSauronVSockPort)
+func TestSauronCollectionControlsAreNotRegistered(t *testing.T) {
+	t.Setenv("SAURON_ENABLE", "false")
+	t.Setenv("SAURON_VSOCK_PORT", "9100")
+	s := NewSettings(false)
+	for _, key := range []string{"SAURON_ENABLE", "SAURON_VSOCK_PORT"} {
+		if _, registered := s.m[key]; registered {
+			t.Errorf("removed setting %s is still registered", key)
 		}
 	}
-	if got := SauronVSockPort(nil); got != DefaultSauronVSockPort {
-		t.Errorf("SauronVSockPort(nil) = %d, want the default %d", got, DefaultSauronVSockPort)
-	}
-	if SauronEnabled(nil) {
-		t.Error("SauronEnabled(nil) = true, want false")
+	if SauronVSockPort != 9000 {
+		t.Fatalf("collector port = %d, want the fixed agent port 9000", SauronVSockPort)
 	}
 }

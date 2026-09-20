@@ -131,6 +131,7 @@ func waitForDomainActiveState(t *testing.T, name string, want bool, timeout time
 }
 
 func TestPowerLifecycle(t *testing.T) {
+	requireVHostVSock(t)
 	settings := config.NewSettings(false)
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, newLibvirtAccessibleTempDir(t, "devboxgateway-root-")); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)

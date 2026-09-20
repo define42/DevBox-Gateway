@@ -294,6 +294,9 @@ func assertRemovedVM(t *testing.T, conn *libvirt.Connect, vmName string) {
 }
 
 func TestStartVM(t *testing.T) {
+	if _, err := os.Stat("/dev/vhost-vsock"); err != nil {
+		t.Skipf("no vhost-vsock device on this host: %v", err)
+	}
 	settings := newConsoleSocketSettings(t)
 	testUsername := fmt.Sprintf("testuser-%d", time.Now().UnixNano())
 

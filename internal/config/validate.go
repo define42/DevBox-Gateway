@@ -80,33 +80,18 @@ func ValidateSplunkHEC(settings *Settings) error {
 	return validateHECSettings(settings, SPLUNK_HEC_ENDPOINT, SPLUNK_HEC_TOKEN, SPLUNK_HEC_INDEX, "audit events")
 }
 
-// maxVSockPort is the highest AF_VSOCK port a listener can bind; 0xFFFFFFFF is
-// VMADDR_PORT_ANY.
-const maxVSockPort = 1<<32 - 2
-
-// ValidateSauron rejects a SauronAgent collector configuration that would not
-// collect what the operator asked for: a port the collector cannot bind,
-// partial Splunk HEC settings, no event output at all, or output settings
-// that would never be used because SAURON_ENABLE is off.
+// ValidateSauron requires an event output for the mandatory guest collector
+// and rejects partial Splunk HEC settings.
 func ValidateSauron(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}
 	endpointSet := strings.TrimSpace(settings.Get(SAURON_SPLUNK_HEC_ENDPOINT)) != ""
-	if !SauronEnabled(settings) {
-		if endpointSet || strings.TrimSpace(settings.Get(SAURON_SPLUNK_HEC_TOKEN)) != "" {
-			return fmt.Errorf("SAURON_SPLUNK_HEC_* is set but %s is false; enable it to collect and forward SauronAgent guest events, or remove the SAURON_SPLUNK_HEC_* settings", SAURON_ENABLE)
-		}
-		return nil
-	}
-	if port := settings.Int(SAURON_VSOCK_PORT); port < 1 || int64(port) > maxVSockPort {
-		return fmt.Errorf("%s=%d is out of range; it must be between 1 and %d", SAURON_VSOCK_PORT, port, maxVSockPort)
-	}
 	if err := validateHECSettings(settings, SAURON_SPLUNK_HEC_ENDPOINT, SAURON_SPLUNK_HEC_TOKEN, SAURON_SPLUNK_HEC_INDEX, "SauronAgent guest events"); err != nil {
 		return err
 	}
 	if !endpointSet && strings.TrimSpace(settings.Get(SAURON_EVENT_LOG_FILE)) == "" {
-		return fmt.Errorf("%s is true but both %s and %s are empty; set at least one so guest events are kept somewhere", SAURON_ENABLE, SAURON_EVENT_LOG_FILE, SAURON_SPLUNK_HEC_ENDPOINT)
+		return fmt.Errorf("SauronAgent collection is mandatory but both %s and %s are empty; set at least one so guest events are kept somewhere", SAURON_EVENT_LOG_FILE, SAURON_SPLUNK_HEC_ENDPOINT)
 	}
 	return nil
 }

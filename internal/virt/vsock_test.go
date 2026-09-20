@@ -130,28 +130,36 @@ func TestDomainVSockCID(t *testing.T) {
 	}
 }
 
-// TestPrepareVMCreationFollowsSauronEnable locks that new VDIs get the
-// SauronAgent vsock device exactly when the collector is enabled.
-func TestPrepareVMCreationFollowsSauronEnable(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		settings := newBootTestSettings(t)
-		if err := settings.OverwriteForTestBool(config.SAURON_ENABLE, enabled); err != nil {
-			t.Fatal(err)
-		}
-		owner, err := identity.New("vsocktest")
-		if err != nil {
-			t.Fatal(err)
-		}
-		spec, err := prepareVMCreation(VMCreateRequest{
-			Name: "devbox", Owner: owner, GuestUsername: "guest",
-			PasswordHash: testGuestPasswordHash, BaseImage: seedDummyBaseImage(t, settings),
-		}, settings)
-		if err != nil {
-			t.Fatalf("prepareVMCreation: %v", err)
-		}
-		if got := spec.startConfig().VSock; got != enabled {
-			t.Errorf("SAURON_ENABLE=%t: VMStartConfig.VSock = %t", enabled, got)
-		}
+func TestPrepareVMCreationAlwaysIncludesVSock(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		legacyValue string
+	}{
+		{name: "default"},
+		{name: "legacy disable ignored", legacyValue: "false"},
+		{name: "legacy enable ignored", legacyValue: "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SAURON_ENABLE", tc.legacyValue)
+			settings := config.NewSettings(false)
+			if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
+				t.Fatal(err)
+			}
+			owner, err := identity.New("vsocktest")
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, err := prepareVMCreation(VMCreateRequest{
+				Name: "devbox", Owner: owner, GuestUsername: "guest",
+				PasswordHash: testGuestPasswordHash, BaseImage: seedDummyBaseImage(t, settings),
+			}, settings)
+			if err != nil {
+				t.Fatalf("prepareVMCreation: %v", err)
+			}
+			if !spec.startConfig().VSock {
+				t.Fatal("gateway-created VM is missing the required SauronAgent vsock device")
+			}
+		})
 	}
 }
 
@@ -216,7 +224,7 @@ func TestLookupVSockGuestIgnoresStaleHints(t *testing.T) {
 }
 
 // TestStartVMWithVSockIsAttributable boots a real VDI from the production
-// domain XML with the SauronAgent vsock device, as SAURON_ENABLE does.
+// domain XML with the SauronAgent vsock device included in every gateway VDI.
 func TestStartVMWithVSockIsAttributable(t *testing.T) {
 	requireVHostVSock(t)
 	conn := newTestLibvirtConn(t)

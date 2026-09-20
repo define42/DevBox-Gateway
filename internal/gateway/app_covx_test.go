@@ -65,6 +65,10 @@ func mcovBootEnv(t *testing.T) string {
 	t.Setenv(config.FRONT_DOMAIN, "mcov.gateway.test")
 	t.Setenv(config.SNI_HASH_SECRET, "")
 	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
+	t.Setenv(config.SAURON_EVENT_LOG_FILE, filepath.Join(t.TempDir(), "sauron.jsonl"))
+	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_TOKEN, "")
+	t.Setenv(config.SAURON_SPLUNK_HEC_INDEX, "")
 
 	root := newLibvirtAccessibleTempDir(t, "mcov-root-")
 	t.Setenv(config.DATA_ROOT_DIR, root)
@@ -97,6 +101,7 @@ func mcovWriteBadConfigFile(t *testing.T) string {
 }
 
 func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
+	requireSauronVSock(t)
 	mcovBootEnv(t)
 
 	gateway, err := bootGateway()
@@ -117,6 +122,7 @@ func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 }
 
 func TestMcovBootGatewayForwardsAuditEventsToSplunkHEC(t *testing.T) {
+	requireSauronVSock(t)
 	mcovBootEnv(t)
 	collector := newMcovHECCollector(t)
 	t.Setenv(config.SPLUNK_HEC_ENDPOINT, collector.server.URL)
@@ -301,6 +307,7 @@ func TestMcovBootGatewaySNIHashSecretError(t *testing.T) {
 }
 
 func TestMcovBootGatewayListenError(t *testing.T) {
+	requireSauronVSock(t)
 	mcovBootEnv(t)
 	t.Setenv(config.LISTEN_ADDR, "bad::addr")
 

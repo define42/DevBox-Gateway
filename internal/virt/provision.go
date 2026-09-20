@@ -119,7 +119,6 @@ type vmProvisionSpec struct {
 	poolPath      string
 	vcpu          int
 	memoryMiB     int
-	vsock         bool // add the SauronAgent virtio-vsock device
 	network       NetworkIdentity
 	backend       backendidentity.Credentials
 }
@@ -135,7 +134,7 @@ func (s vmProvisionSpec) startConfig() VMStartConfig {
 		Network:            s.network,
 		BackendCertificate: s.backend.CertificatePEM,
 		BackendServerName:  s.backend.ServerName,
-		VSock:              s.vsock,
+		VSock:              true,
 		Owner:              s.owner,
 		GuestUser:          s.guestUsername,
 		BaseImage:          s.baseImage,
@@ -172,7 +171,6 @@ func prepareVMCreation(req VMCreateRequest, settings *config.Settings) (vmProvis
 
 	spec.vcpu = config.VMVCPUCount(settings)
 	spec.memoryMiB = config.VMMemoryMiB(settings)
-	spec.vsock = config.SauronEnabled(settings)
 
 	// Validate the selected base image against the library and resolve it to an
 	// absolute path (the single path-traversal guard) before anything is created.

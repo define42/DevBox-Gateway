@@ -13,11 +13,10 @@ services:
     # Libvirt creates the dedicated VM bridge during gateway startup. Sharing
     # the host network lets the gateway reach it without a pre-existing macvlan.
     network_mode: host
-    # The SauronAgent collector (SAURON_ENABLE below) listens on AF_VSOCK,
-    # which Docker's default seccomp profile blocks. The container already
-    # drives the host's libvirt through its socket, so the syscall filter adds
-    # little on top of that; drop this line together with SAURON_ENABLE to keep
-    # it. vsock is shared with containers while the host's
+    # The always-on SauronAgent collector listens on AF_VSOCK port 9000,
+    # which Docker's default seccomp profile blocks. This disables the syscall
+    # filter; a deployment-specific profile permitting AF_VSOCK can replace it.
+    # vsock is shared with containers while the host's
     # net.vsock.child_ns_mode is "global", the default.
     security_opt:
       - seccomp=unconfined
@@ -36,9 +35,8 @@ services:
       - SPLUNK_HEC_INDEX=devbox_audit
       # The bundled Splunk serves HEC with its default self-signed certificate.
       - SPLUNK_HEC_SKIP_TLS_VERIFY=true
-      # Collect SauronAgent events from inside the VMs (over vsock) and forward
+      # Persist the always-collected SauronAgent guest events and also forward
       # them to the bundled Splunk, into their own index.
-      - SAURON_ENABLE=true
       - SAURON_EVENT_LOG_FILE=/data/logs/sauron.jsonl
       - SAURON_SPLUNK_HEC_ENDPOINT=https://127.0.0.1:8088
       - SAURON_SPLUNK_HEC_TOKEN=${SPLUNK_HEC_TOKEN:-11111111-2222-3333-4444-555555555555}

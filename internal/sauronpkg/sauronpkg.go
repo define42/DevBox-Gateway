@@ -4,9 +4,11 @@
 // `make install PREFIX=/usr` lays them out, so its documented quick start ("make
 // install ... or install the package") applies unchanged: install the package
 // and enable the unit of the component this machine runs. The agent runs on its
-// built-in defaults; the collector also needs its .yaml.example copied and
-// filled in. The formats are written by the same pure-Go internal/rpm and
-// internal/deb writers that build the DevBox Gateway packages.
+// built-in defaults; the standalone collector also needs its .yaml.example
+// copied and filled in. On DevBox Gateway hosts, leave sauronhost disabled:
+// the gateway always provides the collector on AF_VSOCK port 9000. The formats
+// are written by the same pure-Go internal/rpm and internal/deb writers that
+// build the DevBox Gateway packages.
 package sauronpkg
 
 import (
@@ -25,7 +27,7 @@ const Name = "sauronagent"
 
 const (
 	summary     = "SauronAgent guest audit agent and SauronHost hypervisor collector"
-	description = "SauronAgent streams Linux audit events from inside KVM guests to the hypervisor over virtio-vsock. The guest agent (sauronagent) installs its built-in execution, identity, privilege and system-security audit policy with CAP_AUDIT_CONTROL, discovers private SSH directories with CAP_DAC_READ_SEARCH, reads the kernel audit multicast feed with CAP_AUDIT_READ, spools unacknowledged events to disk, and never speaks IP. No auditd or audit command-line tools are required. The hypervisor collector (sauronhost) identifies every guest by its VSOCK CID, deduplicates replays, and writes normalized JSON events to the journal, a file, or syslog. Install the package on both the hypervisor and the guests, then enable sauronhost.service or sauronagent.service respectively."
+	description = "SauronAgent streams Linux audit events from inside KVM guests to the hypervisor over virtio-vsock. The guest agent (sauronagent) installs its built-in execution, identity, privilege and system-security audit policy with CAP_AUDIT_CONTROL, discovers private SSH directories with CAP_DAC_READ_SEARCH, reads the kernel audit multicast feed with CAP_AUDIT_READ, spools unacknowledged events to disk, and never speaks IP. No auditd or audit command-line tools are required. The hypervisor collector (sauronhost) identifies every guest by its VSOCK CID, deduplicates replays, and writes normalized JSON events to the journal, a file, or syslog. Install the package in each guest and enable sauronagent.service. On hypervisors without DevBox Gateway, also install the package and enable sauronhost.service. DevBox Gateway always provides its own collector on fixed AF_VSOCK port 9000; leave sauronhost.service disabled on gateway hosts to avoid a port conflict."
 	url         = "https://github.com/define42/SauronAgent"
 	licenseTag  = "Apache-2.0"
 	debSection  = "admin"

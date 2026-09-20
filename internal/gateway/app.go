@@ -62,8 +62,7 @@ type gatewayRuntime struct {
 	httpServers    *httpServerRegistry
 	sessionManager *session.Manager
 	auditSink      io.Closer
-	// sauron is the SauronAgent guest event collector; nil when SAURON_ENABLE
-	// is off.
+	// sauron is the mandatory SauronAgent guest event collector.
 	sauron io.Closer
 
 	// stopAutoShutdown stops the VDI auto-shutdown worker; nil when the
@@ -247,24 +246,16 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 
 	runtime, err := startGatewayRuntime(settings, vmInventory, sessionManager, auditSink)
 	if err != nil {
-		if collector != nil {
-			err = errors.Join(err, collector.Close())
-		}
-		return nil, err
+		return nil, errors.Join(err, collector.Close())
 	}
-	if collector != nil {
-		runtime.sauron = collector
-	}
+	runtime.sauron = collector
 	keepAuditSink = true
 	return runtime, nil
 }
 
-// startSauronCollector starts the SauronAgent guest event collector when
-// SAURON_ENABLE is set; ValidateSauron has already checked its settings.
+// startSauronCollector always starts the guest collector on the fixed agent
+// port. ValidateSauron has already checked its output settings.
 func startSauronCollector(settings *config.Settings) (*sauron.Collector, error) {
-	if !config.SauronEnabled(settings) {
-		return nil, nil
-	}
 	collector, err := sauron.Start(sauronOptions(settings))
 	if err != nil {
 		return nil, fmt.Errorf("start sauron collector: %w", err)
@@ -274,7 +265,7 @@ func startSauronCollector(settings *config.Settings) (*sauron.Collector, error) 
 
 func sauronOptions(settings *config.Settings) sauron.Options {
 	return sauron.Options{
-		Port:         config.SauronVSockPort(settings),
+		Port:         config.SauronVSockPort,
 		EventLogFile: settings.Get(config.SAURON_EVENT_LOG_FILE),
 		HEC: splunkhec.Config{
 			Endpoint:           settings.Get(config.SAURON_SPLUNK_HEC_ENDPOINT),
