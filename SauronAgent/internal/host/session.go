@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/identity"
-	"github.com/define42/SauronAgent/internal/output"
-	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/identity"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
 )
 
 // defaultWriteTimeout bounds a write to a guest when configuration gives no

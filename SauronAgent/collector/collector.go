@@ -17,11 +17,11 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/host"
-	"github.com/define42/SauronAgent/internal/output"
-	"github.com/define42/SauronAgent/internal/transport"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/host"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/transport"
 )
 
 type (

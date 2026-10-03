@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/identity"
-	"github.com/define42/SauronAgent/internal/metrics"
-	"github.com/define42/SauronAgent/internal/protocol"
-	"github.com/define42/SauronAgent/internal/queue"
-	"github.com/define42/SauronAgent/internal/spool"
-	"github.com/define42/SauronAgent/internal/transport"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/identity"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/queue"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/spool"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/transport"
 )
 
 // Sender tuning that is not configurable.

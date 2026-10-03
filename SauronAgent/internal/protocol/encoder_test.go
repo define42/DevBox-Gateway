@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
 )
 
 // sampleEvent is a normalized "cat /etc/shadow" execution, as the correlator

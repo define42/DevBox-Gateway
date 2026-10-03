@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
 )
 
 func TestParseFacility(t *testing.T) {

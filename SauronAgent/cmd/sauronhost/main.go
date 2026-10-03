@@ -28,12 +28,12 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/host"
-	"github.com/define42/SauronAgent/internal/identity"
-	"github.com/define42/SauronAgent/internal/logging"
-	"github.com/define42/SauronAgent/internal/metrics"
-	"github.com/define42/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/host"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/identity"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/logging"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
 )
 
 // progName prefixes everything written to the terminal.

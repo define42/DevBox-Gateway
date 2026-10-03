@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
 )
 
 const testBootID = "6f2b4a1c-9d3e-4c7a-8b15-2f0d9a7c4e11"

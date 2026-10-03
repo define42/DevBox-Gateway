@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 // readSequences returns the event sequence numbers found in path, failing the

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/define42/SauronAgent/internal/audit"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/audit"
 )
 
 // Normalization turns one correlated group of raw kernel audit records into a

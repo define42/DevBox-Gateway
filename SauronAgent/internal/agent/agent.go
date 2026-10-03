@@ -31,15 +31,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/audit"
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/identity"
-	"github.com/define42/SauronAgent/internal/logging"
-	"github.com/define42/SauronAgent/internal/metrics"
-	"github.com/define42/SauronAgent/internal/queue"
-	"github.com/define42/SauronAgent/internal/spool"
-	"github.com/define42/SauronAgent/internal/transport"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/audit"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/identity"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/logging"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/queue"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/spool"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/transport"
 )
 
 // Channel capacities between the collection stages.

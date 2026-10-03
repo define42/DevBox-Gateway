@@ -9,7 +9,7 @@
 # agent whose build depends on a linter downloaded at build time has a supply
 # chain nobody reviewed. "make lint" is therefore go vet and nothing else.
 
-MODULE := github.com/define42/SauronAgent
+PACKAGE := github.com/define42/devbox-gateway/SauronAgent
 
 # VERSION is compiled into the binaries and reported to the collector in the
 # HELLO message, which is the only way to tell from the host which build a
@@ -33,7 +33,7 @@ GOBUILDENV := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH)
 # -s -w drop the symbol and DWARF tables; -trimpath keeps build-host paths out
 # of the binary. The version string above, not the symbol table, is what
 # identifies a build in the field.
-LDFLAGS := -s -w -X $(MODULE)/internal/identity.Version=$(VERSION)
+LDFLAGS := -s -w -X $(PACKAGE)/internal/identity.Version=$(VERSION)
 
 GOFILES := $(shell find . -name '*.go' -not -path './.git/*')
 
@@ -111,7 +111,7 @@ fuzz:
 	exit $$fail
 
 cover:
-	$(GO) test ./... -count=1 -covermode=atomic -coverpkg=$(MODULE)/... -coverprofile=$(COVERPROFILE)
+	$(GO) test ./... -count=1 -covermode=atomic -coverpkg=$(PACKAGE)/... -coverprofile=$(COVERPROFILE)
 	@$(GO) tool cover -func=$(COVERPROFILE) | tail -n 1
 
 clean:

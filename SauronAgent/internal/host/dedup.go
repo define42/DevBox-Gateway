@@ -5,7 +5,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/define42/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
 )
 
 // minDedupWindow is the floor applied to limits.dedup_window.

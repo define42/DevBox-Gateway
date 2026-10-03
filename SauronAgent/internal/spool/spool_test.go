@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
 )
 
 // execEvent builds a normalized event of the shape the correlator produces for

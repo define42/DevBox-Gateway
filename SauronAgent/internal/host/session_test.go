@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
 )
 
 func TestFullExchangeAcknowledgesCumulatively(t *testing.T) {

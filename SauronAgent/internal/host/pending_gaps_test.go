@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/define42/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
 )
 
 func TestGapPublicationPinsStreamAndRejectsRecoveredRange(t *testing.T) {

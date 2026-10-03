@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 const (

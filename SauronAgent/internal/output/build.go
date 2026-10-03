@@ -3,7 +3,7 @@ package output
 import (
 	"errors"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 // errNoOutputs reports a collector configured to write events nowhere.

@@ -3,7 +3,7 @@ package agent
 import (
 	"sync/atomic"
 
-	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
 )
 
 // sequencer hands out the per-boot event sequence numbers.

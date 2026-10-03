@@ -17,7 +17,7 @@ import (
 )
 
 // Version is the agent version, overridable at build time with
-// -ldflags "-X github.com/define42/SauronAgent/internal/identity.Version=..."
+// -ldflags "-X github.com/define42/devbox-gateway/SauronAgent/internal/identity.Version=..."
 var Version = "0.1.0"
 
 // Identity describes the guest the agent is running in.

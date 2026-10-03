@@ -19,7 +19,6 @@ COPY --from=go-toolchain /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:${PATH}" GOPATH=/go GOTOOLCHAIN=local CGO_ENABLED=1
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY SauronAgent/go.mod SauronAgent/go.sum SauronAgent/
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd cmd
 COPY internal internal
@@ -56,7 +55,6 @@ COPY --from=go-toolchain /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:${PATH}" GOPATH=/go GOTOOLCHAIN=local CGO_ENABLED=1
 WORKDIR /src
 COPY go.mod go.sum ./
-COPY SauronAgent/go.mod SauronAgent/go.sum SauronAgent/
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd cmd
 COPY internal internal

@@ -7,10 +7,10 @@ import (
 	"net"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/output"
-	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
 )
 
 // cidUnidentified is the CID recorded for a connection whose identity is not

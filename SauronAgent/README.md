@@ -96,6 +96,8 @@ with the CID mapping. It is never used to decide which VM an event came from.
 
 ## Quick start
 
+Run the source-install commands below from the DevBox-Gateway repository root.
+
 ### On the hypervisor
 
 On a DevBox Gateway host, use the gateway's always-on collector on AF_VSOCK
@@ -107,7 +109,7 @@ VMs without a vsock device are not automatically migrated. See the
 For a hypervisor without DevBox Gateway, install the standalone collector:
 
 ```sh
-make install PREFIX=/usr                 # or install the package
+make -C SauronAgent install PREFIX=/usr  # or install the package
 systemd-sysusers && systemd-tmpfiles --create
 cp /etc/sauronhost/sauronhost.yaml.example /etc/sauronhost/sauronhost.yaml
 $EDITOR /etc/sauronhost/sauronhost.yaml  # fill in the vms: CID map
@@ -140,7 +142,7 @@ to end.
 ### In the guest
 
 ```sh
-make install PREFIX=/usr                 # or install the package
+make -C SauronAgent install PREFIX=/usr  # or install the package
 systemd-sysusers && systemd-tmpfiles --create
 systemctl daemon-reload
 systemctl enable --now sauronagent
@@ -345,26 +347,34 @@ see [packaging/systemd/](packaging/systemd/).
 
 ## Building
 
+SauronAgent is part of the DevBox-Gateway Go module. Its dependencies and Go
+version are defined in the repository's root [`go.mod`](../go.mod). Run these
+commands from the repository root:
+
 ```sh
-make build           # ./bin/sauronagent and ./bin/sauronhost, CGO_ENABLED=0
-make test            # unit tests
-make test-race       # the same with the race detector
-make vet             # go vet (also "make lint"; no external linters)
-make fuzz            # a short run of every fuzz target
-make cover           # coverage summary
-make install         # binaries, units, sysusers/tmpfiles, collector example config
+make -C SauronAgent build      # SauronAgent/bin/sauronagent and sauronhost, CGO_ENABLED=0
+make -C SauronAgent test       # SauronAgent tests
+make -C SauronAgent test-race  # the same with the race detector
+make -C SauronAgent vet        # go vet (also "lint"; no external linters)
+make -C SauronAgent fuzz       # a short run of every SauronAgent fuzz target
+make -C SauronAgent cover      # SauronAgent coverage summary
+make -C SauronAgent install    # binaries, units, sysusers/tmpfiles, collector example config
 ```
+
+The root `make test` and `go test ./...` also include all SauronAgent packages.
+The root `make lint` runs SauronAgent's `go vet` check alongside the gateway's
+golangci-lint checks.
 
 `VERSION` is compiled in and reported to the collector in HELLO, so the host
 can tell which build each guest is running:
 
 ```sh
-make build VERSION=1.0.0
+make -C SauronAgent build VERSION=1.0.0
 ```
 
-Go 1.27 or newer, Linux. Dependencies: `golang.org/x/sys`,
-`github.com/mdlayher/vsock`, `gopkg.in/yaml.v3` -- everything else is the
-standard library.
+SauronAgent targets Linux. Its direct dependencies are `golang.org/x/sys`,
+`github.com/mdlayher/vsock`, and `gopkg.in/yaml.v3`; their versions are managed
+alongside the gateway's dependencies in the root module.
 
 ## Documentation
 

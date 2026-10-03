@@ -7,7 +7,7 @@
 
 [Unit]
 Description=SauronHost audit collector for guest VMs
-Documentation=https://github.com/define42/SauronAgent
+Documentation=https://github.com/define42/DevBox-Gateway/tree/main/SauronAgent
 Documentation=file:/usr/share/doc/sauronagent/deployment.md
 
 # vhost_vsock must be loaded for guests to reach VMADDR_CID_HOST. Loading it

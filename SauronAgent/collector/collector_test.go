@@ -13,10 +13,10 @@ import (
 
 	"github.com/mdlayher/vsock"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/logging"
-	"github.com/define42/SauronAgent/internal/protocol"
-	"github.com/define42/SauronAgent/internal/transport"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/logging"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/transport"
 )
 
 const testTimeout = 5 * time.Second

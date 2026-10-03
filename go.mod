@@ -4,9 +4,8 @@ go 1.27.1
 
 require (
 	github.com/alexedwards/scs/v2 v2.9.0
-	github.com/caddyserver/certmagic v0.25.4
+	github.com/caddyserver/certmagic v0.25.6
 	github.com/danielgtaylor/huma/v2 v2.39.1
-	github.com/define42/SauronAgent v0.0.0-00010101000000-000000000000
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-ldap/ldap/v3 v3.4.14
@@ -23,6 +22,7 @@ require (
 	github.com/tomatome/grdp v0.1.0
 	github.com/tredoe/osutil v1.5.0
 	golang.org/x/sys v0.48.0
+	gopkg.in/yaml.v3 v3.0.1
 	libvirt.org/go/libvirt v1.12007.0
 )
 
@@ -31,7 +31,7 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/caddyserver/zerossl v0.1.5 // indirect
+	github.com/caddyserver/zerossl v0.1.6 // indirect
 	github.com/cavaliergopher/cpio v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -51,12 +51,12 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/goccy/go-json v0.11.2 // indirect
 	github.com/huin/asn1ber v0.0.0-20120622192748-af09f62e6358 // indirect
 	github.com/icodeface/tls v0.0.0-20230910023335-34df9250cd12 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
-	github.com/klauspost/pgzip v1.2.6 // indirect
+	github.com/klauspost/pgzip v1.2.7 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/lunixbochs/struc v0.0.0-20241101090106-8d528fa2c543 // indirect
@@ -64,8 +64,8 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect
-	github.com/mdlayher/socket v0.6.0 // indirect
-	github.com/mholt/acmez/v3 v3.1.6 // indirect
+	github.com/mdlayher/socket v0.7.0 // indirect
+	github.com/mholt/acmez/v3 v3.1.7 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
@@ -86,7 +86,7 @@ require (
 	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
-	github.com/ulikunitz/xz v0.5.16 // indirect
+	github.com/ulikunitz/xz v0.5.17 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
@@ -102,9 +102,4 @@ require (
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// SauronAgent is developed in this repository as its own module; the gateway
-// embeds its host collector (package collector) to receive guest events.
-replace github.com/define42/SauronAgent => ./SauronAgent

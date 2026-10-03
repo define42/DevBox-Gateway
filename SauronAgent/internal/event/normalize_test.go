@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/audit"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/audit"
 )
 
 // ---------------------------------------------------------------------------

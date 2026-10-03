@@ -311,9 +311,9 @@ built from [`SauronAgent/`](SauronAgent), with the same version as the gateway
 packages (the version is also compiled into the binaries, so a guest reports the
 release it runs).
 
-One package carries both components, laid out like SauronAgent's own
-`make install PREFIX=/usr`. Install it on the hypervisor and in each guest, then
-enable the component that machine runs:
+One package carries both components, laid out like
+`make -C SauronAgent install PREFIX=/usr`. Install it on the hypervisor and in
+each guest, then enable the component that machine runs:
 
 | Path                                               | Purpose                                                   |
 |----------------------------------------------------|-----------------------------------------------------------|
@@ -976,11 +976,11 @@ SauronAgent's own Makefile into separate directories under `SauronAgent/bin/`
 for each package format and architecture, then packages them into
 `dist/sauronagent-<version>-1.x86_64.rpm` / `dist/sauronagent_<version>_amd64.deb`
 through the [`cmd/mksauronagent`](cmd/mksauronagent) command, which reuses the
-pure-Go `internal/rpm` and `internal/deb` writers. SauronAgent is a separate Go
-module; the gateway also compiles in its host collector (package
-`SauronAgent/collector`, through a `replace` directive in `go.mod`), so both need
-Go 1.27.1 or newer. With an older local toolchain, prefix the commands with
-`GOTOOLCHAIN=auto` as the release workflow does.
+pure-Go `internal/rpm` and `internal/deb` writers. SauronAgent and the gateway
+share the root Go module and its dependencies. The gateway also compiles in
+the host collector from `SauronAgent/collector`. Both need the Go version
+specified in the root `go.mod`. With an older local toolchain, prefix the
+commands with `GOTOOLCHAIN=auto`.
 
 For ARM64, use `make sauron-rpm ARCH=aarch64` or
 `make sauron-deb DEB_ARCH=arm64`. The package targets select the matching Go
@@ -1005,10 +1005,20 @@ via Go's `embed` package.
 
 ```sh
 make test     # go test ./... with coverage; writes coverage.out and coverage.html
-make lint     # run golangci-lint
-make gosec    # run gosec security scanner
-go test -race ./...
+make lint     # golangci-lint for the gateway; go vet for SauronAgent
+make gosec    # gosec security scanner for the gateway
+go test -race -p=1 -timeout=15m ./...
 ```
+
+The test commands include both the gateway and SauronAgent packages, with
+combined coverage in `make test`. To run only the SauronAgent tests, use
+`make -C SauronAgent test`. The gateway's strict lint and gosec checks cover
+`./cmd/...` and `./internal/...`; SauronAgent uses `go vet` through `make lint`.
+Run `go vet ./...` to vet the entire module.
+
+Keep `-p=1` when running the full test suite because integration tests in
+multiple packages share the system libvirt daemon. Allow extra time for VM
+image copies when using the race detector.
 
 Some integration tests (e.g. `ldap_integration_test.go`,
 `dashboard_vm_integration_test.go`) start temporary services via
@@ -1044,8 +1054,8 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 │   ├── vmname/      VM name construction and validation.
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
-├── SauronAgent/     Guest audit agent and hypervisor collector (separate Go module;
-│                    the gateway embeds its collector package).
+├── SauronAgent/     Guest audit agent and hypervisor collector in the root Go module;
+│                    the gateway embeds its collector package.
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
 ├── testsplunk/      Post-setup task creating the local Splunk's audit and SauronAgent indexes.

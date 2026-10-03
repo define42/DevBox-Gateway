@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
 )
 
 // Source is the host's description of where an event came from.

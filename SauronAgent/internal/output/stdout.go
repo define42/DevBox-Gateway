@@ -10,7 +10,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 // Errors and the encoding below are shared by every sink in this package.

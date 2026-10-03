@@ -18,10 +18,8 @@ ENV GOOS=linux \
     GOARCH=amd64
 
 
-# Copy module files first (better caching). go.mod replaces the SauronAgent
-# module with the ./SauronAgent tree, so its module files are needed as well.
+# Copy module files first (better caching).
 COPY go.mod go.sum  ./
-COPY SauronAgent/go.mod SauronAgent/go.sum SauronAgent/
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 

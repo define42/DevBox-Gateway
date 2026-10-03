@@ -54,7 +54,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.27'
+          go-version-file: go.mod
           cache-dependency-path: go.sum
 
       # -------------------------------
@@ -92,16 +92,8 @@ jobs:
           flags: unittests
           fail_ci_if_error: true
 
-      # -------------------------------
-      # SauronAgent vet. The top-level test target already runs its tests and
-      # includes them in coverage.out. SauronAgent/ is its own Go module (the
-      # gateway embeds its collector package through a replace directive), so
-      # vet runs with GOTOOLCHAIN=auto: the go command fetches exactly the
-      # toolchain SauronAgent/go.mod asks for (checksum-verified via the Go
-      # module proxy) should it ever need a newer Go than the one set up above.
-      # -------------------------------
-      - name: Vet SauronAgent
-        run: GOTOOLCHAIN=auto make -C SauronAgent lint
+      - name: Vet
+        run: go vet ./...
 
       # Native packages compile and validate against their distribution
       # baselines inside Docker, independently of the runner's libvirt ABI.
@@ -147,11 +139,11 @@ jobs:
       # -------------------------------
       - name: Build SauronAgent RPM package
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
-        run: GOTOOLCHAIN=auto make sauron-rpm VERSION=${{ steps.tag.outputs.new_version }}
+        run: make sauron-rpm VERSION=${{ steps.tag.outputs.new_version }}
 
       - name: Build SauronAgent deb package
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''
-        run: GOTOOLCHAIN=auto make sauron-deb VERSION=${{ steps.tag.outputs.new_version }}
+        run: make sauron-deb VERSION=${{ steps.tag.outputs.new_version }}
 
       - name: Create GitHub release
         if: github.event_name == 'push' && steps.tag.outputs.new_tag != ''

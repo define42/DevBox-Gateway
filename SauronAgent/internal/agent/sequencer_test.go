@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/spool"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/spool"
 )
 
 func numbered(seq uint64, bootID string) *event.Event {

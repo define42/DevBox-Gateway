@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/identity"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/identity"
 )
 
 // These tests drive run() in process. Spawning the built binary is the

@@ -16,8 +16,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/define42/SauronAgent/internal/event"
-	"github.com/define42/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
 )
 
 // ErrClosed is returned by Get once the queue has been closed and every event

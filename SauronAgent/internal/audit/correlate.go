@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/metrics"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/metrics"
 )
 
 const (

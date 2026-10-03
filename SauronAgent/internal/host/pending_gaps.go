@@ -4,7 +4,7 @@ import (
 	"context"
 	"maps"
 
-	"github.com/define42/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
 )
 
 // gapPublication is an exclusive claim on one retained range. The stream and

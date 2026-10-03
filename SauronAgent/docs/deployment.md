@@ -2,6 +2,8 @@
 
 Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 
+Run the source-install commands from the DevBox-Gateway repository root.
+
 ## 1. What goes where
 
 | | Hypervisor | Each guest |
@@ -25,8 +27,9 @@ Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 * systemd 247 or newer for the units as shipped. Older systemd ignores the
   directives it does not know (`ProtectProc=`, `ProcSubset=`) with a warning;
   everything else applies.
-* Go 1.27 or newer to build. Nothing at runtime: the binaries are built with
-  `CGO_ENABLED=0`.
+* The Go version specified in the repository's root [`go.mod`](../../go.mod)
+  to build. No Go installation is needed at runtime; the binaries are built
+  with `CGO_ENABLED=0`.
 
 ## 2. Install the collector (hypervisor)
 
@@ -39,7 +42,7 @@ libvirt, so no static `vms:` map is needed. Configure output using the
 For a hypervisor without DevBox Gateway:
 
 ```sh
-make install PREFIX=/usr
+make -C SauronAgent install PREFIX=/usr
 systemd-sysusers
 systemd-tmpfiles --create
 cp /etc/sauronhost/sauronhost.yaml.example /etc/sauronhost/sauronhost.yaml
@@ -91,7 +94,7 @@ arrive with `"known": false` and a synthetic name.
 ## 4. Install the agent (guest)
 
 ```sh
-make install PREFIX=/usr
+make -C SauronAgent install PREFIX=/usr
 systemd-sysusers
 systemd-tmpfiles --create
 systemctl daemon-reload

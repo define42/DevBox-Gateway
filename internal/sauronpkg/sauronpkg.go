@@ -28,7 +28,7 @@ const Name = "sauronagent"
 const (
 	summary     = "SauronAgent guest audit agent and SauronHost hypervisor collector"
 	description = "SauronAgent streams Linux audit events from inside KVM guests to the hypervisor over virtio-vsock. The guest agent (sauronagent) installs its built-in execution, identity, privilege and system-security audit policy with CAP_AUDIT_CONTROL, discovers private SSH directories with CAP_DAC_READ_SEARCH, reads the kernel audit multicast feed with CAP_AUDIT_READ, spools unacknowledged events to disk, and never speaks IP. No auditd or audit command-line tools are required. The hypervisor collector (sauronhost) identifies every guest by its VSOCK CID, deduplicates replays, and writes normalized JSON events to the journal, a file, or syslog. Install the package in each guest and enable sauronagent.service. On hypervisors without DevBox Gateway, also install the package and enable sauronhost.service. DevBox Gateway always provides its own collector on fixed AF_VSOCK port 9000; leave sauronhost.service disabled on gateway hosts to avoid a port conflict."
-	url         = "https://github.com/define42/SauronAgent"
+	url         = "https://github.com/define42/DevBox-Gateway/tree/main/SauronAgent"
 	licenseTag  = "Apache-2.0"
 	debSection  = "admin"
 

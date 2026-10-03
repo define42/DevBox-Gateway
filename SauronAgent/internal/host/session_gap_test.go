@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/output"
-	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
 )
 
 // firstGapFailureSink holds the first gap publication until the test has tried

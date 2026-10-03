@@ -14,8 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/event"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
 )
 
 // defaultSyslogTag is used when configuration names none, so that events can

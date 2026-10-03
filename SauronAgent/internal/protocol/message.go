@@ -1,6 +1,6 @@
 package protocol
 
-import "github.com/define42/SauronAgent/internal/event"
+import "github.com/define42/devbox-gateway/SauronAgent/internal/event"
 
 // Hello is the payload of MsgHello: the agent introducing itself.
 //

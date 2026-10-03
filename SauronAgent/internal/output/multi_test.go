@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 // recordingSink is a destination whose behaviour a test dictates, standing in

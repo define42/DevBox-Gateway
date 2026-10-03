@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/define42/SauronAgent/internal/config"
-	"github.com/define42/SauronAgent/internal/protocol"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/protocol"
 )
 
 // fakeResolver stands in for Options.Resolve: a live CID-to-VM mapping such as

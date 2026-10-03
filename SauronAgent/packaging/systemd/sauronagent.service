@@ -12,7 +12,7 @@
 
 [Unit]
 Description=SauronAgent guest audit and security telemetry agent
-Documentation=https://github.com/define42/SauronAgent
+Documentation=https://github.com/define42/DevBox-Gateway/tree/main/SauronAgent
 Documentation=file:/usr/share/doc/sauronagent/deployment.md
 
 # No network dependency on purpose: audit records come from the kernel and

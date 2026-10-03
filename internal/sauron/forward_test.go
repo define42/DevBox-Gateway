@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/define42/SauronAgent/collector"
+	"github.com/define42/devbox-gateway/SauronAgent/collector"
 
 	"github.com/define42/devbox-gateway/internal/splunkhec"
 )

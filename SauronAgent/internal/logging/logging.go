@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/define42/SauronAgent/internal/config"
+	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 )
 
 // New builds a slog.Logger from a logging configuration, returning the logger
