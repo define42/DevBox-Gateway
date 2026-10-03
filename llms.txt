@@ -1,0 +1,36 @@
+# DevBox Gateway
+
+> A Linux application that manages libvirt virtual desktops through an HTTPS dashboard and proxies RDP over the same public port. SauronAgent collects guest audit events over virtio-vsock.
+
+The gateway and SauronAgent share the root Go module. Gateway builds require
+CGO and libvirt development headers; the standalone agent and collector build
+with CGO disabled. Configuration and behavior should be checked against the
+source before changing documentation.
+
+## Guides
+
+- [README](README.md): Installation, configuration, VM storage, RDP access, audit delivery, and operational limits.
+- [Contributing](CONTRIBUTING.md): Development prerequisites, build commands, serialized integration tests, and review expectations.
+- [Repository instructions](AGENTS.md): Coding and configuration rules for changes in this repository.
+- [HTTP endpoints](docs/http-api.md): Browser routes, sessions, form fields, WebSockets, and health-check scope.
+- [SauronAgent](SauronAgent/README.md): Guest agent and standalone collector setup and build commands.
+- [SauronAgent deployment](SauronAgent/docs/deployment.md): Configuration, sizing, monitoring, and recovery.
+- [SauronAgent protocol](SauronAgent/docs/protocol.md): Framing, sequencing, acknowledgements, and replay.
+- [SauronAgent security](SauronAgent/docs/security.md): Trust boundaries, privileges, and collection limits.
+- [Audit coverage comparison](compliance.md): Implemented audit coverage and deployment checks; not certification.
+
+## Source references
+
+- [Module](go.mod): Shared Go version and dependencies.
+- [Build targets](Makefile): Gateway builds, packaging, tests, and analysis commands.
+- [Gateway settings](internal/config/config.go): Registered environment-backed parameters and defaults.
+- [Gateway lifecycle](internal/gateway/app.go): Startup, listeners, background services, and shutdown.
+- [Sessions](internal/session/session.go): Browser identity, expiry, and connection authorization.
+- [VM operations](internal/virt/doc.go): Libvirt provisioning, storage, ownership, and lifecycle.
+- [Embedded collector](SauronAgent/collector/collector.go): Collector API for gateway integration.
+
+## Licenses
+
+- [Gateway](LICENSE): MIT.
+- [SauronAgent](SauronAgent/LICENSE): Apache-2.0.
+- [Browser assets](internal/webassets/novnc/LICENSE.txt): noVNC and bundled notices.

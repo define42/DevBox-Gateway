@@ -1,15 +1,16 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository is a Go module for an HTTPS RDP gateway. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb` and `cmd/mkrpm` are thin native-packaging command adapters. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, `deb` and `rpm` for native package construction, and `console`, `dashboard`, `rdp`, and `session` for their respective features.
+This repository is one Go module for an HTTPS RDP gateway and SauronAgent. Executable entrypoints live under `cmd/`: `cmd/devbox-gateway` builds the gateway, while `cmd/mkdeb`, `cmd/mkrpm`, and `cmd/mksauronagent` are native-packaging command adapters. Application code lives in focused packages under `internal/`, including `gateway` for lifecycle and HTTP/TLS dispatch, `virt` for libvirt-backed VM operations, `deb` and `rpm` for native package construction, and `console`, `dashboard`, `rdp`, and `session` for their respective features. `SauronAgent/` contains the guest agent, standalone collector, and collector library embedded by the gateway; it shares the root `go.mod` and `go.sum`.
 
 UI source lives in `ui/`, and the compiled browser asset is `internal/webassets/dashboard.js`. LDAP fixtures for local development and tests live in `testldap/`. Tests are co-located with their packages; integration coverage is concentrated in `internal/gateway`, `internal/rdp`, and `internal/virt`.
 
 ## Build, Test, and Development Commands
-- `make run`: stop any existing stack, build the Docker images, and start the local gateway + LDAP services with Docker Compose.
+- `make run`: stop the existing Compose stack, build the Docker images, and start the local gateway, LDAP, and Splunk services.
 - `make test`: run all Go tests with coverage across packages.
-- `make lint`: run `golangci-lint`.
-- `make gosec`: run `gosec`.
+- `make lint`: run `golangci-lint` for the gateway and `go vet` for SauronAgent.
+- `make gosec`: run `gosec` for the gateway's `cmd/` and `internal/` packages.
+- `make -C SauronAgent test`: run only the agent and collector tests.
 - `tsc -p tsconfig.json`: rebuild the dashboard TypeScript bundle into `internal/webassets/dashboard.js`.
 
 ## Local Run And Login Flow
@@ -34,12 +35,14 @@ Keep handlers and helpers focused. Prefer table-driven tests for branching behav
 ## Testing Guidelines
 Use Go's `testing` package for unit and integration coverage. Some integration tests start temporary services with `testcontainers-go`, so Docker needs to be available.
 
+Full integration tests also use the host's libvirt daemon and KVM. Keep package execution serialized with `-p=1`, and do not run multiple libvirt suites concurrently. See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites and focused checks.
+
 Before submitting changes, run at minimum:
 - `make test`
 
 If linting, auth, or request handling changed, also run:
 - `make lint`
-- `go test -race ./...`
+- `go test -race -p=1 -timeout=15m ./...`
 
 ## Commit & Pull Request Guidelines
 Keep commits single-purpose and use short, specific commit messages. PRs should include a concise summary, commands run locally, and screenshots when the dashboard or login flow changes.

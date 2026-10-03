@@ -69,6 +69,8 @@ func newFailFastLimitListener(ln net.Listener, maxConns int) *failFastLimitListe
 	}
 }
 
+// Accept closes connections above the global cap and returns the next admitted
+// connection. The caller must close it to release its slot.
 func (l *failFastLimitListener) Accept() (net.Conn, error) {
 	for {
 		conn, err := l.Listener.Accept()
@@ -116,6 +118,8 @@ func newPerSourceLimitListener(ln net.Listener, maxPerSource int) *perSourceLimi
 	}
 }
 
+// Accept closes connections above their source cap and returns the next admitted
+// connection. The caller must close it to release its source slot.
 func (l *perSourceLimitListener) Accept() (net.Conn, error) {
 	for {
 		conn, err := l.Listener.Accept()
@@ -189,6 +193,7 @@ type slotTrackedConn struct {
 	release     func()
 }
 
+// Close closes the transport and releases its listener slot exactly once.
 func (c *slotTrackedConn) Close() error {
 	err := c.Conn.Close()
 	c.releaseOnce.Do(c.release)
@@ -482,6 +487,8 @@ func newSingleConnListener(conn net.Conn) *singleConnListener {
 	return l
 }
 
+// Accept returns the supplied connection once. Later calls wait for the listener
+// or that connection to close, then return net.ErrClosed.
 func (l *singleConnListener) Accept() (net.Conn, error) {
 	l.mu.Lock()
 	if l.conn != nil {
@@ -496,6 +503,8 @@ func (l *singleConnListener) Accept() (net.Conn, error) {
 	return nil, net.ErrClosed
 }
 
+// Close unblocks Accept and closes the supplied connection if it was not yet
+// accepted. An accepted connection remains the HTTP server's responsibility.
 func (l *singleConnListener) Close() error {
 	l.mu.Lock()
 	conn := l.conn
@@ -514,6 +523,7 @@ func (l *singleConnListener) wasAccepted() bool {
 	return l.accepted
 }
 
+// Addr returns the supplied connection's local address, including after close.
 func (l *singleConnListener) Addr() net.Addr {
 	return l.addr
 }
@@ -525,6 +535,7 @@ type closeNotifyConn struct {
 	notify func()
 }
 
+// Close closes the transport and calls its completion callback exactly once.
 func (c *closeNotifyConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(c.notify)

@@ -26,12 +26,12 @@ else is treated as an RDP X.224 Connection Request.
 
 ## Table of contents
 
-- [Features](#features)
-- [Architecture](#architecture)
 - [Quick start (Docker Compose)](#quick-start-docker-compose)
 - [Installing the RPM](#installing-the-rpm)
 - [Installing the deb](#installing-the-deb)
 - [Installing SauronAgent](#installing-sauronagent)
+- [Features](#features)
+- [Architecture](#architecture)
 - [Login flow](#login-flow)
 - [Connecting an RDP client](#connecting-an-rdp-client)
 - [Configuration](#configuration)
@@ -44,83 +44,23 @@ else is treated as an RDP X.224 Connection Request.
 - [Building from source](#building-from-source)
 - [Testing and linting](#testing-and-linting)
 - [Repository layout](#repository-layout)
+- [HTTP endpoints and health checks](#http-endpoints-and-health-checks)
 - [Security notes](#security-notes)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
-
-## Features
-
-- **RDP-over-TLS reverse proxy** with short-lived, single-use random tokens.
-- **HTTPS dashboard** for self-service VM lifecycle management (create, start,
-  restart, shutdown, remove). VM CPU and RAM are fixed by the gateway
-  configuration (`VM_VCPU_COUNT` / `VM_MEMORY_MIB`), not chosen by users.
-- **In-browser consoles**: serial console and noVNC streamed over WebSocket.
-- **LDAP authentication** with optional StartTLS and optional certificate
-  verification.
-- **ACME / Let's Encrypt** support for automatic public TLS certificates, with
-  a self-signed fallback for local development.
-- **Libvirt integration** for managing QEMU/KVM virtual machines from a
-  configurable storage pool, with base image auto-download.
-- **Single hostname and port** (`:443`) for everything: dashboard, websockets,
-  and RDP.
-- **Structured JSON audit events** for authentication, VM lifecycle,
-  console/RDP connections, and administrator actions, sent directly to Splunk
-  HEC when configured or written as JSON Lines to a local file otherwise.
-
-## Architecture
-
-```
-                  ┌──────────────────────── TCP :443 ────────────────────────┐
-client ──TLS──►   │  byte-sniff: 0x16 → HTTPS, else → RDP X.224              │
-                  └──────────────┬──────────────────────────┬────────────────┘
-                                 │                          │
-                       HTTPS / WebSocket                 RDP / TLS
-                                 │                          │
-                ┌────────────────▼─────────────┐  ┌─────────▼─────────────────┐
-                │ chi router + Huma API        │  │ Read token, terminate TLS │
-                │  /login, /logout             │  │ → dial backend VM         │
-                │  /api/dashboard/*            │  │ → new RDP TLS handshake   │
-                │  /api/dashboard/console/...  │  │ → bidirectional proxy     │
-                │  /api/dashboard/vnc/...      │  └─────────┬─────────────────┘
-                │  static assets               │            │
-                └────────────────┬─────────────┘            │
-                                 │                          │
-                       LDAP bind / session                  │
-                                 │                          │
-                  ┌──────────────▼──────────────────────────▼────────────────┐
-                  │              libvirt (QEMU/KVM) on the host              │
-                  └──────────────────────────────────────────────────────────┘
-```
-
-The RDP flow on the front side is:
-
-1. Read the client's X.224 Connection Request (TPKT) and its routing token.
-2. Reply with an X.224 Connection Confirm selecting `PROTOCOL_SSL` (TLS).
-3. Complete the TLS handshake and resolve the required token to a VM. Missing,
-   invalid, and unknown routing tokens are rejected.
-4. Authorize the VM owner and consume the single-use Connect grant.
-5. Load the VM's host-assigned address and provisioned certificate identity,
-   then TCP-connect to the backend.
-6. Send a fresh Connection Request to the backend requesting TLS only.
-7. Read the backend's Connection Confirm and require `PROTOCOL_SSL`.
-8. Verify the backend certificate and its provisioned server name during TLS.
-9. Splice bytes between client TLS and backend TLS for the rest of the session.
-
-On shutdown, the gateway stops accepting HTTP requests and gives active handlers
-up to 5 seconds to finish. It then cancels remaining requests and closes their
-connections, allowing up to another 5 seconds for cleanup before closing the
-audit sink. Cancelled VM creation rolls back its partially created resources;
-interrupted image uploads remove their temporary files. RDP and WebSocket
-sessions are drained separately.
 
 ## Quick start (Docker Compose)
 
 Requirements on the host:
 
 - Docker and Docker Compose v2.
-- A libvirt daemon reachable at `/var/run/libvirt` (the compose file
-  bind-mounts it into the gateway container).
+- Linux with KVM available to QEMU and the `vhost_vsock` kernel module loaded.
+  The gateway's embedded guest-event collector requires AF_VSOCK even before
+  a guest agent connects.
+- A libvirt daemon version 6.2.0 or newer reachable at `/var/run/libvirt`
+  (the compose file bind-mounts it into the gateway container).
 - Libvirt's network-filter driver and its firewall tools on the host. The
   gateway creates its dedicated `devbox` NAT network and `virbr-devbox` bridge
   during startup; no pre-existing bridge or macvlan is needed.
@@ -135,8 +75,16 @@ Requirements on the host:
 Start the stack:
 
 ```sh
+git clone https://github.com/define42/DevBox-Gateway.git
+cd DevBox-Gateway
 make run
 ```
+
+Open `https://localhost`, accept the local self-signed certificate, and sign
+in with `johndoe` / `dogood`. See [Login flow](#login-flow) for the dashboard
+and the seeded administrator account. This Compose configuration is a local
+development setup with test credentials and certificate verification disabled
+for LDAP and Splunk.
 
 This stops any previous stack, rebuilds the images, and starts:
 
@@ -367,6 +315,71 @@ Package removal leaves the guest spool intact.
 > Building the deb yourself instead of downloading it is covered under
 > [Building from source](#building-from-source).
 
+## Features
+
+- **RDP-over-TLS reverse proxy** with short-lived, single-use random tokens.
+- **HTTPS dashboard** for self-service VM lifecycle management (create, start,
+  restart, shutdown, remove). VM CPU and RAM are fixed by the gateway
+  configuration (`VM_VCPU_COUNT` / `VM_MEMORY_MIB`), not chosen by users.
+- **In-browser consoles**: serial console and noVNC streamed over WebSocket.
+- **LDAP authentication** with optional StartTLS and optional certificate
+  verification.
+- **ACME / Let's Encrypt** support for automatic public TLS certificates, with
+  a self-signed fallback for local development.
+- **Libvirt integration** for managing QEMU/KVM virtual machines from a
+  configurable storage pool and an administrator-managed base image library.
+- **Single hostname and port** (`:443`) for everything: dashboard, websockets,
+  and RDP.
+- **Structured JSON audit events** for authentication, VM lifecycle,
+  console/RDP connections, and administrator actions, sent directly to Splunk
+  HEC when configured or written as JSON Lines to a local file otherwise.
+
+## Architecture
+
+```
+                  ┌──────────────────────── TCP :443 ────────────────────────┐
+client ──TLS──►   │  byte-sniff: 0x16 → HTTPS, else → RDP X.224              │
+                  └──────────────┬──────────────────────────┬────────────────┘
+                                 │                          │
+                       HTTPS / WebSocket                 RDP / TLS
+                                 │                          │
+                ┌────────────────▼─────────────┐  ┌─────────▼─────────────────┐
+                │ chi router + Huma API        │  │ Read token, terminate TLS │
+                │  /login, /logout             │  │ → dial backend VM         │
+                │  /api/dashboard/*            │  │ → new RDP TLS handshake   │
+                │  /api/dashboard/console/...  │  │ → bidirectional proxy     │
+                │  /api/dashboard/vnc/...      │  └─────────┬─────────────────┘
+                │  static assets               │            │
+                └────────────────┬─────────────┘            │
+                                 │                          │
+                       LDAP bind / session                  │
+                                 │                          │
+                  ┌──────────────▼──────────────────────────▼────────────────┐
+                  │              libvirt (QEMU/KVM) on the host              │
+                  └──────────────────────────────────────────────────────────┘
+```
+
+The RDP flow on the front side is:
+
+1. Read the client's X.224 Connection Request (TPKT) and its routing token.
+2. Reply with an X.224 Connection Confirm selecting `PROTOCOL_SSL` (TLS).
+3. Complete the TLS handshake and resolve the required token to a VM. Missing,
+   invalid, and unknown routing tokens are rejected.
+4. Authorize the VM owner and consume the single-use Connect grant.
+5. Load the VM's host-assigned address and provisioned certificate identity,
+   then TCP-connect to the backend.
+6. Send a fresh Connection Request to the backend requesting TLS only.
+7. Read the backend's Connection Confirm and require `PROTOCOL_SSL`.
+8. Verify the backend certificate and its provisioned server name during TLS.
+9. Splice bytes between client TLS and backend TLS for the rest of the session.
+
+On shutdown, the gateway stops accepting HTTP requests and gives active handlers
+up to 5 seconds to finish. It then cancels remaining requests and closes their
+connections, allowing up to another 5 seconds for cleanup before closing the
+audit sink. Cancelled VM creation rolls back its partially created resources;
+interrupted image uploads remove their temporary files. RDP and WebSocket
+sessions are drained separately.
+
 ## Login flow
 
 Open `https://localhost` in a browser. If the gateway generated a self-signed
@@ -383,13 +396,17 @@ A successful login redirects to `/api/dashboard`, where you can:
 - Create a new VM (name, base image, guest username). The guest account is
   provisioned with the password you logged in to the gateway with: only its
   salted sha512_crypt hash is kept in the in-memory session at login and
-  embedded in the VM's cloud-init seed — the cleartext is never stored. Every
-  VM gets the operator-configured CPU and memory (`VM_VCPU_COUNT` /
-  `VM_MEMORY_MIB`); users cannot pick or change them.
+  embedded in the VM's cloud-init seed. The cleartext password is not kept in
+  the session or seed. Every VM gets the operator-configured CPU and memory
+  (`VM_VCPU_COUNT` / `VM_MEMORY_MIB`); users cannot pick or change them.
 - Start / restart / shutdown / remove existing VMs that you own.
 - Open a serial console or noVNC session in the browser.
 - Download an `.rdp` file (named after the VM, e.g. `alice-desktop.rdp`)
   preconfigured for the gateway.
+
+Manual shutdown immediately powers off the VM; save guest work before using
+it. The optional idle-shutdown policy requests a graceful guest shutdown first
+(see `VDI_AUTO_SHUTDOWN_HOURS`).
 
 The same `johndoe` / `dogood` credentials are exercised by the LDAP
 integration tests, so they are also the recommended local smoke-test account.
@@ -402,9 +419,10 @@ configured through `ADMIN_GROUP`.
 Always connect by downloading the per-VM `.rdp` file from the dashboard — do
 **not** try to point a client at the gateway by hand. Click the VM's **RDP**
 button to get a ready-to-use file (named after the VM, e.g.
-`alice-desktop.rdp`) and open it in any standard RDP client (mstsc, FreeRDP,
-Remmina, …). The file already targets the gateway on port `443` with the
-correct server name and TLS settings; there is nothing to configure manually.
+`alice-desktop.rdp`) and open it in an RDP client (mstsc, FreeRDP,
+Remmina, …). The file targets `FRONT_DOMAIN` and the public port selected by
+`RDP_PORT` or `LISTEN_ADDR` (`443` by default), with the routing token and TLS
+settings included.
 
 **Each downloaded file contains a new, single-use token valid for 2 minutes.**
 Clicking **RDP** authorizes one connection for that VM and downloads its file.
@@ -454,8 +472,9 @@ connections require TLS 1.2 or newer.
 
 All runtime configuration is registered in
 [`internal/config/config.go`](internal/config/config.go). On start-up the
-gateway loads a config file, then applies any matching environment variables on
-top, and prints a table of every setting and its effective value.
+gateway combines built-in defaults, a config file, and environment overrides,
+then prints the effective settings with registered secrets masked. The gateway
+has no configuration command-line flags.
 
 **Config file.** The gateway reads a `KEY=VALUE` config file on start-up
 (default `/etc/devbox-gateway/devbox-gateway.conf`, overridable with the
@@ -465,12 +484,18 @@ double quotes. A missing file is not an error — the gateway then runs purely o
 environment variables and built-in defaults. The RPM ships a fully commented
 template at this path. Each key below is both a config-file key and an
 environment variable; **an explicit environment variable always overrides the
-file**, which keeps container and development overrides working.
+file**, including an explicitly empty value. `CONFIG_FILE` itself is a bootstrap
+environment variable: set it before starting the process, not inside the file.
+The file parser does not expand shell variables, execute commands, or remove
+inline comments; put comments on their own lines.
 
 | Variable                  | Default                                                                                                          | Description                                                                                       |
 |---------------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
 | `LISTEN_ADDR`             | `:443`                                                                                                           | Address the gateway listens on (HTTPS + RDP multiplexed).                                         |
 | `RDP_PORT`                | _(empty)_ | Public TCP port advertised in downloaded `.rdp` files. Empty follows the port in `LISTEN_ADDR` (443 for an ephemeral listener). Set a value from 1 to 65535 when a proxy or port mapping exposes a different port; for example, `LISTEN_ADDR=:8443` with `RDP_PORT=443`. |
+| `MAX_CONCURRENT_CONNECTIONS` | `4096` | Maximum open frontend TCP connections across HTTPS, WebSockets, and RDP. Excess connections are immediately closed. Set `<=0` to disable the limit. |
+| `MAX_CONNECTIONS_PER_SOURCE` | `256` | Maximum open frontend connections per IPv4 address or IPv6 /64, enforced before TLS and authentication. Account for users sharing a NAT or proxy. Set `<=0` to disable the limit. |
+| `MAX_CONNECTIONS_PER_USER` | `32` | Maximum concurrent authenticated dashboard, serial, and VNC WebSockets plus proxied RDP sessions per user. Set `<=0` to disable the limit. |
 | `PPROF_LISTEN_ADDR`       | _(empty)_                                                                                                        | Optional separate Go runtime-profiler listener. The host must be a literal loopback IP (for example `127.0.0.1:6060` or `[::1]:6060`); wildcard, hostname, and non-loopback binds are rejected. pprof is never registered on the public `LISTEN_ADDR` handler. |
 | `TIMEOUT`                 | `10s`                                                                                                            | Handshake / dial / read timeout for connection setup and HTTP response writes. Long-running creation/upload responses renew the write deadline for each write; HTTP writes use 10s when this setting is non-positive. |
 | `CERT_FILE`               | _(empty)_                                                                                                        | PEM-encoded TLS certificate for the front side. Empty → self-signed cert is generated.            |
@@ -486,7 +511,7 @@ file**, which keeps container and development overrides working.
 | `SPLUNK_HEC_ACK_ENABLED`  | `false`                                                                                                          | Require indexer acknowledgement before advancing the application-audit spool. Requires its endpoint and an ACK-enabled HEC token; see [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
 | `DEVBOX_GATEWAY_SPOOL_MAX_MIB` | `10240`                                                                                                    | Maximum disk space for the application-audit HEC delivery spool at `<DATA_ROOT_DIR>/audit-spool`. `<=0` → the default. Pending events are preserved at capacity and new audit writes wait for space. |
-| `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl`                                                                           | JSON Lines file receiving every guest event, rotated at 256 MiB with 8 files kept. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
+| `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl` | JSON Lines guest-event log, rotated at 256 MiB with eight rotated files plus the active file retained. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
 | `SAURON_SPLUNK_HEC_INDEX` | _(empty)_                                                                                                        | Destination index for guest events. Empty → the token's default index.                           |
@@ -501,6 +526,7 @@ file**, which keeps container and development overrides working.
 | `VDI_AUTO_SHUTDOWN_HOURS` | `0`                                                                                                              | Shut down a running VDI after this many hours without use. Creation, start, and opening RDP, serial, or noVNC count as use. Open connections through the gateway prevent auto-shutdown, even without keyboard or mouse input; the full idle window starts when the last connection ends. Last use is persisted on connection changes and checkpointed each minute while connected so recent activity survives gateway restarts. Connections bypassing the gateway are not tracked. The guest is first asked to power off (ACPI power button) and is force-stopped if still running 5 minutes later. Set `<=0` to disable auto-shutdown (the default). |
 | `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `VM_MEMORY_MIB`           | `4096`                                                                                                           | Memory in MiB assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
+| `VM_DISK_SIZE_GB`         | `200` | Target virtual disk capacity in GiB for new VMs, and the maximum uploaded base-image file size. Smaller base disks are grown; larger ones are not shrunk. QCOW2 host storage grows as data is written. Set `<=0` to use the default. |
 | `LDAP_URL`                | `ldaps://ldap:389`                                                                                               | Required LDAP server URL. The gateway refuses to start when empty.                                |
 | `LDAP_AUTH_TIMEOUT`       | `10s` | Maximum total time for LDAP connection setup, TLS, bind, and search. Request cancellation also aborts authentication. Values `<=0` use the default. |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
@@ -516,9 +542,11 @@ file**, which keeps container and development overrides working.
 | `LOGIN_RATE_LIMIT_LOCKOUT` | `15m`                                                                                                           | How long matching login attempts are rejected after either failure limit is reached.              |
 | `DEBUG_CONNECTIONS`       | `false`                                                                                                          | When `true`, log every accepted front connection (HTTPS vs RDP, with source address) and every HTTP/WebSocket request (type, source address, method, path). Useful for tracing connectivity; noisy, so leave off in normal operation. |
 
-Booleans accept anything `strconv.ParseBool` recognises (`true`, `false`,
-`1`, `0`, `yes`, `no`, …). Durations accept Go's `time.ParseDuration`
-syntax (e.g. `15s`, `2m`, `500ms`).
+Booleans accept `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE`,
+`True`, and `False`. `yes` and `no` are not accepted. Durations use Go duration
+syntax such as `15s`, `2m`, or `500ms`. Invalid integer, boolean, or duration
+values fall back to the setting's built-in default; check the startup table
+when troubleshooting an override.
 
 ### Audit logs and Splunk
 
@@ -559,6 +587,11 @@ that account read/traverse access after the service has created the path:
 sudo setfacl -m u:splunk:rx /var/log/devbox-gateway
 sudo setfacl -m u:splunk:r /var/log/devbox-gateway/audit.jsonl
 ```
+
+File mode does not rotate the log or fsync each event. After the file opens,
+write failures through the `slog` handler are not surfaced by `audit.Log` or
+the health endpoint. Monitor disk space and downstream ingestion independently;
+the process keeps the file open until shutdown.
 
 Ordinary process diagnostics remain available through `journalctl` (or Docker
 logs); application audit events go to the selected audit output.
@@ -686,6 +719,9 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   `labels.owner` — the gateway user who owns the VM), and the guest's normalized
   `event` unchanged. The collector's own `sauron.*` events (protocol violations,
   sequence gaps, refused connections, output failures) go to the same stream.
+  If CID lookup fails, the collector still records the event with
+  `source.known=false` and a synthetic `unknown-cid-N` name; VM UUID and owner
+  labels are then unavailable.
 - Events go to `SAURON_EVENT_LOG_FILE` and, when configured, to Splunk HEC, using
   their own endpoint, token, and index so guest telemetry can land in a different
   index than the gateway audit log. In Splunk they arrive with
@@ -699,14 +735,21 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   acceptance when `SAURON_SPLUNK_HEC_ACK_ENABLED=true`; already-spooled records
   remain after VM deletion. A background forwarder delivers the spool to Splunk
   in order, in batches, retrying with
-  backoff (at most 30s apart) for however long Splunk is unreachable — days if
+  backoff capped at 30s for however long Splunk is unreachable — days if
   need be — and resumes from its checkpoint after a gateway restart. A long
   outage is reported in the process log every 5 minutes with the spool's size.
-- The spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default). Should an
-  outage outlast it, the gateway stops acknowledging new events rather than
-  discarding any: they then wait in the guests' own spools (1 GiB each by
-  default) until the backlog drains.
-- Delivery is at-least-once. After a crash or restart, events that were
+- The gateway spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default).
+  When it fills, the gateway preserves pending records and stops acknowledging
+  new events. Guests then retain events in their own spools (1 GiB by default).
+  A full guest spool evicts its oldest unsent segments and reports the lost
+  sequence range, so a sufficiently long outage can lose guest events. Guest
+  spool writes also use periodic fsync by default; a power loss can lose recent
+  unsynced writes.
+- With file-only collection, the guest ACK follows a successful file write;
+  the embedded collector does not fsync that write before acknowledging it.
+  File acceptance therefore does not guarantee persistence across a host power
+  loss. With HEC enabled, the gateway spool is fsynced before acceptance.
+- Retries can produce duplicate deliveries. After a crash or restart, events that were
   delivered just before it can reach Splunk twice. An event Splunk rejects as
   invalid on its own (HEC codes 6, 12, 13, 15, or too large) is dropped with a
   log line, so it cannot block the backlog; every other refusal — an index the
@@ -884,7 +927,7 @@ curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
 Because `docker-compose.yml` already bind-mounts `/data/`, files dropped in
 `/data/baseimages` on the host are visible to the gateway container.
 
-For a native (RPM) install the data root defaults to
+For a native RPM or deb install the data root defaults to
 `/var/lib/libvirt/devbox-gateway`, so populate
 `/var/lib/libvirt/devbox-gateway/baseimages` instead (or set `DATA_ROOT_DIR` /
 `BASE_IMAGE_DIR` to wherever you keep images).
@@ -915,10 +958,11 @@ Or build the production container image:
 docker compose build
 ```
 
-The multi-stage `Dockerfile` compiles the TypeScript UI and the Go binary in a
-`golang:1.26-alpine` builder (pinned via the `GO_VERSION` build arg) and ships
-only the resulting binary plus `libvirt-libs` and `ca-certificates` in the
-runtime image.
+The multi-stage [Dockerfile](Dockerfile) compiles the TypeScript UI and the Go
+binary in a Go/Alpine builder. Its `GO_VERSION` and `ALPINE_VERSION` build
+arguments select the image tags; the root `go.mod` specifies the required Go
+version. The Alpine runtime contains the gateway binary, `libvirt-libs`, and
+`ca-certificates`.
 
 ### Building the RPM
 
@@ -1034,6 +1078,8 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── mkrpm/           RPM packaging CLI adapter.
 │   └── mksauronagent/   SauronAgent RPM/deb packaging CLI adapter.
 ├── internal/
+│   ├── audit/       Application audit events and durable HEC delivery.
+│   ├── backendidentity/ Per-VM backend TLS certificates and identity validation.
 │   ├── cert/        TLS certificate management (self-signed + ACME via certmagic).
 │   ├── cloudinit/   NoCloud document and seed ISO generation.
 │   ├── config/      Environment-backed settings registry (the only place env
@@ -1043,6 +1089,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── deb/         Debian package construction and archive writing.
 │   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
 │   ├── hash/        Password hashing for cloud-init.
+│   ├── identity/    Authenticated user identity and administrator role.
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── rpm/         RPM package construction and manifests.
@@ -1050,7 +1097,6 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── sauronpkg/   SauronAgent package manifest and maintainer scripts.
 │   ├── session/     Cookie session manager and middleware.
 │   ├── splunkhec/   Splunk HTTP Event Collector client shared by audit and sauron.
-│   ├── types/       Shared types (e.g. authenticated user).
 │   ├── virt/        Libvirt VM lifecycle (create/start/stop/remove/resize).
 │   ├── vmname/      VM name construction and validation.
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
@@ -1059,8 +1105,27 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
 ├── testsplunk/      Post-setup task creating the local Splunk's audit and SauronAgent indexes.
+├── docs/            HTTP endpoint reference.
+├── CONTRIBUTING.md  Contributor setup, checks, and review guidance.
+├── go.mod, go.sum   Shared dependencies for the gateway and SauronAgent.
 └── Dockerfile, docker-compose.yml, Makefile, tsconfig.json
 ```
+
+## HTTP endpoints and health checks
+
+The [HTTP endpoint reference](docs/http-api.md) describes the dashboard routes,
+authentication, request formats, and WebSocket endpoints. OpenAPI, schema, and
+interactive API-documentation routes are disabled in the gateway.
+
+`GET /api/health` returns `200 OK` with `ok` when the public HTTP handler can
+respond. It does not check LDAP, libvirt, audit delivery, or the guest collector.
+For the local Compose setup with a self-signed certificate:
+
+```sh
+curl --insecure --fail https://localhost/api/health
+```
+
+Use certificate verification when probing a deployment with a trusted certificate.
 
 ## Security notes
 
@@ -1075,28 +1140,45 @@ Some integration tests (e.g. `ldap_integration_test.go`,
   boundary. Keep unrelated guests off the gateway's dedicated bridge.
 - RDP access is gated by an explicit, single-use authorization rather than a
   standing login: the gateway admits a proxied RDP connection only when the VM's
-  owner clicked **Connect** for that VM, from the same client IP, within the last
-  2 minutes (see `rdpConnectWindow` in `internal/session`), and each Connect
+  owner clicked **RDP** for that VM, from the same client IP, within the last
+  2 minutes (see `rdpConnectWindow` in `internal/session`), and each click
   authorizes exactly one connection (the grant is consumed on use — see
   `ConsumeRDPConnectGrant`). The VM's own RDP login still applies on top. Note the
-  grant is keyed to the source IP, so on a shared NAT egress another host behind
-  that IP could spend the grant during the window (still facing the VM's RDP
-  login). Because consumption happens at connection time, a connection that fails
+  token is bound to the source IP. A host behind the same NAT could spend it
+  during the window only if it also obtains the random token, for example by
+  intercepting the pre-TLS request (and would still face the VM's RDP login).
+  Because consumption happens at connection time, a connection that fails
   after authorization spends the grant, and reconnecting requires clicking
-  Connect again.
+  **RDP** again.
 - Logout is user-wide within the running gateway process: a valid `POST
   /logout` destroys all active browser sessions for that username and closes
   tracked live RDP, serial-console, and VNC WebSocket connections. External
-  directory revocation without a gateway logout is still enforced only for new
-  logins or new connection setup; already-open streams are not continuously
-  re-checked against LDAP.
+  directory changes are checked at the next LDAP login. Existing browser
+  sessions retain their cached identity and role until logout or expiry, and
+  can authorize new connections during that time. Already-open streams are
+  not continuously re-checked against LDAP.
 - All environment-backed parameters must be defined in
   `internal/config/config.go`. Reading `os.Getenv` directly from feature code
   is not allowed and is enforced by `make lint`.
-- The gateway listens on `:443` only. There is no plaintext HTTP listener.
+- The public listener defaults to `:443` and is configurable with `LISTEN_ADDR`.
+  There is no public plaintext HTTP listener. An optional profiler listener,
+  configured with `PPROF_LISTEN_ADDR`, uses HTTP on a literal loopback IP.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, focused test commands,
+the shared Go module layout, and pull-request guidance. Release notes and
+packaged builds are published through [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases).
+The [documentation index](llms.txt) lists the main guides and source references
+for automated tooling.
 
 ## License
 
 DevBox-Gateway is released under the [MIT License](LICENSE). The `LICENSE`
 file is bundled into the RPM (`/usr/share/licenses/devbox-gateway/LICENSE`)
 and Debian (`/usr/share/doc/devbox-gateway/copyright`) packages.
+
+The bundled SauronAgent code has its own [Apache-2.0 license](SauronAgent/LICENSE).
+The embedded noVNC assets retain their [license notices](internal/webassets/novnc/LICENSE.txt),
+including notices for bundled dependencies. Sharing a Go module does not replace
+these component licenses.

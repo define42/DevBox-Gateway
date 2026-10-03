@@ -46,6 +46,8 @@ type Setting struct {
 }
 
 // Settings holds the process configuration keyed by environment-backed setting ID.
+// Construct it with NewSettings and finish all writes before sharing it between
+// goroutines; setters and test overrides are not synchronized.
 type Settings struct {
 	m map[string]*Setting
 }
@@ -129,6 +131,9 @@ const (
 )
 
 // NewSettings builds the gateway settings from defaults and environment overrides.
+// Invalid integer, boolean, and duration overrides retain their defaults. When
+// printSettings is true, it prints effective values with registered secrets masked.
+// Callers still need the validation functions before starting the gateway.
 func NewSettings(printSettings bool) *Settings {
 	s := &Settings{m: make(map[string]*Setting)}
 
@@ -413,7 +418,9 @@ func VMMemoryMiB(settings *Settings) int {
 
 // ---- Setters ----
 
-// SetString registers a string setting and resolves its effective value.
+// SetString registers a string setting using the environment value when present,
+// including an empty value, or defaultValue otherwise. Surrounding whitespace
+// is removed in either case.
 func (s *Settings) SetString(id, description, defaultValue string) {
 	raw := defaultValue
 	if v, ok := os.LookupEnv(id); ok {
@@ -437,7 +444,8 @@ func (s *Settings) SetSecretString(id, description, defaultValue string) {
 	s.m[id].Secret = true
 }
 
-// SetInt registers an integer setting and resolves its effective value.
+// SetInt registers an integer setting from the environment, retaining defaultValue
+// when the override is absent or cannot be parsed.
 func (s *Settings) SetInt(id, description string, defaultValue int) {
 	value := defaultValue
 	rawUsed := strconv.Itoa(defaultValue)
@@ -458,7 +466,8 @@ func (s *Settings) SetInt(id, description string, defaultValue int) {
 	}
 }
 
-// SetBool registers a boolean setting and resolves its effective value.
+// SetBool registers a boolean setting from the environment using strconv.ParseBool.
+// An absent or invalid override retains defaultValue.
 func (s *Settings) SetBool(id, description string, defaultValue bool) {
 	value := defaultValue
 	rawUsed := strconv.FormatBool(defaultValue)
@@ -479,7 +488,8 @@ func (s *Settings) SetBool(id, description string, defaultValue bool) {
 	}
 }
 
-// SetDuration registers a duration setting and resolves its effective value.
+// SetDuration registers a duration setting from the environment using
+// time.ParseDuration. An absent or invalid override retains defaultValue.
 func (s *Settings) SetDuration(id, description string, defaultValue time.Duration) {
 	value := defaultValue
 	rawUsed := defaultValue.String()
@@ -508,10 +518,11 @@ func (s *Settings) Has(id string) bool {
 	return ok
 }
 
-// Get returns the setting value as a string.
+// Get returns String(id), including an empty string for an unknown setting.
 func (s *Settings) Get(id string) string { return s.String(id) }
 
-// String returns the setting value as a string.
+// String formats any registered setting as a string, returning an empty string
+// when id is unknown. Secret values are returned without masking.
 func (s *Settings) String(id string) string {
 	st, ok := s.m[id]
 	if !ok {
@@ -531,7 +542,8 @@ func (s *Settings) String(id string) string {
 	}
 }
 
-// Int returns the setting value as an int.
+// Int returns an integer setting or parses another kind's raw value as an integer.
+// It returns zero for unknown settings and failed conversions.
 func (s *Settings) Int(id string) int {
 	st, ok := s.m[id]
 	if !ok {
@@ -552,7 +564,8 @@ func (s *Settings) Int(id string) int {
 	return parsed
 }
 
-// Bool returns the setting value as a bool.
+// Bool returns a boolean setting or parses another kind's raw value as a boolean.
+// It returns false for unknown settings and failed conversions.
 func (s *Settings) Bool(id string) bool {
 	st, ok := s.m[id]
 	if !ok {
@@ -573,12 +586,13 @@ func (s *Settings) Bool(id string) bool {
 	return parsed
 }
 
-// IsTrue reports whether the named setting resolves to true.
+// IsTrue reports whether Bool(id) is true; unknown or invalid values return false.
 func (s *Settings) IsTrue(id string) bool {
 	return s.Bool(id)
 }
 
-// Duration returns the setting value as a duration.
+// Duration returns a duration setting or parses another kind's raw value with
+// time.ParseDuration. It returns zero for unknown settings and failed conversions.
 func (s *Settings) Duration(id string) time.Duration {
 	st, ok := s.m[id]
 	if !ok {
@@ -712,6 +726,7 @@ type SettingNotFoundError struct {
 	ID string
 }
 
+// Error identifies the missing setting.
 func (e *SettingNotFoundError) Error() string {
 	return "setting not found: " + e.ID
 }
@@ -723,6 +738,7 @@ type SettingTypeMismatchError struct {
 	Actual   Kind
 }
 
+// Error identifies the setting and the expected and actual value kinds.
 func (e *SettingTypeMismatchError) Error() string {
 	return "setting type mismatch for " + e.ID + ": expected " + kindToString(e.Expected) + ", got " + kindToString(e.Actual)
 }

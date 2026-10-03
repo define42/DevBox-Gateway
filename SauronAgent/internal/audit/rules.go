@@ -818,6 +818,7 @@ type ruleOrderingError struct {
 	key         string
 }
 
+// Error identifies the existing rule that prevents the managed key from matching.
 func (e ruleOrderingError) Error() string {
 	return fmt.Sprintf("audit: existing higher-priority exit rule can hide key %q for %s; revise the conflicting VM audit policy before starting SauronAgent", e.key, e.description)
 }

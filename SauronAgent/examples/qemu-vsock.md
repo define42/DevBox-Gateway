@@ -1,13 +1,14 @@
 # Giving a VM a virtio-vsock device
 
 SauronAgent talks to the hypervisor over `AF_VSOCK`, so every monitored VM
-needs a virtio-vsock device and a context ID (CID). This is the whole of the
-hypervisor-side setup.
+needs a virtio-vsock device and a context ID (CID). This guide covers the
+device and transport; [deployment.md](../docs/deployment.md) covers installing
+the collector, its CID map, and its outputs.
 
 ## Context IDs
 
 A CID is a 32-bit number identifying one endpoint of the vsock address space.
-Three values are reserved:
+The relevant special values are:
 
 | CID | Name | Meaning |
 |---|---|---|
@@ -71,11 +72,10 @@ another VM on this hypervisor already has that CID.
 Add it to a running definition with `virsh edit <domain>`; the device is added
 on the next full start of the VM, not on a reboot from inside the guest.
 
-`auto='yes'` lets libvirt pick a free CID instead. That is convenient and wrong
-for this purpose: the CID is the VM's identity in the collector's `vms:` map,
-and an identity that libvirt may choose differently after a redefinition turns
-into events attributed to the wrong VM -- or to no VM at all. Pin it with
-`auto='no'`.
+For a standalone collector with a static `vms:` map, pin the CID with
+`auto='no'` and keep the map in sync. `auto='yes'` lets libvirt select the CID
+and requires a collector that resolves the current mapping dynamically.
+DevBox Gateway uses that dynamic approach through libvirt.
 
 Check what a domain actually got:
 
@@ -91,10 +91,11 @@ workable scheme:
 1. **Allocate CIDs from one authoritative list**, the same place you track VM
    names and UUIDs -- the CMDB, the Terraform state, the Ansible inventory.
    Treat a CID like an IP address: allocated once, recorded, never guessed.
-2. **Make them unique across the whole fleet, not just per hypervisor.** The
-   kernel only requires per-host uniqueness, but fleet-wide uniqueness means
-   one `vms:` list can be deployed to every hypervisor unchanged, and a VM that
-   is live-migrated keeps its identity on the destination host.
+2. **Keep a map for each hypervisor.** List the guests actually collected on
+   that host. Copying every `expected: true` guest to every collector would
+   produce missing-stream alerts on hosts where those guests do not run.
+   If guests move between hosts, update the destination mapping and expected
+   stream settings as part of that operation.
 3. **Use a readable structure.** For example: `1xx` production web, `2xx`
    build and CI, `3xx` databases -- whatever survives contact with your naming.
    Start at 3 and stay well below `0xFFFFFFFF`.
@@ -164,8 +165,10 @@ from the connection -- which is why the agent's systemd unit can run with
 
 ### 3. A plain socket gets through
 
-Stop the collector first, or pick another port: only one listener can hold
-port 9000.
+These commands assume a standalone collector. Stop it first, or pick another
+port: only one listener can hold port 9000. On a DevBox Gateway host, use a
+different test port so the gateway's embedded collector can keep running;
+change the port on both sides of the test.
 
 ```sh
 # on the hypervisor
@@ -207,12 +210,12 @@ Then generate something audited in the guest -- `sudo -u nobody id`, or `cat
 /etc/shadow` as root -- and watch it appear on the hypervisor with
 `"source": {"cid": 102, "vm": "transfer-vm-03", ...}`.
 
-## Guest-to-guest is not possible
+## Guest connections
 
-A guest's vsock device reaches the host and nothing else: there is no route
-from CID 102 to CID 103. Two VMs on the same hypervisor cannot see each other's
-agents or interfere with each other's telemetry, and a compromised VM cannot
-reach the collector's socket by any path other than its own device.
+SauronAgent opens an outgoing connection to the host; it does not run a
+listener inside the guest. Each guest reaching the collector is attributed to
+its connection's CID. Other guests can still connect to the same host
+collector, so its per-CID and total connection limits remain relevant.
 
 ## Troubleshooting
 

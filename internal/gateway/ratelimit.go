@@ -50,6 +50,8 @@ func (l *loginRateLimiter) enabled() bool {
 	return l != nil && l.maxAttempts > 0 && l.window > 0 && l.lockout > 0
 }
 
+// RetryAfter reports the longest active lockout for the user/IP pair and source
+// IP. A false result allows a login attempt without reserving capacity for it.
 func (l *loginRateLimiter) RetryAfter(username, remoteAddr string) (time.Duration, bool) {
 	if !l.enabled() {
 		return 0, false
@@ -76,6 +78,8 @@ func (l *loginRateLimiter) RetryAfter(username, remoteAddr string) (time.Duratio
 	return retryAfter, retryAfter > 0
 }
 
+// RecordFailure counts an unsuccessful login in both applicable buckets and
+// returns the resulting lockout. An existing lockout is not extended.
 func (l *loginRateLimiter) RecordFailure(username, remoteAddr string) time.Duration {
 	if !l.enabled() {
 		return 0
@@ -115,6 +119,8 @@ func (l *loginRateLimiter) RecordFailure(username, remoteAddr string) time.Durat
 	return retryAfter
 }
 
+// RecordSuccess clears failures for this user/IP pair while preserving the
+// source-wide failure count used to limit password spraying.
 func (l *loginRateLimiter) RecordSuccess(username, remoteAddr string) {
 	if !l.enabled() {
 		return

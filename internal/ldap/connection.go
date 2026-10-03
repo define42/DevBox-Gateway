@@ -19,6 +19,8 @@ type connection struct {
 	stopCancel func() bool
 }
 
+// Close detaches context cancellation and closes the transport before waiting
+// for LDAP shutdown, so a blocked LDAP write cannot hold shutdown open.
 func (c *connection) Close() error {
 	c.stopCancel()
 	// LDAP Close waits for its message loop before closing the socket. Close the

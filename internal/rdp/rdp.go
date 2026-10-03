@@ -28,7 +28,7 @@ import (
 	"github.com/tomatome/grdp/protocol/x224"
 )
 
-// InitLogging configures grdp's logger to use the standard logger.
+// InitLogging sends grdp error diagnostics to stdout through a dedicated log.Logger.
 func InitLogging() {
 	glog.SetLogger(log.New(os.Stdout, "", 0))
 	glog.SetLevel(glog.ERROR)
@@ -65,7 +65,9 @@ type frontRDPConnection struct {
 
 type backendIdentityLookup func(string) (certificatePEM, serverName string, err error)
 
-// Handle handles a single RDP connection over TLS.
+// Handle negotiates frontend TLS, consumes a browser-issued connection grant,
+// verifies the selected VM's backend TLS identity, and proxies until disconnect.
+// The caller must close raw when Handle returns, including negotiation failures.
 func Handle(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings) {
 	handleWithBackendIdentity(raw, frontTLS, sessionManager, settings, virt.VMBackendIdentity)
 }

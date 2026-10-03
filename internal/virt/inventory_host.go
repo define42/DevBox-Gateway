@@ -14,6 +14,8 @@ type inventoryHostIdentity struct {
 	Hostname string
 }
 
+// String identifies the libvirt endpoint and host UUID, or hostname when the
+// driver does not expose a UUID.
 func (identity inventoryHostIdentity) String() string {
 	host := identity.HostUUID
 	if host == "" {

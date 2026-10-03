@@ -65,9 +65,12 @@ type Envelope struct {
 
 // Sink is a destination for enriched events.
 //
-// Write must not block indefinitely: the collector calls it on the path that
-// decides whether an event can be acknowledged, and an event is only
-// acknowledged to the guest once every sink has durably accepted it.
+// Implementations must support concurrent calls from guest sessions and
+// bound their write duration. The collector acknowledges after Write returns
+// nil for every sink; it does not call Flush before every acknowledgement.
+// Implementations requiring durable acknowledgements must persist the event
+// before Write returns. Stdout and syslog delegate persistence to their
+// receivers; file output syncs each write only when configured to do so.
 type Sink interface {
 	// Write delivers one envelope. Returning an error means the event was not
 	// accepted and must not be acknowledged to the guest.

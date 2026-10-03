@@ -137,7 +137,8 @@ type configuredSink struct {
 // package output keeps its existing destination. Keep the returned closer open
 // while audit records can be emitted; closing it restores the previous logging
 // state and attempts a bounded HEC drain (retaining pending records) or closes
-// the file. Storage failures are reported through the operational log.
+// the file. HEC spool failures are reported through the operational log. The
+// file-only handler does not surface write failures through Log.
 func Configure(options Options) (io.Closer, error) {
 	var file *os.File
 	var forwarder *hecForwarder
@@ -216,6 +217,8 @@ func (sink *configuredSink) Close() error {
 }
 
 // Log emits event as one structured Info record through the default slog logger.
+// An empty Result defaults to success. Configure the sink before use; slog does
+// not return handler write errors to this caller.
 func Log(ctx context.Context, event Event) {
 	result := event.Result
 	if result == "" {

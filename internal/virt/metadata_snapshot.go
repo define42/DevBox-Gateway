@@ -106,6 +106,8 @@ type domainMetadataXMLTarget struct {
 	expectedLocal string
 }
 
+// UnmarshalXML reads the first direct child in each gateway metadata namespace
+// to match libvirt's metadata lookup rules, ignoring unrelated namespaces.
 func (metadata *domainMetadataXMLContents) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
 	for {
 		token, err := decoder.Token()

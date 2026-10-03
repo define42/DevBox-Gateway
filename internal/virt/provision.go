@@ -332,7 +332,10 @@ func provisionVMResources(ctx context.Context, conn *libvirt.Connect, settings *
 	return ctx.Err()
 }
 
-// RemoveVM deletes the named VM, its disks, and any leftover console sockets.
+// RemoveVM stops and undefines the named domain, releases its network reservation,
+// and removes its disk and seed ISO from the configured storage pool. Libvirt
+// owns cleanup of console resources. Errors can leave cleanup partially complete;
+// callers must authorize the operation before invoking it.
 func RemoveVM(name string, settings *config.Settings) error {
 	// Take the per-name lock so a remove and a create of the same VDI name
 	// cannot interleave (see vmNameLocks): the destroy and volume deletion below

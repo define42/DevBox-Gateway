@@ -52,6 +52,7 @@ func (p spoolPosition) before(q spoolPosition) bool {
 	return p.Segment < q.Segment || (p.Segment == q.Segment && p.Offset < q.Offset)
 }
 
+// String formats a segment and byte offset for spool diagnostics.
 func (p spoolPosition) String() string {
 	return fmt.Sprintf("segment %d offset %d", p.Segment, p.Offset)
 }

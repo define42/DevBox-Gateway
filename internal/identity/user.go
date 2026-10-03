@@ -11,7 +11,9 @@ type User struct {
 
 // New creates a non-administrator user. Directory authentication may promote
 // the returned identity after verifying direct membership in the configured
-// administrator group.
+// administrator group. New preserves name exactly and performs no validation;
+// callers must validate the username before creating an identity. It currently
+// always returns a nil error.
 func New(name string) (*User, error) {
 	return &User{Name: name}, nil
 }

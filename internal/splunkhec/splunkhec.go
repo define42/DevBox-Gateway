@@ -223,8 +223,10 @@ type rejectedError struct {
 	code   int // HEC reply code, or -1 when the reply carried none
 }
 
+// Error returns the collector rejection details.
 func (e *rejectedError) Error() string { return e.err.Error() }
 
+// Unwrap exposes the underlying response error to errors.Is and errors.As.
 func (e *rejectedError) Unwrap() error { return e.err }
 
 // IsRejected reports whether err is a collector response that retrying the

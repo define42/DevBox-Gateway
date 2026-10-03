@@ -1,10 +1,24 @@
 # Internal API contracts
 
-These signatures are frozen. Packages are implemented independently and wired
-together afterwards, so every exported name below must match exactly.
+This reference summarizes selected package interfaces and the rules their
+callers rely on. The source and its Go doc comments are authoritative; these
+internal APIs are not a separately versioned public compatibility promise.
 
-The foundation types they refer to already exist in the repository and must not
-be modified:
+SauronAgent shares the root Go module. Paths below are relative to the
+`SauronAgent/` directory, and imports start with
+`github.com/define42/devbox-gateway/SauronAgent`. Code outside this subtree
+embeds the collector through `collector`; it cannot import the subtree's
+`internal` packages directly.
+
+From the repository root, inspect the current declarations with:
+
+```sh
+go doc ./SauronAgent/collector
+go doc ./SauronAgent/internal/agent.Options
+go doc ./SauronAgent/internal/host.Options
+```
+
+Foundation types:
 
 - `internal/audit/records.go`      — `RecordType`, `RawMessage`, `Record`, `RecordTypeName`
 - `internal/audit/records_gen.go`  — generated record type constants
@@ -86,7 +100,7 @@ type NormalizeOptions struct {
 }
 func Normalize(g *audit.Group, opts NormalizeOptions) *Event
 
-// Internal agent events. Sequence is assigned later by the spool/sender.
+// Internal agent events. Sequence is assigned on submission, before the queue.
 func NewInternal(typ, severity string, fields map[string]any) *Event
 func NewQueueOverflow(dropped uint64, firstMissing, lastMissing uint64) *Event
 func NewParseFailure(raw string, reason string) *Event
@@ -106,7 +120,7 @@ func (e *Encoder) WriteMessage(t MessageType, seq uint64, v any) error
 
 type Decoder struct{ /* unexported */ }
 func NewDecoder(r io.Reader, maxPayload uint32) *Decoder
-func (d *Decoder) ReadFrame() (*Frame, error)   // Frame.Payload valid until next call
+func (d *Decoder) ReadFrame() (*Frame, error)   // Frame and Payload valid until next call
 func (d *Decoder) ReadFrameInto(f *Frame) error
 
 func DecodePayload(f *Frame, v any) error
@@ -182,10 +196,12 @@ type Options struct {
 type Spool struct{ /* unexported */ }
 func Open(opts Options) (*Spool, error)
 
-// Append durably records an event that has already been assigned a sequence.
+// Append records an event with a sequence; durability follows the sync policy.
 func (s *Spool) Append(e *event.Event) error
 // Next returns up to max unacknowledged events in sequence order.
 func (s *Spool) Next(max int) ([]*event.Event, error)
+// NextAfter advances a sender cursor without acknowledging retained events.
+func (s *Spool) NextAfter(through uint64, max int) ([]*event.Event, error)
 // Ack discards every event up to and including seq.
 func (s *Spool) Ack(seq uint64) error
 // LastSequence is the highest sequence ever appended, surviving restart.
@@ -194,7 +210,7 @@ func (s *Spool) LastSequence() uint64
 func (s *Spool) FirstUnacked() uint64
 func (s *Spool) PendingCount() int
 func (s *Spool) Bytes() int64
-// DrainDropped reports data discarded because the spool hit MaxSize.
+// DrainDropped reports size-limit loss and detected spool corruption.
 func (s *Spool) DrainDropped() (dropped uint64, firstMissing, lastMissing uint64, ok bool)
 func (s *Spool) Sync() error
 func (s *Spool) Close() error
@@ -213,7 +229,7 @@ func NewMulti(sinks ...Sink) Sink
 func Build(cfg config.OutputSection) (Sink, error)
 ```
 
-## internal/agent (pipeline, phase 2)
+## internal/agent (guest pipeline)
 
 ```go
 type Options struct {
@@ -223,8 +239,9 @@ type Options struct {
     Logger   *slog.Logger
     // Dialer overrides transport construction in tests.
     Dialer transport.Dialer
-    // Source overrides the audit record source in tests.
+    // An injected Source skips kernel setup unless ConfigureRules is supplied.
     Source func(ctx context.Context, out chan<- *audit.Record) error
+    ConfigureRules func(context.Context) error
 }
 type Agent struct{ /* unexported */ }
 func New(opts Options) (*Agent, error)
@@ -240,10 +257,11 @@ netlink reader -> correlator -> normalizer -> assign sequence -> queue -> spool 
 
 Sequence numbers are assigned immediately after normalization and before the queue, so that
 queue and spool overflow accounting can name exactly which sequences were lost. Sequence is
-scoped to the boot id and continues across an agent restart within the same boot, recovered
-from the spool's LastSequence.
+recovered from the spool's LastSequence across agent restarts and, when the
+spool persists, across guest reboots. Events retain their original boot ID.
+The collector's deduplication key uses the session's HELLO boot ID.
 
-## internal/host (collector, phase 2)
+## internal/host (host collector)
 
 ```go
 type Options struct {
@@ -255,9 +273,25 @@ type Options struct {
     Listener transport.Listener
     // OnInternalEvent receives host-generated events such as stream loss.
     OnInternalEvent func(*output.Envelope)
+    // Resolve checks live hypervisor state once per VSOCK connection, before
+    // the static VM map. Resolved VMs do not join the expected-stream monitor.
+    Resolve func(cid uint32) (config.VMMapping, bool)
 }
 type Server struct{ /* unexported */ }
 func New(opts Options) (*Server, error)
 func (s *Server) Run(ctx context.Context) error
 func (s *Server) Close() error
 ```
+
+## Output acceptance and replay
+
+The collector acknowledges only after the selected sink accepts an event or
+its gap report. A successful `Write` controls acknowledgement; the server does
+not call `Flush` before each ACK. Sink implementations must make accepted
+writes durable themselves if that is the required delivery contract.
+
+`collector.NewFileSink` uses rotation and buffered kernel writes, with syncing
+on `Flush` and `Close`. Collector deduplication state is in memory, so
+consumers must tolerate duplicates after restarts or state eviction. See the
+[protocol reference](protocol.md#44-ack) for cumulative acknowledgement and
+gap handling.

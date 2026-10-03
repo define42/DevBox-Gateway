@@ -346,10 +346,9 @@ func (s *session) handleEvent(f *protocol.Frame) error {
 
 // handlePing answers a heartbeat.
 //
-// The counters are advisory -- they come from the guest and are exactly as
-// trustworthy as it is -- but they are the only way to tell a healthy quiet
-// guest from one whose audit subsystem has been switched off, because neither
-// produces audit events.
+// Heartbeat counters are guest claims. In the shipped agent, audit_enabled
+// is a startup setting, so it cannot detect later kernel-policy changes.
+// Healthy heartbeats are logged at debug level and degraded ones at warning.
 func (s *session) handlePing(f *protocol.Frame) error {
 	var ping protocol.Ping
 	if err := protocol.DecodePayload(f, &ping); err != nil {

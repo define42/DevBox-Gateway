@@ -135,10 +135,12 @@ type writeError struct {
 	err error
 }
 
+// Error names the frame type whose write failed.
 func (e *writeError) Error() string {
 	return fmt.Sprintf("protocol: write %s frame: %v", e.typ, e.err)
 }
 
+// Unwrap exposes the underlying transport error for errors.Is and errors.As.
 func (e *writeError) Unwrap() error { return e.err }
 
 // recycle releases an assembly buffer that grew past encoderScratch.

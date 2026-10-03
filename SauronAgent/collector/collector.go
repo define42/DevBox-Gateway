@@ -1,8 +1,9 @@
 // Package collector embeds SauronHost -- the hypervisor-side collector that
 // accepts SauronAgent guests over AF_VSOCK -- in another Go program.
 //
-// cmd/sauronhost is one such program: it reads a YAML file with a static
-// CID-to-VM list and writes to the journal, a file or syslog. A program that
+// The standalone cmd/sauronhost command uses the same internal collector with
+// a YAML file, a static CID-to-VM list, and journal, file, or syslog output.
+// A program that
 // manages the VMs itself, such as a libvirt front end, can instead build the
 // configuration in code, resolve each connecting CID to a VM live with
 // Options.Resolve, and deliver events to a Sink of its own.
@@ -29,8 +30,9 @@ type (
 	Config = config.Host
 	// VM is the trusted identity of the guest behind one CID.
 	VM = config.VMMapping
-	// Sink is a destination for enriched events. Write must return nil only
-	// once the event is durably held, because that is what the guest is told.
+	// Sink is a destination for enriched events. Returning nil from Write
+	// permits the collector to acknowledge the event. Implementations that
+	// need durable acknowledgements must persist it before returning.
 	Sink = output.Sink
 	// Envelope is one event as the collector emits it: the guest's event and
 	// the host's trusted view of where it came from.
@@ -71,8 +73,9 @@ type Options struct {
 	// Logger receives the collector's diagnostics; nil discards them.
 	Logger *slog.Logger
 	// Resolve maps a hypervisor-assigned CID to its VM when a connection
-	// arrives. It is consulted once per connection, before Config.VMs; see
-	// the field of the same name in the collector's own options.
+	// arrives. It is consulted once per VSOCK connection, before Config.VMs.
+	// Resolved VMs are not added to the expected-stream monitor; that monitor
+	// covers only Config.VMs entries marked Expected.
 	Resolve func(cid uint32) (VM, bool)
 	// Listener, when set, replaces the socket Config.Listen describes. The
 	// Server owns it and closes it on shutdown.
@@ -100,6 +103,8 @@ func New(opts Options) (*Server, error) {
 // NewFileSink returns a Sink that appends newline-delimited JSON envelopes to
 // path with the collector's default size-based rotation (256 MiB per file,
 // eight rotated files kept). Parent directories are created as needed.
+// Writes are acknowledged without an fsync; Flush and Close sync the file.
+// Use a custom Sink when every acknowledgement must follow durable storage.
 func NewFileSink(path string) (Sink, error) {
 	cfg := config.DefaultHost().Output.File
 	cfg.Enabled = true

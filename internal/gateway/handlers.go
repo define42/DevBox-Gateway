@@ -357,6 +357,7 @@ type statusResponseWriter struct {
 	status int
 }
 
+// WriteHeader records the first explicit status for the login audit.
 func (w *statusResponseWriter) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
@@ -364,6 +365,7 @@ func (w *statusResponseWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Write records an implicit 200 status before forwarding the response body.
 func (w *statusResponseWriter) Write(payload []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
@@ -371,6 +373,7 @@ func (w *statusResponseWriter) Write(payload []byte) (int, error) {
 	return w.ResponseWriter.Write(payload)
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer.
 func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }

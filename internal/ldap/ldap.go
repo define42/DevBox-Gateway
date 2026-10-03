@@ -47,7 +47,9 @@ func Configured(settings *config.Settings) bool {
 
 // AuthenticateAccess authenticates a user against LDAP and returns the gateway
 // user model. The request context and LDAP_AUTH_TIMEOUT bound the entire attempt,
-// including connection setup, TLS, bind, and search.
+// including connection setup, TLS, bind, and search. Required and administrator
+// groups are checked through direct memberOf values. The returned identity keeps
+// the supplied username; callers must validate its gateway syntax first.
 func AuthenticateAccess(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error) {
 	timeout := settings.Duration(config.LDAP_AUTH_TIMEOUT)
 	if timeout <= 0 {

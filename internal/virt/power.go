@@ -6,7 +6,9 @@ import (
 	"libvirt.org/go/libvirt"
 )
 
-// StartExistingVM starts an existing domain when it is currently shut off.
+// StartExistingVM validates the domain's isolation settings and starts it if
+// inactive. An already active domain is left unchanged. This function does not
+// check user ownership; callers must authorize the operation.
 func StartExistingVM(name string) error {
 	// Removal must finish stopping and undefining the domain before a start
 	// can look it up, or it could restart a VM whose volumes are being deleted.
@@ -89,7 +91,9 @@ func GracefulShutdownVM(name string) error {
 	return nil
 }
 
-// ShutdownVM force-stops a running domain.
+// ShutdownVM immediately stops an active domain through libvirt Destroy, without
+// waiting for the guest OS to shut down. An inactive domain is left unchanged.
+// Callers must authorize the operation; use GracefulShutdownVM to request ACPI shutdown.
 func ShutdownVM(name string) error {
 	conn, err := connectLibvirt()
 	if err != nil {
@@ -120,7 +124,9 @@ func ShutdownVM(name string) error {
 	return nil
 }
 
-// RestartVM reboots a running domain or starts it when it is shut off.
+// RestartVM validates the domain's isolation settings, then requests a reboot of
+// an active domain or starts an inactive one. It returns after libvirt accepts
+// the operation, without waiting for guest readiness. Callers must authorize it.
 func RestartVM(name string) error {
 	// A restart can start a stopped domain, so it needs the same exclusion
 	// against provisioning and removal as StartExistingVM.

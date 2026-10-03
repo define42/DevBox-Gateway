@@ -5,8 +5,8 @@
 // over AF_VSOCK, so it needs no guest networking at all. The collector
 // attributes each connection to a VM by the CID libvirt assigned to it --
 // never by anything the guest says about itself -- and writes every event to
-// a local JSON Lines file and, optionally, to a durable spool that is
-// forwarded to a Splunk HTTP Event Collector.
+// the configured outputs: a local JSON Lines file, a durable spool forwarded
+// to a Splunk HTTP Event Collector, or both. At least one output is required.
 package sauron
 
 import (
@@ -195,6 +195,7 @@ func newLogger() *slog.Logger {
 // follows whatever destination and prefix log is configured with.
 type stdLogWriter struct{}
 
+// Write forwards a formatted collector record to the operational log.
 func (stdLogWriter) Write(record []byte) (int, error) {
 	if err := log.Output(2, string(record)); err != nil {
 		return 0, err

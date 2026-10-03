@@ -237,6 +237,7 @@ func validateLiveReservations(network *libvirt.Network, hosts []networkDHCPHost)
 
 type networkReservationsChangedError struct{}
 
+// Error identifies a mismatch that prevents safe DHCP reservation updates.
 func (*networkReservationsChangedError) Error() string {
 	return "live and persistent network reservations differ"
 }

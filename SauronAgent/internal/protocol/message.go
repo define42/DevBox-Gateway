@@ -29,13 +29,11 @@ type Ready struct {
 	// SessionID identifies this connection in host-side logs.
 	SessionID string `json:"session_id,omitempty"`
 
-	// ResumeFrom is the highest sequence number the host has already durably
-	// recorded for this (CID, boot ID) pair. The agent may skip re-sending
-	// anything at or below it. Zero means the host has nothing and the agent
-	// should send everything it holds.
-	//
-	// This is an optimisation, not a correctness requirement: delivery is
-	// at-least-once and the host deduplicates regardless.
+	// ResumeFrom is the highest contiguous sequence accounted for by accepted
+	// events or published gap reports for this (CID, HELLO boot ID) pair.
+	// The agent may discard retained events through this position. Zero means
+	// no position is remembered, which also occurs after collector restart.
+	// Sink acceptance determines durability; this state is held in memory.
 	ResumeFrom uint64 `json:"resume_from,omitempty"`
 
 	// MaxPayloadSize is the largest frame payload the host will accept.
@@ -44,25 +42,23 @@ type Ready struct {
 
 // EventMessage is the payload of MsgEvent.
 //
-// The frame header also carries the sequence number, which lets the host
-// acknowledge and deduplicate without parsing JSON. The two must agree; the
-// host rejects a frame where they do not.
+// The frame header and nested event must carry the same nonzero sequence.
+// The collector parses the event and rejects a mismatch before deduplication.
 type EventMessage struct {
 	Event *event.Event `json:"event"`
 }
 
-// Ack is the payload of MsgAck. Acknowledgement is cumulative: acknowledging
-// sequence N means every sequence up to and including N is durably held by the
-// host, and the agent may discard them from its spool.
+// Ack is the payload of MsgAck. Acknowledging N permits the agent to discard
+// retained events through N. The collector advances this position after sink
+// acceptance of events or gap reports; durability depends on the sink.
 type Ack struct {
 	Sequence uint64 `json:"sequence"`
 }
 
 // Ping is the payload of MsgPing: the agent's heartbeat.
 //
-// The counters let the host distinguish a healthy quiet guest from one whose
-// audit subsystem has been switched off or whose agent is wedged. A missing
-// heartbeat is itself a security signal.
+// Counters describe the guest's view of collection and backlog. They are
+// untrusted claims; a heartbeat alone does not establish audit coverage.
 type Ping struct {
 	// UptimeSeconds is how long the agent process has been running.
 	UptimeSeconds uint64 `json:"uptime"`
@@ -72,8 +68,8 @@ type Ping struct {
 	EventsSpooled  uint64 `json:"events_spooled"`
 	EventsDropped  uint64 `json:"events_dropped"`
 
-	// AuditEnabled reflects whether the agent is still receiving audit
-	// records from the kernel.
+	// AuditEnabled is the agent's configured startup value. It does not query
+	// the live kernel policy or prove that audit records are still arriving.
 	AuditEnabled bool `json:"audit_enabled"`
 
 	// QueueDepth and SpoolBytes expose backpressure to the host.
@@ -87,8 +83,8 @@ type Pong struct {
 	// match a response to its request.
 	EchoUptime uint64 `json:"echo_uptime,omitempty"`
 
-	// UnixNano is the host's clock at the time of the response, which lets the
-	// host detect guests whose clocks have drifted.
+	// UnixNano is the host's clock at the time of the response. A client can
+	// compare it with its own clock; the shipped agent does not report drift.
 	UnixNano int64 `json:"unix_nano,omitempty"`
 }
 

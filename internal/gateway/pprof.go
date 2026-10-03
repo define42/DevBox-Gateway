@@ -105,6 +105,8 @@ func newPprofHandler() http.Handler {
 	return mux
 }
 
+// Close stops the profiler, bounds the wait for active requests, and reports
+// shutdown or serving errors. It accepts a nil receiver and repeated calls.
 func (p *pprofRuntime) Close() error {
 	if p == nil {
 		return nil

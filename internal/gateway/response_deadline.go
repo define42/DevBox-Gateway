@@ -48,6 +48,8 @@ func (w *renewableWriteDeadline) renew() error {
 	return w.err
 }
 
+// WriteHeader refreshes the deadline before sending headers. A deadline error
+// is logged and prevents the write.
 func (w *renewableWriteDeadline) WriteHeader(status int) {
 	if err := w.renew(); err != nil {
 		log.Printf("set HTTP response write deadline: %v", err)
@@ -56,6 +58,8 @@ func (w *renewableWriteDeadline) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Write refreshes the deadline before each body write and returns deadline or
+// transport errors to the handler.
 func (w *renewableWriteDeadline) Write(p []byte) (int, error) {
 	if err := w.renew(); err != nil {
 		return 0, err
@@ -63,6 +67,7 @@ func (w *renewableWriteDeadline) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+// FlushError refreshes the deadline before flushing buffered response data.
 func (w *renewableWriteDeadline) FlushError() error {
 	if err := w.renew(); err != nil {
 		return err
@@ -70,6 +75,7 @@ func (w *renewableWriteDeadline) FlushError() error {
 	return w.controller.Flush()
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer.
 func (w *renewableWriteDeadline) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }

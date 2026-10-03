@@ -2,6 +2,12 @@
 
 ## Linux Guest Audit and Security Telemetry Agent over Virtio-VSOCK
 
+This document records design objectives and the main architecture. Operational
+behavior and its limits are described in [deployment.md](deployment.md),
+[protocol.md](protocol.md), and [security.md](security.md). In particular,
+acknowledgement follows sink acceptance, deduplication state is in memory,
+and heartbeat liveness does not prove that guest auditing remains enabled.
+
 **SauronAgent** is a lightweight Linux security auditing component designed to run inside virtual machines.
 
 Its primary purpose is to collect security-relevant events directly from the Linux kernel, normalize and correlate those events, and securely forward them to the virtualization host using **virtio-vsock**.
@@ -160,10 +166,11 @@ Explicit binary message framing, JSON payload:
 # 15-17. Messages, HELLO, Sequence Numbers
 
 Message types: HELLO, READY, EVENT, ACK, PING, PONG, ERROR, SHUTDOWN.
-Every event receives an increasing sequence number, scoped against the guest
-boot identifier. boot-id + sequence gives a unique stream identity, letting the
-host detect duplicates, missing events, reconnections and replayed buffered
-events.
+Every event receives an increasing sequence number. The agent resumes from
+its persistent spool across restarts and reboots. The collector keys its
+in-memory stream state by the source CID and HELLO boot ID, then uses sequence
+numbers to detect duplicates and gaps. Replayed events retain their original
+event boot ID, which can differ from the current HELLO boot ID.
 
 # 18-22. Reliability
 
@@ -183,12 +190,12 @@ Disk-backed spool at /var/lib/sauronagent/spool:
 receive -> normalize -> assign sequence -> write spool -> send -> receive ACK ->
 delete acknowledged data.
 
-Delivery guarantee is at-least-once. The host deduplicates on
-(source CID, boot ID, sequence).
+Retained events are replayed until acknowledged. Queue/spool limits, crash
+loss, and output durability constrain delivery. The host deduplicates on
+(source CID, HELLO boot ID, sequence) while its in-memory state is retained.
 
-Reconnection uses exponential backoff with a compiled maximum, e.g.
-100ms, 250ms, 500ms, 1s, 2s, 5s, 10s. The agent continues reading and spooling
-during the outage.
+Reconnection starts at 100ms, doubles to a 10s maximum, and adds 20% jitter.
+The agent continues reading and spooling during the outage.
 
 # 24-26. SauronHost
 
@@ -218,9 +225,11 @@ event.
 
 # 29. Heartbeats
 
-Periodic PING carrying uptime, events_received, events_sent, events_spooled,
-audit_enabled, so the host can detect a stopped agent, a disabled audit
-subsystem, a hung guest, broken transport or a growing queue.
+Periodic PING carries uptime, events_received, events_sent, events_spooled,
+events_dropped, audit_enabled, queue_depth, and spool_bytes. The collector
+uses received traffic to monitor expected streams. Counters are untrusted guest
+claims; audit_enabled is the configured startup value and does not detect a
+later change to kernel audit policy.
 
 # 30. Audit Configuration Monitoring
 

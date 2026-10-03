@@ -53,8 +53,11 @@ type debugUpgradeWriter struct {
 	name    string
 }
 
+// Unwrap lets http.ResponseController reach the underlying writer.
 func (w *debugUpgradeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// Hijack transfers the connection to the caller and traces its first write.
+// It returns an error if the wrapped writer cannot be hijacked.
 func (w *debugUpgradeWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	hj, ok := w.ResponseWriter.(http.Hijacker)
 	if !ok {
@@ -80,6 +83,7 @@ type debugConn struct {
 	logged  atomic.Bool
 }
 
+// Write forwards bytes and logs the start and completion of the first write.
 func (c *debugConn) Write(p []byte) (int, error) {
 	first := c.logged.CompareAndSwap(false, true)
 	if first {

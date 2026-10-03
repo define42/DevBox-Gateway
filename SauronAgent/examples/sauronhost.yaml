@@ -3,7 +3,7 @@
 # Install as /etc/sauronhost/sauronhost.yaml and start with
 #   sauronhost -config /etc/sauronhost/sauronhost.yaml
 #
-# Every value below except the "vms" list is the built-in default. The loader
+# host.name and the "vms" list are examples; other values are built-in defaults. The loader
 # rejects unknown keys, so a misspelled setting fails at startup instead of
 # silently keeping a default you did not intend.
 #
@@ -23,8 +23,8 @@ listen:
   kind: vsock
 
   # Local context ID to bind. 4294967295 is VMADDR_CID_ANY, which accepts
-  # connections from every guest on this hypervisor. Binding a specific CID
-  # here would make the collector deaf to all the others.
+  # local VSOCK contexts. This is a local bind address, not a peer-CID filter;
+  # use the VM map and allow_unknown_cids to control accepted guest identities.
   cid: 4294967295
 
   # VSOCK port guests dial. The agent's compiled-in port is 9000. Ports below
@@ -132,8 +132,10 @@ output:
   syslog:
     enabled: false
     # "" uses the local syslog socket (/dev/log). Otherwise "tcp", "udp" or
-    # "unix" -- note that tcp/udp send audit records over the network in
-    # plaintext unless the daemon is configured for TLS.
+    # "unix". The built-in TCP/UDP client sends plaintext and has no TLS
+    # option. For TLS forwarding, send to a local daemon that handles TLS.
+    # The shipped service blocks IP sockets; direct TCP/UDP output also needs
+    # a systemd override for RestrictAddressFamilies and IPAddressDeny.
     network: ""
     address: ""
     tag: sauronhost
@@ -191,8 +193,8 @@ limits:
   # recorded under a synthetic name with source.known=false rather than
   # dropped, because an unexpected VM connecting to the collector is itself
   # something an analyst must see. Set it to false only if you would rather
-  # refuse an unmapped guest outright -- and understand that you are then
-  # choosing to have no record of it at all.
+  # refuse an unmapped guest outright. The collector attempts to report
+  # sauron.connection.rejected, but does not collect that guest's audit stream.
   allow_unknown_cids: true
 
 logging:

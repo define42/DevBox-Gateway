@@ -3,6 +3,12 @@
 Installing, sizing, monitoring and troubleshooting SauronAgent and SauronHost.
 
 Run the source-install commands from the DevBox-Gateway repository root.
+Installation and service-management commands require root. Source builds
+use Linux amd64 by default; pass `GOARCH=arm64` for ARM64 targets.
+
+This guide describes the standalone `sauronhost` service. The embedded gateway
+collector uses gateway configuration, logging, and service permissions; the
+standalone unit's sandbox and static `vms:` monitoring do not apply to it.
 
 ## 1. What goes where
 
@@ -74,6 +80,42 @@ which systemd captures into the journal. To hand events to a log shipper
 instead, enable the file sink (`output.file`) or the syslog sink
 (`output.syslog`); several sinks can be enabled at once, and an event is
 acknowledged to the guest only once **every** enabled sink has accepted it.
+Acceptance is not necessarily a durable disk write. The default file sink has
+`sync_on_write: false`; stdout and syslog rely on the receiving logger's
+persistence and retention. Configure those destinations for the durability
+you need before treating acknowledged events as retained evidence.
+
+### Command-line and configuration reference
+
+| Command | Flags | Behavior |
+|---|---|---|
+| `sauronagent` | `-h`, `-help` | Print usage and exit |
+| `sauronagent` | `-version` | Print the build version and Go/platform information |
+| `sauronagent` | `-check-config` | Validate and summarize compiled settings without starting collection |
+| `sauronhost` | `-h`, `-help` | Print usage and exit |
+| `sauronhost` | `-version` | Print the build version and Go/platform information |
+| `sauronhost` | `-config file` | Layer one YAML configuration over built-in defaults |
+| `sauronhost` | `-check-config` | Validate and summarize the selected configuration without opening outputs or listening |
+
+Neither command reads configuration from environment variables. The agent
+always uses `config.DefaultAgent`. The collector uses `config.DefaultHost`,
+then the YAML file selected by `-config`; there is no automatic file search.
+Without `-config`, the collector warns that its defaults map no VMs. The
+shipped unit explicitly selects `/etc/sauronhost/sauronhost.yaml`.
+
+The [annotated collector example](../examples/sauronhost.yaml) lists all YAML
+settings. Its `host.name` and `vms` entries are examples; replace them with your
+host and guests. Unknown keys and invalid values fail validation. Durations
+use strings such as `30s`, and sizes accept bytes or units such as `1MiB`.
+Check an edited file before restarting:
+
+```sh
+sauronhost -config /etc/sauronhost/sauronhost.yaml -check-config
+```
+
+A successful check does not verify filesystem permissions, output availability,
+or the VSOCK listener. All outputs can be disabled in a valid configuration,
+but the collector then refuses to start.
 
 ## 3. Give each VM a vsock device
 
@@ -278,10 +320,10 @@ deploying the agent.
 
 ## 5. Sizing
 
-Measured on the `cat /etc/shadow` example in the README, a normalized exec
-event is about **1.0 KiB** of JSON, or about **1.8 KiB** with
-raw records preserved. Events with long argument vectors or many PATH records
-are larger; the built-in maximum frame payload is 1 MiB.
+Measure event sizes on a representative workload. The calculations below use
+**1.8 KiB** per event as an illustration, not a measured upper bound. Events
+with long argument vectors or many PATH records are larger; the built-in
+maximum frame payload is 1 MiB.
 
 The limits below are compiled into `config.DefaultAgent`, not loaded from a
 guest file. `sauronagent -check-config` prints the effective queue, spool,
@@ -291,8 +333,10 @@ change, a rebuild, and deployment of that binary.
 ### Queue
 
 The built-in queue capacity of 10,000 bounds the events held in memory between
-the netlink reader and the sender. Worst-case memory is roughly
-`capacity x event size`: 10,000 x 1.8 KiB is about 18 MiB.
+collection and the spool writer. At 1.8 KiB of serialized data per event,
+10,000 events hold about 18 MiB of payload alone. Go objects, maps, strings,
+raw records, intermediate channels, and encoding buffers add memory overhead;
+this calculation is not a worst-case memory bound.
 
 The queue exists to absorb **bursts**, not outages -- a package upgrade, a
 build, a fork storm. When it fills, the oldest events are dropped and a
@@ -310,8 +354,8 @@ max_size  >=  outage seconds  x  events per second  x  event size  x  1.3
 ```
 
 At 50 events/second with raw preserved, an hour of collector downtime is about
-`3600 x 50 x 1.8 KiB ~= 310 MiB`. The 1 GiB default covers most of a working
-day at that rate. On reaching the limit the agent emits `sauron.spool.full`
+`3600 x 50 x 1.8 KiB ~= 316 MiB`. With 30% sizing headroom, a 1 GiB
+spool covers about 2.5 hours at that rate. On reaching the limit the agent emits `sauron.spool.full`
 and discards the oldest unsent data, with the sequence range.
 
 The built-in 16 MiB segment size is the granularity at which acknowledged data
@@ -389,13 +433,16 @@ host:   connections_accepted_total     connections_rejected_total
         output_errors_total            streams_lost_total
 ```
 
-In v1 there is no scrape endpoint. The agent's counters reach the hypervisor in
-every heartbeat -- `uptime`, `events_received`, `events_sent`,
-`events_spooled`, `events_dropped`, `audit_enabled`, `queue_depth`,
-`spool_bytes` -- which is deliberate: a counter that can only be read from
-inside the guest is a counter an intruder can edit. Watch for
+There is no scrape endpoint. Heartbeats send `uptime`, `events_received`,
+`events_sent`, `events_spooled`, `events_dropped`, `audit_enabled`, `queue_depth`,
+and `spool_bytes`. The standalone collector logs healthy heartbeats at debug
+level and degraded heartbeats at warning level; they are not emitted as normal
+audit events. These values are guest claims. In particular, `audit_enabled`
+reflects the agent's startup configuration, not a live kernel-status query.
+It cannot detect an external policy manager disabling auditing after startup.
+Watch for
 
-* `audit_enabled: false` on a VM that should be auditing,
+* `audit_enabled: false`, which reports collection disabled in the agent build,
 * `events_dropped` rising at all,
 * `queue_depth` or `spool_bytes` that grow and never fall (the host is not
   acknowledging, or is slower than the guest),
@@ -403,15 +450,22 @@ inside the guest is a counter an intruder can edit. Watch for
 
 ## 7. Restarts, upgrades and reboots
 
-* Restarting the **agent** loses nothing: unacknowledged events are in the
-  spool, and the sequence continues from `LastSequence` within the same boot.
-* Restarting the **collector** loses nothing: the agents reconnect with backoff
-  and re-send from their spools. Duplicates are expected and suppressed.
-* Rebooting a **guest** starts a new boot id, and sequence numbers restart.
-  That is not a gap; it is a new stream.
-* An orderly stop sends `SHUTDOWN`, so a maintenance window looks different in
-  the host logs from a VM that simply went quiet. Use that distinction in your
-  alerting.
+* An orderly **agent** stop drains the pipeline and closes the spool. On
+  restart, retained unacknowledged events are replayed and numbering continues
+  above `LastSequence`. An abrupt exit can lose records that had not reached
+  the spool; guest power loss can also lose unsynced writes.
+* On a **collector** restart, agents reconnect and replay their retained
+  backlog. Deduplication state is held in memory, so already-written events
+  whose ACK was lost can be written again. A host crash can also lose
+  acknowledged output that its sink had not made durable.
+* A **guest reboot** changes the HELLO boot ID. If the spool survives,
+  numbering continues above its recovered `LastSequence`; it does not reset
+  to 1. Replayed events retain their original event `boot_id`, while collector
+  deduplication uses the current session's HELLO boot ID. Downstream consumers
+  must tolerate replayed events from a previous boot.
+* An orderly stop attempts to send `SHUTDOWN`, which is logged separately from
+  an unexpected disconnect. It remains a guest claim and does not disable the
+  expected-stream monitor or automatically establish a maintenance window.
 
 ## 8. Troubleshooting
 
@@ -445,17 +499,19 @@ unit))
 ```
 
 * `systemctl show sauronagent -p AmbientCapabilities -p CapabilityBoundingSet`
-  must show `cap_audit_read` and, for automatic rule setup, `cap_audit_control`
-  in both. `AmbientCapabilities=` without the capability in
+  must show `cap_audit_read`, `cap_audit_control`, and `cap_dac_read_search`
+  in both for the shipped managed policy. `AmbientCapabilities=` without the capability in
   `CapabilityBoundingSet=` grants nothing.
 * Do not add `PrivateUsers=yes`: inside a user namespace `CAP_AUDIT_READ`
   applies to that namespace, and the kernel checks audit access against the
   initial one. The agent starts and receives nothing.
 * Running the binary by hand needs root, or
-  `setcap cap_audit_read,cap_audit_control+ep /usr/bin/sauronagent`.
+  `setcap cap_audit_read,cap_audit_control,cap_dac_read_search+ep /usr/bin/sauronagent`,
+  plus write access to the spool directory. Prefer the supplied systemd unit.
 * A container needs the capabilities granted to the container itself
-  (`--cap-add=AUDIT_READ --cap-add=AUDIT_CONTROL`) and a non-user-namespaced
-  runtime.
+  (`--cap-add=AUDIT_READ --cap-add=AUDIT_CONTROL --cap-add=DAC_READ_SEARCH`)
+  and a non-user-namespaced runtime. Its filesystem view must also contain the
+  intended watched paths.
 
 ### The agent runs but there are no audit events
 
@@ -509,8 +565,10 @@ Work down the path:
    means the agent is collecting but not delivering.
 3. Hypervisor: `systemctl status sauronhost`. Its `listen.port` must match the
    agent's compiled-in port, 9000.
-4. Hypervisor: `listen.cid` must be `4294967295` (`VMADDR_CID_ANY`). Bound to a
-   specific CID, the collector is deaf to every other guest.
+4. Hypervisor: keep `listen.cid` at its default `4294967295`
+   (`VMADDR_CID_ANY`). This is the collector's local bind address, not the
+   remote guest CID; accepted guest identities are controlled by the VM map
+   and `limits.allow_unknown_cids`.
 5. Hypervisor: check the unit's `RestrictAddressFamilies=` lists `AF_VSOCK`.
 6. Test the raw path with `socat`, as in
    [../examples/qemu-vsock.md](../examples/qemu-vsock.md) -- stop the collector
@@ -535,7 +593,10 @@ One event exceeded the agent's built-in 1 MiB maximum or the host's
 vector. The limits are independent and the smaller one wins. Raising the agent
 limit requires a rebuild; raising the host limit is a SauronHost configuration
 change. The agent fails such a send locally rather than emitting a frame the
-host is certain to reject.
+host is certain to reject. It skips the oversized event for that session,
+logs the loss, and attempts to send a `sauron.protocol.violation` report with
+the missing sequence. If the negotiated limit cannot carry that report either,
+only the local diagnostic remains.
 
 ### Inspecting the built-in agent settings
 

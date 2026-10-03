@@ -19,6 +19,7 @@ type prefixedFS struct {
 	fs.FS
 }
 
+// Open accepts embedded paths with or without the historical static/ prefix.
 func (f prefixedFS) Open(name string) (fs.File, error) {
 	switch {
 	case name == "static":

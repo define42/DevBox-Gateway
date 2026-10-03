@@ -50,6 +50,8 @@ func newSessionExpiryStore(inner scs.Store, codec scs.Codec) (*sessionExpiryStor
 	}, nil
 }
 
+// Delete removes the stored session and cancels its expiry audit only after
+// deletion succeeds.
 func (s *sessionExpiryStore) Delete(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -61,10 +63,14 @@ func (s *sessionExpiryStore) Delete(token string) error {
 	return nil
 }
 
+// Find delegates token lookup and expiry checks to the backing SCS store.
 func (s *sessionExpiryStore) Find(token string) ([]byte, bool, error) {
 	return s.inner.Find(token)
 }
 
+// Commit persists a live session and replaces its expiry audit timer. It rejects
+// expired sessions and writes after shutdown; undecodable data is still stored
+// but cannot be attributed to a user for expiry auditing.
 func (s *sessionExpiryStore) Commit(token string, data []byte, expiry time.Time) error {
 	tracked, decodeErr := s.decodeTrackedSession(data, expiry)
 
@@ -127,6 +133,7 @@ func (s *sessionExpiryStore) scheduleLocked(token string, tracked *trackedSessio
 	})
 }
 
+// All delegates enumeration of unexpired sessions to the backing SCS store.
 func (s *sessionExpiryStore) All() (map[string][]byte, error) {
 	return s.iterable.All()
 }

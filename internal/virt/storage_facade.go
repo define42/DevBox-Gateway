@@ -69,7 +69,8 @@ func DeleteBaseImage(settings *config.Settings, name string) error {
 	return nil
 }
 
-// RemoveVolumes deletes the named volumes from the given storage pool.
+// RemoveVolumes attempts every named volume in the storage pool, ignores missing
+// volumes, and returns lookup and deletion errors together.
 func RemoveVolumes(conn *libvirt.Connect, storagePoolName string, volumeNames ...string) error {
 	return storage.RemoveVolumes(conn, storagePoolName, volumeNames...)
 }

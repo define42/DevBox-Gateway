@@ -146,13 +146,15 @@ The host's acceptance, sent in response to HELLO.
 | `protocol_version` | uint8 | yes | must be 1 |
 | `host_version` | string | no | build identifier of the collector |
 | `session_id` | string | no | identifies this connection in host logs |
-| `resume_from` | uint64 | no | highest sequence already durably recorded for this (CID, boot id) |
+| `resume_from` | uint64 | no | highest contiguous sequence accounted for by accepted events or published gap evidence for this (CID, HELLO boot id) |
 | `max_payload_size` | uint32 | no | largest payload the host will accept |
 
 `resume_from` is an optimisation, not a correctness requirement: the agent may
 skip re-sending anything at or below it, and the host deduplicates either way.
-Zero, or absent, means the host holds nothing for this stream and the agent
-should send everything it has.
+Zero, or absent, means the host has no remembered acknowledgement position
+for this stream and the agent should send everything it retains. Collector
+restart or state eviction can clear that position even when outputs already
+contain earlier events.
 
 An agent MUST respect `max_payload_size` if it is present and smaller than the
 agent's own limit. A frame larger than the host's limit is not a recoverable
@@ -171,10 +173,12 @@ The event object's schema is the normalized event model; see the README and
 
 1. The frame header's `Sequence` MUST equal the event's `sequence` field. A
    host receiving a frame where they disagree MUST reject it
-   (`ERROR` code `bad_sequence`). Carrying the sequence in the header is what
-   lets the host acknowledge and deduplicate without parsing JSON.
-2. The event carries its own `boot_id`. The host uses the boot id for the
-   deduplication key; see section 6.
+   (`ERROR` code `bad_sequence`). The reference collector parses the JSON
+   event before checking this equality and deduplicating it.
+2. The event's `boot_id` describes when that event was collected. The
+   reference collector keys session deduplication by the HELLO `boot_id`,
+   which can differ when a persistent spool replays a previous boot's events;
+   see section 6.
 
 ### 4.4 `ACK`
 
@@ -182,11 +186,19 @@ The event object's schema is the normalized event model; see the README and
 {"sequence":184213}
 ```
 
-Acknowledgement is **cumulative**: acknowledging N means every sequence up to
-and including N is durably held by the host, and the agent may discard all of
-them from its spool. There is no negative acknowledgement and no selective
-acknowledgement. A host MUST NOT acknowledge N unless every event it accepted
-below N has been durably written, because the agent will delete them.
+Acknowledgement is **cumulative**: acknowledging N permits the agent to
+discard every retained event through N. The collector advances its contiguous
+acknowledgement position only after sink acceptance of an event or of a
+`sauron.stream.gap` report covering missing sequences. An ACK can therefore
+cover recorded loss; it does not mean every original event was delivered.
+There is no negative or selective acknowledgement.
+
+The reference collector treats a successful `Sink.Write` as acceptance; it
+does not call `Flush` before every ACK. File output with `sync_on_write: false`
+can acknowledge writes still in the host's page cache. Stdout and syslog rely
+on the receiving logger for durability. A host MUST NOT acknowledge events
+whose sink writes failed. Installations that require durable acknowledgements
+must provide a sink that makes its accepted writes durable.
 
 Acknowledgements are batched (`limits.ack_interval`, default every 64 events)
 and time-bounded (`limits.ack_max_delay`, default 2s) so a slow trickle of
@@ -204,12 +216,13 @@ The agent's heartbeat, sent every 30 seconds by the compiled policy.
 {"echo_uptime":86400,"unix_nano":1789752345318000000}
 ```
 
-The counters are what distinguish a healthy quiet guest from one whose audit
-subsystem has been switched off or whose agent is wedged: `audit_enabled:
-false`, a rising `events_dropped`, or a `queue_depth` that never falls are all
-visible without a single audit event arriving. `unix_nano` is the host's clock,
-which lets a guest detect its own drift. All counter fields are advisory: they
-come from the guest and are as trustworthy as the guest is.
+The counters report the guest's view of collection and backlog even when no
+audit event arrives. In this implementation, `audit_enabled` is the configured
+startup value, not a live check of the kernel audit subsystem. A guest can keep
+sending heartbeats while auditing is disabled externally or records are
+suppressed. `unix_nano` carries the host's clock for consumers that compare
+clocks; the shipped agent does not report drift automatically. Every heartbeat
+field is an untrusted guest claim.
 
 ### 4.6 `ERROR`
 
@@ -241,10 +254,10 @@ turns one bug into a denial of service against the collector.
 ```
 
 Sent by either side before an orderly close, so that the peer can tell a
-planned stop from a crash. `last_sequence` is the highest sequence the agent
-sent. A collector SHOULD record a stream that ended with SHUTDOWN differently
-from one that simply stopped: the first is maintenance, the second is the one
-worth investigating.
+reported planned stop from a crash. `last_sequence` is the highest sequence
+the agent sent. The collector logs SHUTDOWN separately, but continues to
+monitor expected streams: the message is a guest claim and cannot authorize
+a maintenance window.
 
 ## 5. Size limits
 
@@ -263,27 +276,35 @@ the send locally rather than emit a frame the peer is certain to reject.
 
 Every event is assigned a sequence number by the agent immediately after
 normalization, before it is queued or spooled. Within one boot the sequence is
-strictly increasing with no intentional gaps. Sequence 0 is reserved to mean
+increasing. Recovering a higher host acknowledgement position can advance the
+next sequence; detected drops also leave gaps. Sequence 0 is reserved to mean
 "no sequence" (as in `resume_from: 0`) and is never assigned to an event.
 
-Sequence numbers are scoped by the guest's **boot id**. They restart on reboot,
-and continue across an agent restart within one boot, recovered from the spool.
+The reference agent resumes numbering above the spool's `LastSequence`.
+A persistent spool keeps numbering increasing across both agent restarts and
+guest reboots. A fresh spool starts from 1, unless the collector supplies a
+higher `resume_from` for the current stream.
 
-The deduplication key is therefore:
+The reference collector's deduplication key is:
 
 ```text
-(source CID, boot id, sequence)
+(source CID, HELLO boot id, sequence)
 ```
+
+The event's own `boot_id` is preserved as data, including for older events
+replayed after a reboot. It does not change the session's deduplication key.
 
 * The **CID** comes from the connection, not from the guest.
 * The **boot id** comes from the guest and is untrusted, but a guest that lies
   about it only damages its own stream's continuity.
 * The **sequence** comes from the frame header.
 
-Delivery is **at-least-once**. After a reconnect the agent re-sends everything
-its spool still holds above `resume_from`, so duplicates are normal and
-expected; the host suppresses them using a window of recent sequence numbers
-per (CID, boot id) (`limits.dedup_window`, default 65536). The window must be
+Retained events use **at-least-once** replay. After a reconnect the agent
+re-sends its retained, deliverable events above `resume_from`, so duplicates
+are normal and expected; the host suppresses them using a window of recent sequence numbers
+per (CID, HELLO boot id) (`limits.dedup_window`, default 65536). This state is
+held in memory and can be evicted, so duplicates can reappear after a collector
+restart or state eviction. The window must be
 larger than the agent's built-in 1024-event unacked window by a wide margin, or
 a replay after a long outage will be written twice.
 
@@ -331,9 +352,10 @@ Rules:
    (`unexpected_type`).
 4. The host closes a connection that sends nothing at all, including
    heartbeats, for `limits.idle_timeout` (default 5 minutes).
-5. Either side may close at any point. A closed connection loses nothing: the
-   agent's spool still holds everything not yet acknowledged, and it will be
-   re-sent after the reconnect.
+5. Either side may close at any point. A connection close leaves retained,
+   unacknowledged spool events available for replay. Queue/spool overflow,
+   storage failures, abrupt process exits, and unsynced writes still limit
+   delivery; see the deployment guide.
 
 ### Reconnection
 

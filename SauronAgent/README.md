@@ -58,9 +58,9 @@ to both ends:
 * **No guest network configuration.** The agent works on a VM with no IP
   address at all, before DHCP, on a broken network, and on an isolated VLAN.
   There is no management interface to secure and no route to maintain.
-* **Nothing to reach from the guest network.** The collector does not listen on
-  a TCP port. A neighbouring VM cannot connect to it, scan it, or flood it; a
-  guest can only reach it through its own virtio-vsock device.
+* **No collector listener on the guest IP network.** The production collector
+  listens on VSOCK. Other guests with VSOCK access can also connect to it under
+  their own CIDs, so the collector still enforces connection and payload limits.
 * **Nothing to firewall wrong.** Audit delivery cannot be broken by a change to
   the guest's iptables/nftables rules, its routing table, or its resolver --
   which matters because those are exactly the things an intruder changes.
@@ -94,9 +94,12 @@ agent version in the HELLO message. That data is recorded under
 logs readable and to let you alert on a guest whose self-description disagrees
 with the CID mapping. It is never used to decide which VM an event came from.
 
-## Quick start
+## Getting started
 
 Run the source-install commands below from the DevBox-Gateway repository root.
+Building requires the Go version in [`go.mod`](../go.mod), GNU Make, and Linux.
+Installation and the systemd commands require root. `make install` builds for
+Linux amd64 by default; set `GOARCH=arm64` when targeting an ARM64 machine.
 
 ### On the hypervisor
 
@@ -285,15 +288,16 @@ came from:
 }
 ```
 
-`received_at` is the host's clock, which is independent of a guest clock that
-may be wrong or manipulated. Everything outside `source.reported` is
-configured on the hypervisor and cannot be influenced by the guest.
+`received_at` is the host's clock. Fields in `source` outside `source.reported`
+come from the connection and host configuration. The nested `event`, including
+its timestamp, remains guest-supplied data.
 
-## Failure is an event, not a log line
+## Loss and stream monitoring
 
-A security agent that quietly stops delivering is worse than one that is
-plainly down. Every way an event can be lost produces an event of its own, in
-the same stream as the audit data:
+The agent reports detected queue, spool, parsing, and kernel losses in the
+event stream. These reports share the same delivery path and can themselves
+be lost if the guest or its storage fails. The standalone collector also
+monitors VMs marked `expected: true` in its static configuration:
 
 | Event | Meaning |
 |---|---|
@@ -308,18 +312,21 @@ the same stream as the audit data:
 {"version":1,"type":"sauron.queue.overflow","severity":"critical","boot_id":"5f1c7d2a-…","fields":{"events_dropped":1842,"first_missing_sequence":184213,"last_missing_sequence":186054}}
 ```
 
-`sauron.stream.lost` is the one the design exists for: an intruder's first move
-inside a guest is to silence its telemetry, and only the host can notice that.
+`sauron.stream.lost` detects a guest that stops sending. A compromised guest
+can keep sending heartbeats while suppressing audit data; stream liveness does
+not prove that collection is complete. Dynamic CID resolution alone does not
+add a VM to the expected-stream monitor.
 
 ## Privilege model
 
-The agent runs as the `sauronagent` system user with `CAP_AUDIT_READ` and
-`CAP_AUDIT_CONTROL`, granted ambiently and bounded by its systemd unit.
-`CAP_AUDIT_READ` permits joining the `NETLINK_AUDIT` read-log multicast group;
-`CAP_AUDIT_CONTROL` permits enabling auditing and installing the managed
-process-execution and identity/credential file rules. Both capabilities remain
-available for the process lifetime. The agent never registers as the audit
-daemon and can coexist with `auditd`. It has no `CAP_SYS_ADMIN` and the service
+The agent runs as the `sauronagent` system user with `CAP_AUDIT_READ`,
+`CAP_AUDIT_CONTROL`, and `CAP_DAC_READ_SEARCH`, granted ambiently and bounded by
+its systemd unit. They permit reading audit records, configuring the managed
+baseline, and discovering watched paths inside private directories. All three
+remain available for the process lifetime. `CAP_DAC_READ_SEARCH` also permits
+reading protected files visible in the service sandbox; see the
+[security model](docs/security.md#4-capability-model). The agent never registers
+as the audit daemon and can coexist with `auditd`. It has no `CAP_SYS_ADMIN` and the service
 never runs as root.
 
 The collector runs with an empty capability bounding set. It parses frames sent
@@ -334,16 +341,23 @@ see [packaging/systemd/](packaging/systemd/).
 
 ## Reliability
 
-* The netlink reader never blocks on the host. Under sustained overload events
-  are dropped from a bounded queue on purpose -- and accounted for, never
-  silently.
-* Events are written to a disk spool at `/var/lib/sauronagent/spool` before
-  they are sent, and are deleted only once the host acknowledges them, so an
-  agent restart or a host outage does not lose the backlog.
-* Acknowledgement is cumulative and delivery is at-least-once. The host
-  deduplicates on `(CID, boot id, sequence)`.
+* Collection and sending use separate goroutines. A bounded queue drops its
+  oldest events under overload and records the lost sequence range.
+* Events reach `/var/lib/sauronagent/spool` before transmission. A host outage
+  retains the backlog until acknowledgements or the spool size limit remove
+  it. An abrupt agent exit can lose records still in memory; guest power loss
+  can also lose unsynced spool writes.
+* Acknowledgements are cumulative and follow sink acceptance. The default file
+  sink does not sync every write; stdout and syslog rely on the downstream
+  logger for durability. An ACK alone does not guarantee survival of host
+  power loss.
+* Retained events are replayed after reconnect. The host deduplicates using
+  `(CID, HELLO boot id, sequence)` while its in-memory state remains available.
+  A collector restart or state eviction can produce duplicates.
 * Reconnection uses exponential backoff with jitter; collection and spooling
-  continue throughout an outage.
+  continue during an outage within the configured queue and spool limits.
+
+See [deployment limits and restart behavior](docs/deployment.md#7-restarts-upgrades-and-reboots).
 
 ## Building
 
@@ -378,11 +392,28 @@ alongside the gateway's dependencies in the root module.
 
 ## Documentation
 
+With the default installation prefix, installed guides share one directory:
+`/usr/share/doc/sauronagent`. Relative links below follow the source-tree layout
+and are intended for a checkout. Package users can browse the
+[repository documentation](https://github.com/define42/DevBox-Gateway/tree/main/SauronAgent)
+for working links between guides and source files.
+
 | Document | Contents |
 |---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | the design specification this implements |
+| [docs/DESIGN.md](docs/DESIGN.md) | design objectives and implementation limits |
 | [docs/protocol.md](docs/protocol.md) | the SAUR wire protocol, precisely enough to reimplement |
 | [docs/security.md](docs/security.md) | threat model, stated honestly: what this does and does not protect against |
 | [docs/deployment.md](docs/deployment.md) | installing, sizing, monitoring and troubleshooting |
 | [examples/qemu-vsock.md](examples/qemu-vsock.md) | giving a VM a vsock device and verifying it |
-| [examples/sauronhost.yaml](examples/sauronhost.yaml) | collector settings, commented, at their defaults |
+| [examples/sauronhost.yaml](examples/sauronhost.yaml) | collector settings with sample host and VM identities |
+
+## Contributing
+
+Follow the [repository contribution guide](../CONTRIBUTING.md). Changes to the
+agent's compiled settings also need updates to the deployment guide and any
+configuration summaries or examples they affect.
+
+## License
+
+The SauronAgent subtree retains its [Apache License 2.0](LICENSE). The gateway
+has its own [license](../LICENSE).

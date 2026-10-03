@@ -80,6 +80,8 @@ type gatewayRuntime struct {
 	closeErr  error
 }
 
+// Close stops accepting connections, drains handlers, and closes background
+// workers and their outputs. Repeated calls return the same combined error.
 func (g *gatewayRuntime) Close() error {
 	g.closeOnce.Do(func() {
 		g.closeErr = g.close()

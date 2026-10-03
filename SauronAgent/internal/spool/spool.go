@@ -290,7 +290,8 @@ func (s *Spool) recover() error {
 	return nil
 }
 
-// Append durably records an event that has already been assigned a sequence.
+// Append writes an event that has already been assigned a sequence.
+// Power-loss durability follows SyncOnWrite, SyncInterval, or an explicit Sync.
 //
 // The sequence must be greater than LastSequence. A sender that restarts must
 // therefore resume from LastSequence()+1 rather than from 1, which is what
@@ -516,8 +517,8 @@ func (s *Spool) LastSequence() uint64 {
 	return s.lastSeq
 }
 
-// FirstUnacked is the lowest sequence still held. When nothing is held it is
-// the sequence the next appended event must exceed, i.e. LastSequence()+1.
+// FirstUnacked is the lowest sequence still held. When nothing is held it
+// returns LastSequence()+1, the next sequence available for append.
 func (s *Spool) FirstUnacked() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()

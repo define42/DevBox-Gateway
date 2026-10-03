@@ -1,9 +1,9 @@
 # Security model
 
-This document states what SauronAgent protects against and, at least as
-importantly, what it does not. It is the material from DESIGN.md sections 27-28
-written out honestly: a monitoring system whose limits are not written down
-gets trusted for things it cannot do.
+This document describes the standalone agent and collector, their trust
+boundaries, and their limits. The embedded DevBox Gateway collector uses the
+gateway's configuration and process permissions; the standalone collector's
+systemd sandbox does not apply to that process.
 
 ## 1. Trust boundaries
 
@@ -56,19 +56,20 @@ machine-id and boot-id -- and those claims are recorded, under
 `source.reported`, precisely so that a disagreement with the CID mapping can
 be alerted on -- but it cannot connect from a CID that is not its own.
 
-**Loss is visible.** Every place an event can be lost is counted and reported
-as an event in the same stream: `sauron.queue.overflow` and
+**Detected loss is reported.** The agent reports known pipeline losses in
+the event stream: `sauron.queue.overflow` and
 `sauron.spool.full` name the exact range of missing sequence numbers,
 `sauron.audit.lost` reports records the kernel dropped before the agent saw
 them, `sauron.parse.failure` carries the text that could not be parsed. A gap
 in the sequence numbers with no such event next to it is a finding, not a
 tuning problem.
 
-**The host's attack surface is small.** The collector has no TCP listener, no
-IP address it reaches, no capabilities, and no writable filesystem outside its
-log directory. A guest can reach exactly one thing on the hypervisor: a vsock
-port that speaks a 20-byte-header protocol which is bounded, fuzz-tested, and
-allocates nothing from a length field it has not validated.
+**The standalone service restricts collector access.** The shipped unit uses
+a VSOCK listener, an empty capability bounding set, and a mostly read-only
+filesystem with a writable log directory and private temporary directories.
+Protocol decoding validates the 20-byte header and payload size before
+allocating a payload buffer. Other host services remain outside this
+collector's security boundary.
 
 **Auditing keeps working alongside auditd.** The agent is a consumer on the
 audit multicast group. It never registers as the audit daemon, so deploying it
@@ -100,11 +101,12 @@ root and kernel control in the guest an attacker can:
 * run a kernel module or rootkit that suppresses specific records before the
   audit subsystem ever emits them.
 
-None of that is defended against, and no agent running inside the guest could
-defend against it. What the design offers is that **each of those actions
-either leaves the already-delivered record untouched or makes the stream go
-missing, and the host notices a missing stream.** That is a detective control
-with a bounded blind spot, not a preventive one.
+Host storage keeps already-delivered records outside the guest's direct
+control. Stream monitoring detects stopped delivery only for configured
+expected VMs. A compromised guest can continue heartbeats while selectively
+suppressing or fabricating audit events, so those actions need not trigger a
+stream-loss alert. The heartbeat's `audit_enabled` flag reflects startup
+configuration and is not an independent kernel-status check.
 
 **Event contents are guest-controlled data.** There is no signature on an
 event and no cryptography in the protocol. An attacker with root in a guest can
@@ -115,9 +117,10 @@ guest as authenticated -- only as what that guest reported.
 
 **The window before acknowledgement is lost on a guest compromise.** Events in
 the queue or spool that the host has not yet acknowledged can be destroyed by
-an attacker who reaches root in that moment. The agent's built-in spool syncs
-periodically; compiling it to sync on every write and setting a short
-SauronHost `limits.ack_max_delay` narrow the window, but nothing closes it.
+an attacker who reaches root in that moment. A disk spool remains under guest control even when every write is synced.
+Sync-on-write protects against some crash loss, not malicious deletion.
+Forwarding promptly to host storage reduces this exposure; acknowledgement
+batching controls how long the guest retains its copy after sink acceptance.
 
 **There is no confidentiality boundary on the wire.** vsock traffic is carried
 by the host kernel. Anyone with root on the hypervisor can read it -- but they
@@ -129,10 +132,13 @@ every guest's audit trail.
 what happened inside VMs. It says nothing about the host they run on, and an
 attacker who owns the hypervisor owns the collector too.
 
-**Absence of events is not proof of absence of activity.** Delivery is
-at-least-once with explicit, reported gaps. If a burst overflowed the queue,
-some events did not happen to be recorded; the overflow event says exactly
-which sequence numbers those were, and that is the whole of the guarantee.
+**Absence of events is not proof of absence of activity.** Retained spool
+events are replayed, while detected queue and spool losses produce reports.
+Those reports use the same pipeline and can themselves be lost. Abrupt exits
+can lose records still in memory; guest power loss can lose unsynced spool
+writes. Host acknowledgements follow sink acceptance, which does not guarantee
+durable storage with the default outputs. Collector deduplication state is
+in memory, so restarts and state eviction can produce duplicates.
 
 **Guest timestamps can be wrong.** Event timestamps come from the guest kernel.
 The collector stamps `received_at` from its own clock, and `PONG` carries the
@@ -200,8 +206,8 @@ with why it is present. The security-relevant ones:
 | `NoNewPrivileges=true` | no path to more privilege through setuid or file capabilities |
 | `ProtectSystem=strict` | the filesystem is read-only except the state or log directory |
 | `ProtectHome=read-only` (agent), `ProtectHome=true` (collector) | agent home paths remain visible for SSH-directory discovery but cannot be written; the collector's home paths are hidden |
-| `StateDirectory=` / `LogsDirectory=` | the only writable path, owned by the service user, mode 0700 / 0750 |
-| `PrivateDevices=true` | no device nodes: the vsock socket is a socket, not `/dev/vsock` |
+| `StateDirectory=` / `LogsDirectory=` | persistent writable state/log paths owned by the service user, mode 0700 / 0750; `PrivateTmp` also supplies writable temporary directories |
+| `PrivateDevices=true` | a private device namespace; AF_VSOCK sockets do not need access to `/dev/vsock` |
 | `RestrictAddressFamilies=` | the agent may use only `AF_NETLINK`, `AF_VSOCK` and `AF_UNIX`; the collector only `AF_VSOCK` and `AF_UNIX` |
 | `IPAddressDeny=any` | neither component can be turned into an IP exfiltration path |
 | `SystemCallFilter=@system-service` minus `@privileged @resources` | a seccomp allow-list |
@@ -230,8 +236,8 @@ break it silently rather than loudly:
   about, is worth a look.
 * **Think before turning `allow_unknown_cids` off.** `true` records an
   unmapped guest under a synthetic name with `known: false`, which is visible.
-  `false` refuses it -- and then the only trace of that VM is a rejection
-  counter.
+  `false` refuses it and attempts to publish `sauron.connection.rejected`,
+  but the guest's audit stream is not collected.
 * **Treat the collector's output as sensitive.** It contains the command lines
   of every audited process on every VM, which routinely include things that
   should never have been typed on a command line. `/var/log/sauronhost` is 0750

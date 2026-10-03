@@ -1,6 +1,6 @@
 # NATO AC/35-D/2003-REV5 §26.3.1 compliance comparison
 
-The solution provides substantial coverage of §26.3.1, but **full compliance is not yet demonstrated**. This comparison covers DevBox-Gateway, SauronAgent on Linux guests, and the collector. It is an implementation assessment, not an accreditation or certification.
+**Full compliance is not yet demonstrated.** This comparison describes the audit coverage implemented in DevBox-Gateway, SauronAgent on Linux guests, and the collector, together with the checks still required in a deployment. It is an implementation assessment, not an accreditation or certification.
 
 The requirements below paraphrase Annex 1, Appendix 4, §26.3.1, printed page 1-44. [NATO directive](https://www.jftc.nato.int/wp-content/uploads/2025/01/AC-35-D-2003-REV5_-_DIRECTIVE_ON_CLASSIFIED_PROJECT_AND_INDUSTRIAL_SECURITY.pdf#page=45)
 
@@ -8,7 +8,7 @@ The requirements below paraphrase Annex 1, Appendix 4, §26.3.1, printed page 1-
 
 | §26.3.1 requirement | Implemented coverage | Assessment / remaining requirement |
 |---|---|---|
-| Generate and maintain an audit log | DevBox-Gateway emits structured JSON application audits to HEC when configured, otherwise to a local file. HEC delivery first fsyncs application events to a persistent spool and replays them after restart. The gateway also always starts its guest-event collector on AF_VSOCK port 9000; SauronAgent collects guest events, spools them, and forwards them to the collector. [Application delivery](internal/audit/hec.go), [guest storage](internal/sauron/sauron.go#L110) | **Conditional; operational verification needed.** Persistence materially reduces outage and restart loss but does not make an event durable when disk persistence itself fails. Spool capacity, filesystem durability, disk-full handling and outage recovery must be verified. Guest agents must be installed and running. New VMs receive a vsock device; existing VMs without one are not automatically migrated. |
+| Generate and maintain an audit log | DevBox-Gateway emits structured JSON application audits to HEC when configured, otherwise to a local file. HEC delivery first fsyncs application events to a persistent spool and replays them after restart. The gateway also starts its guest-event collector on AF_VSOCK port 9000; SauronAgent collects guest events, spools them, and forwards them to the collector. [Application delivery](internal/audit/hec.go), [guest storage](internal/sauron/sauron.go) | **Conditional; operational verification needed.** Persistence does not make an event durable when disk persistence itself fails. Local application-file writes have no per-event fsync or reported write error. Spool capacity, filesystem durability, disk-full handling and outage recovery must be verified. Guest agents must be installed and running, and collection must be monitored after startup. New VMs receive a vsock device; existing VMs without one are not automatically migrated. |
 | Include system, application and user events selected through the Security Authority's risk assessment | System-security rules cover execution, permissions, credentials, persistence, kernel, network, time and mounts. DevBox-Gateway logs authentication and selected VM/admin operations. [Built-in policy](SauronAgent/internal/audit/security_paths.go#L32) | **Partial.** The approved event inventory must be mapped against coverage. Not every application action or access denial is currently audited. |
 | Record every successful and unsuccessful login attempt | DevBox-Gateway logs successful authentication and failures, including malformed requests, missing credentials, invalid usernames and rate limits. SauronAgent consumes guest authentication records. [DevBox-Gateway logging](internal/gateway/handlers.go#L378) | **Implemented for DevBox-Gateway login; conditional for guests.** SSH, PAM, desktop login and other authentication services must actually emit audit records. Execution auditing alone does not prove login coverage. |
 | Record logout, including applicable timeouts | DevBox-Gateway records explicit logout, 30-minute browser-session expiry and IP-mismatch invalidation. SauronAgent consumes guest logout/session-end records. [Expiry auditing](internal/session/session_expiry.go#L170) | **Implemented for browser sessions; conditional for guest sessions.** Browser-session expiry does not terminate existing RDP, noVNC or serial-console streams; dashboard-control WebSockets enforce expiry separately. |
@@ -80,7 +80,7 @@ Every application audit record has `time`, `level`, `msg="audit"`, `action`, `us
 | IP-mismatch invalidation: `user.logout` | A request no longer matches the authenticated session's bound IP; the session invalidation is claimed and audited once. | `operation=client_ip_changed`; `success` or `failure` according to invalidation. `source_ip` is the new request's canonical address when valid, not the previous bound address. | [IP enforcement](internal/session/session.go#L681) |
 | VM creation: `vm.create` | Authenticated dashboard create validation failures, and the outcome of VM provisioning/initial startup. Includes malformed form, invalid name/base-image selection, missing provisioning credential, duplicate-name/limit and provisioning failures when reached. | `success` or `failure`; actor, source IP, administrator flag and VM name when safely available. Success is provisioning/startup success, not proof that the guest OS is ready. | [Create validation and operation](internal/gateway/handlers.go#L734) |
 | VM start: `vm.start` | Dashboard start request: target validation/authorization and start-operation outcomes after authentication. | `success` or `failure`; actor, source IP and VM. Administrator lifecycle actions carry `administrator=true`. | [Lifecycle routes](internal/gateway/handlers.go#L574) |
-| VM shutdown: `vm.stop` | Dashboard shutdown request: target validation/authorization and shutdown-operation outcomes after authentication. | `operation=shutdown`; `success` or `failure`; actor, source IP, VM and administrator flag when applicable. | [Lifecycle audit emission](internal/gateway/handlers.go#L922) |
+| VM shutdown: `vm.stop` | Dashboard shutdown request: target validation/authorization and force-stop operation outcomes after authentication. The dashboard path calls libvirt's domain destroy operation. | `operation=shutdown`; `success` or `failure`; actor, source IP, VM and administrator flag when applicable. Success does not mean the guest completed a graceful shutdown. | [Lifecycle audit emission](internal/gateway/handlers.go#L922), [power operations](internal/virt/power.go) |
 | VM restart: `vm.reboot` | Dashboard restart request: target validation/authorization and restart-operation outcomes after authentication. | `operation=restart`; `success` or `failure`; actor, source IP, VM and administrator flag when applicable. | [Lifecycle audit emission](internal/gateway/handlers.go#L922) |
 | VM removal: `vm.remove` | Dashboard removal request: target validation/authorization and removal-operation outcomes after authentication. | `success` or `failure`; actor, source IP, VM and administrator flag when applicable. | [Lifecycle audit emission](internal/gateway/handlers.go#L922) |
 | Connection established: `connection.connect` | An authorized RDP proxy or noVNC/serial bridge is established and accepted into live-connection tracking. | `result=success`; `protocol=rdp`, `novnc` or `serial`, actor, source IP and VM. Console/noVNC includes administrator status when applicable; the RDP emitter does not set it. | [RDP](internal/rdp/rdp.go#L158), [console/noVNC](internal/console/console.go#L58) |
@@ -136,6 +136,24 @@ HEC forwarding is optional and disabled when its endpoint is unset; remove the a
 SauronAgent collection remains mandatory: DevBox-Gateway always starts the collector on AF_VSOCK port 9000. The guest JSON Lines output is independently controlled by `SAURON_EVENT_LOG_FILE` and can run alongside guest HEC forwarding; at least one of those guest outputs must be configured.
 
 ### Delivery and compliance boundaries
+
+The gateway requires the guest collector to start successfully, but its
+`/api/health` response only confirms that the HTTP handler is serving. It does
+not check collector lifetime, agent connectivity, audit-file writes or HEC
+delivery. A later collector failure is retained until shutdown; it does not
+automatically stop the gateway or make the health endpoint fail. Monitor event
+arrival and storage/delivery failures independently. See [collector
+lifecycle](internal/sauron/sauron.go) and the [health
+handler](internal/gateway/handlers.go).
+
+In application file mode, the gateway opens `AUDIT_LOG_FILE` at startup and
+appends through Go's JSON log handler. File mode does not fsync each record,
+and subsequent write errors are not returned to the caller or reported through
+the operational log. A successful user action therefore does not prove that its
+file audit record was retained. The application file also has no built-in
+rotation. These limits differ from the persistent HEC spool described below;
+verify file durability, capacity and external collection for file-mode
+deployments. See the [application audit writer](internal/audit/audit.go).
 
 Both ACK switches default to `false`, preserving delivery confirmation by an HTTP `2xx` response with valid HEC JSON `code: 0`. Set a stream's switch to `true` only when its Splunk deployment supports HEC indexer acknowledgement and its token has the feature enabled. DevBox-Gateway sends the same generated GUID in `X-Splunk-Request-Channel` on event POSTs and `/services/collector/ack` polls, using the same token. Only an explicit `true` for the submitted payload's exact `ackId` permits successful-delivery checkpoint advancement. False or missing ACK status, malformed replies, transport/HTTP failures and shutdown leave unconfirmed payloads pending. Polling is bounded to five minutes per delivery attempt; the forwarder then retries the stored payload with backoff. Lost responses, timeout or restart can produce duplicates even after Splunk processes a payload.
 
@@ -353,6 +371,9 @@ For both guest examples, HEC `time` matches the collector's `received_at`, not t
 - Validate application-spool sizing, filesystem durability, capacity backpressure,
   disk-error alerting, restart replay and duplicate handling before claiming every
   required event is retained. HEC mode has no permanent local audit-file copy.
+- In application file mode, address unreported write failures and verify
+  durability and rotation. Verify monitoring detects collector exit and missing
+  guest events while the gateway's HTTP health endpoint remains available.
 - Integrate external identity and application audit sources for changes outside the covered local Linux mechanisms.
 - Obtain Security Authority acceptance of the risk-assessed event inventory and its mapping to the deployed logging coverage.
 

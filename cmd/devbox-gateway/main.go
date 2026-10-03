@@ -1,3 +1,5 @@
+// Command devbox-gateway serves the HTTPS dashboard and RDP gateway until an
+// interrupt, termination signal, or listener failure ends the process.
 package main
 
 import (
