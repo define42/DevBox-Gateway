@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -32,6 +33,21 @@ func ValidateLDAPUserDomain(settings *Settings) error {
 	domain := strings.TrimPrefix(strings.TrimSpace(settings.Get(LDAP_USER_DOMAIN)), "@")
 	if domain == "" || strings.ContainsRune(domain, '@') || strings.ContainsAny(domain, " \t\r\n") {
 		return fmt.Errorf("%s must contain one non-empty domain suffix for bare usernames", LDAP_USER_DOMAIN)
+	}
+	return nil
+}
+
+// ValidateLDAPUsernameAttribute requires one LDAP attribute name.
+// Options, wildcard selectors, and filter syntax cannot identify the single
+// directory value used as the gateway's canonical username.
+func ValidateLDAPUsernameAttribute(settings *Settings) error {
+	if settings == nil {
+		return fmt.Errorf("settings is nil")
+	}
+	attribute := settings.Get(LDAP_USERNAME_ATTRIBUTE)
+	valid, err := regexp.MatchString(`^[A-Za-z][A-Za-z0-9-]*$`, attribute)
+	if err != nil || !valid {
+		return fmt.Errorf("%s must name one LDAP attribute without options", LDAP_USERNAME_ATTRIBUTE)
 	}
 	return nil
 }

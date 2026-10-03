@@ -92,6 +92,9 @@ func StartVM(cfg VMStartConfig) (err error) {
 
 	// Both the VNC socket and the serial PTY are libvirt-managed; the gateway
 	// owns no console sockets.
+	if err := ensureExistingVMNotDeleting(conn, cfg.Name); err != nil {
+		return err
+	}
 	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB, cfg.VSock, cfg.Network))
 	if err != nil {
 		return err

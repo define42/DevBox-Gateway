@@ -1729,11 +1729,22 @@ function bootstrap() {
                 shutdownButton.type = "button";
                 shutdownButton.className = "btn btn-sm btn-outline-warning";
                 setIconLabel(shutdownButton, "bi-stop-fill", "Stop");
+                shutdownButton.title = "Ask the guest to shut down gracefully.";
                 shutdownButton.disabled = state.busy || !hasName || !isActive;
                 shutdownButton.addEventListener("click", () => {
                     void shutdownVM(rawName);
                 });
                 actions.appendChild(shutdownButton);
+                const powerOffButton = document.createElement("button");
+                powerOffButton.type = "button";
+                powerOffButton.className = "btn btn-sm btn-outline-danger";
+                setIconLabel(powerOffButton, "bi-power", "Force power off");
+                powerOffButton.title = "Immediately power off the VM. Unsaved work may be lost.";
+                powerOffButton.disabled = state.busy || !hasName || !isActive;
+                powerOffButton.addEventListener("click", () => {
+                    void forcePowerOffVM(rawName);
+                });
+                actions.appendChild(powerOffButton);
                 const removeButton = document.createElement("button");
                 removeButton.type = "button";
                 removeButton.className = "btn btn-sm btn-outline-danger";
@@ -2404,7 +2415,13 @@ function bootstrap() {
         await actionVM(name, "/api/dashboard/restart", "VM restart requested.", "Failed to restart VM.");
     }
     async function shutdownVM(name) {
-        await actionVM(name, "/api/dashboard/shutdown", "VM stop requested.", "Failed to stop VM.");
+        await actionVM(name, "/api/dashboard/shutdown", "VM shutdown requested.", "Failed to request VM shutdown.");
+    }
+    async function forcePowerOffVM(name) {
+        if (state.busy || !window.confirm(`Force power off "${name}" now? This immediately cuts power and can lose unsaved work or damage files. Try Stop first to let the guest shut down safely.`)) {
+            return;
+        }
+        await actionVM(name, "/api/dashboard/power-off", "VM powered off.", "Failed to power off VM.");
     }
     function filenameFromContentDisposition(header, fallback) {
         if (header) {

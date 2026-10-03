@@ -48,8 +48,9 @@ func Configured(settings *config.Settings) bool {
 // AuthenticateAccess authenticates a user against LDAP and returns the gateway
 // user model. The request context and LDAP_AUTH_TIMEOUT bound the entire attempt,
 // including connection setup, TLS, bind, and search. Required and administrator
-// groups are checked through direct memberOf values. The returned identity keeps
-// the supplied username; callers must validate its gateway syntax first.
+// groups are checked through direct memberOf values. The returned username comes
+// from LDAP_USERNAME_ATTRIBUTE on the authenticated directory entry, so alternate
+// login spellings cannot create separate gateway identities.
 func AuthenticateAccess(ctx context.Context, username, password string, settings *config.Settings) (*identity.User, error) {
 	timeout := settings.Duration(config.LDAP_AUTH_TIMEOUT)
 	if timeout <= 0 {
@@ -80,6 +81,9 @@ func authenticateAccess(ctx context.Context, username, password string, settings
 	if err != nil {
 		return nil, err
 	}
+	if err := config.ValidateLDAPUsernameAttribute(settings); err != nil {
+		return nil, err
+	}
 
 	conn, err := dialLDAP(ctx, settings)
 	if err != nil {
@@ -99,11 +103,11 @@ func authenticateAccess(ctx context.Context, username, password string, settings
 	searchReq := ldap.NewSearchRequest(
 		baseDN,
 		ldap.ScopeWholeSubtree,
-		ldap.NeverDerefAliases, 1, 0, false,
+		ldap.NeverDerefAliases, 2, 0, false,
 		filter,
 		// memberOf is operational in some directories (e.g. OpenLDAP's memberof
 		// overlay) and only returned when requested explicitly.
-		[]string{"memberOf"},
+		[]string{"memberOf", settings.Get(config.LDAP_USERNAME_ATTRIBUTE)},
 		nil,
 	)
 
@@ -114,12 +118,19 @@ func authenticateAccess(ctx context.Context, username, password string, settings
 	if len(sr.Entries) == 0 {
 		return nil, fmt.Errorf("user %s not found", mail)
 	}
+	if len(sr.Entries) != 1 {
+		return nil, fmt.Errorf("ldap: user search returned multiple entries")
+	}
+	canonicalName, err := canonicalUsername(sr.Entries[0], settings)
+	if err != nil {
+		return nil, err
+	}
 
 	if groups := requiredGroups(settings); len(groups) > 0 && !memberOfAny(sr.Entries[0], groups) {
 		return nil, fmt.Errorf("user %s is not a member of any required group", mail)
 	}
 
-	user, err := identity.New(username)
+	user, err := identity.New(canonicalName)
 	if err != nil {
 		return nil, err
 	}

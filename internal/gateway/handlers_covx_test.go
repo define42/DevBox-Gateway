@@ -731,6 +731,7 @@ func TestHcovDashboardLifecycleRejectsAnotherUsersVM(t *testing.T) {
 		{name: "start", path: "/api/dashboard/start", verb: "start"},
 		{name: "restart", path: "/api/dashboard/restart", verb: "restart"},
 		{name: "stop", path: "/api/dashboard/shutdown", verb: "shutdown"},
+		{name: "force power off", path: "/api/dashboard/power-off", verb: "force power off"},
 		{name: "remove", path: "/api/dashboard/remove", verb: "remove"},
 	}
 	for _, tt := range tests {
@@ -782,8 +783,15 @@ func TestHcovAdminCanManageAnotherUsersVMLifecycle(t *testing.T) {
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/shutdown", form)
 	hcovAssertAction(t, rec, http.StatusOK, "VM shutdown requested.")
+	// This firmware-only guest cannot honor ACPI. Stop must leave it running.
+	if exists, active := hcovDomainState(t, domainName); !exists || !active {
+		t.Fatalf("graceful stop unexpectedly powered off VM %q: exists=%v active=%v", domainName, exists, active)
+	}
+
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/power-off", form)
+	hcovAssertAction(t, rec, http.StatusOK, "VM powered off.")
 	if exists, active := hcovDomainState(t, domainName); !exists || active {
-		t.Fatalf("admin stop did not deactivate VM %q: exists=%v active=%v", domainName, exists, active)
+		t.Fatalf("admin power off did not deactivate VM %q: exists=%v active=%v", domainName, exists, active)
 	}
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/remove", form)
@@ -823,11 +831,15 @@ func assertAdminVMLifecycleAuditRecords(
 		{action: audit.ActionVMStart, vm: domainName, result: audit.ResultSuccess},
 		{action: audit.ActionVMReboot, vm: domainName, result: audit.ResultSuccess},
 		{action: audit.ActionVMStop, vm: domainName, result: audit.ResultSuccess},
+		{action: audit.ActionVMStop, vm: domainName, result: audit.ResultSuccess},
 		{action: audit.ActionVMRemove, vm: domainName, result: audit.ResultSuccess},
 		{action: audit.ActionVMRemove, vm: missingName, result: audit.ResultFailure},
 	}
 	if len(records) != len(want) {
 		t.Fatalf("got %d administrator VM audit records, want %d: %#v", len(records), len(want), records)
+	}
+	if records[2]["operation"] != "shutdown" || records[3]["operation"] != "force_power_off" {
+		t.Errorf("stop operations are not distinct: graceful=%#v force=%#v", records[2], records[3])
 	}
 	for i, expected := range want {
 		record := records[i]
@@ -904,7 +916,7 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 }
 
 // TestHcovDashboardStartThenShutdown starts a protected domain through the
-// dashboard action route and force-stops it through the shutdown route.
+// dashboard, requests graceful shutdown, then explicitly powers it off.
 func TestHcovDashboardStartThenShutdown(t *testing.T) {
 	user := hcovUniqueName("hcovrun")
 	domainName, settings := hcovDefineProtectedDomain(t, user, "run")
@@ -922,6 +934,15 @@ func TestHcovDashboardStartThenShutdown(t *testing.T) {
 
 	rec = hcovPostForm(t, router, cookie, "/api/dashboard/shutdown", nameForm)
 	hcovAssertAction(t, rec, http.StatusOK, "VM shutdown requested.")
+	if exists, active := hcovDomainState(t, domainName); !exists || !active {
+		t.Fatalf("graceful stop unexpectedly powered off firmware-only VM: exists=%v active=%v", exists, active)
+	}
+
+	rec = hcovPostForm(t, router, cookie, "/api/dashboard/power-off", nameForm)
+	hcovAssertAction(t, rec, http.StatusOK, "VM powered off.")
+	if exists, active := hcovDomainState(t, domainName); !exists || active {
+		t.Fatalf("force power off did not stop VM: exists=%v active=%v", exists, active)
+	}
 }
 
 func TestHcovDashboardStartRejectsUnprotectedDomain(t *testing.T) {

@@ -31,6 +31,9 @@ func StartExistingVM(name string) error {
 		_ = dom.Free()
 	}()
 
+	if err := ensureVMNotDeleting(dom); err != nil {
+		return err
+	}
 	if err := validateDomainSecurity(conn, dom); err != nil {
 		return err
 	}
@@ -59,42 +62,31 @@ func StartExistingVM(name string) error {
 // the domain stops (the auto-shutdown sweeper) escalate to ShutdownVM after a
 // grace period. Requesting shutdown of an already stopped domain is a no-op.
 func GracefulShutdownVM(name string) error {
-	conn, err := connectLibvirt()
-	if err != nil {
-		return fmt.Errorf("connect libvirt: %w", err)
-	}
-	defer func() {
-		_, _ = conn.Close()
-	}()
-
-	dom, err := conn.LookupDomainByName(name)
-	if err != nil {
-		return fmt.Errorf("lookup domain %s: %w", name, err)
-	}
-	defer func() {
-		_ = dom.Free()
-	}()
-
-	active, err := dom.IsActive()
-	if err != nil {
-		return fmt.Errorf("check domain active %s: %w", name, err)
-	}
-	if !active {
-		return nil
-	}
-	// ACPI is requested explicitly: gateway VMs carry no qemu-guest-agent
-	// channel (see domain.go), so pinning the method keeps the behavior
-	// independent of libvirt's default-mode heuristics.
-	if err := dom.ShutdownFlags(libvirt.DOMAIN_SHUTDOWN_ACPI_POWER_BTN); err != nil {
-		return fmt.Errorf("graceful shutdown domain %s: %w", name, err)
-	}
-	return nil
+	unlockName := vmNameLocks.Lock(name)
+	defer unlockName()
+	return gracefulShutdownVM(name)
 }
 
 // ShutdownVM immediately stops an active domain through libvirt Destroy, without
 // waiting for the guest OS to shut down. An inactive domain is left unchanged.
 // Callers must authorize the operation; use GracefulShutdownVM to request ACPI shutdown.
 func ShutdownVM(name string) error {
+	unlockName := vmNameLocks.Lock(name)
+	defer unlockName()
+	return shutdownVM(name)
+}
+
+// The private shutdown helpers require the VM lifecycle lock. The idle sweeper
+// holds it across its decision and shutdown request, so it uses these directly.
+func gracefulShutdownVM(name string) error {
+	return stopVM(name, false)
+}
+
+func shutdownVM(name string) error {
+	return stopVM(name, true)
+}
+
+func stopVM(name string, force bool) error {
 	conn, err := connectLibvirt()
 	if err != nil {
 		return fmt.Errorf("connect libvirt: %w", err)
@@ -111,6 +103,19 @@ func ShutdownVM(name string) error {
 		_ = dom.Free()
 	}()
 
+	if err := ensureVMNotDeleting(dom); err != nil {
+		return err
+	}
+	return stopDomain(dom, name, force)
+}
+
+type shutdownDomain interface {
+	IsActive() (bool, error)
+	ShutdownFlags(libvirt.DomainShutdownFlags) error
+	Destroy() error
+}
+
+func stopDomain(dom shutdownDomain, name string, force bool) error {
 	active, err := dom.IsActive()
 	if err != nil {
 		return fmt.Errorf("check domain active %s: %w", name, err)
@@ -118,8 +123,16 @@ func ShutdownVM(name string) error {
 	if !active {
 		return nil
 	}
-	if err := dom.Destroy(); err != nil {
-		return fmt.Errorf("force shutdown domain %s: %w", name, err)
+	if force {
+		if err := dom.Destroy(); err != nil {
+			return fmt.Errorf("force shutdown domain %s: %w", name, err)
+		}
+		return nil
+	}
+	// Gateway VMs have no guest-agent channel, so explicitly use the ACPI
+	// power button instead of libvirt's default shutdown heuristics.
+	if err := dom.ShutdownFlags(libvirt.DOMAIN_SHUTDOWN_ACPI_POWER_BTN); err != nil {
+		return fmt.Errorf("graceful shutdown domain %s: %w", name, err)
 	}
 	return nil
 }
@@ -149,6 +162,9 @@ func RestartVM(name string) error {
 		_ = dom.Free()
 	}()
 
+	if err := ensureVMNotDeleting(dom); err != nil {
+		return err
+	}
 	if err := validateDomainSecurity(conn, dom); err != nil {
 		return err
 	}

@@ -404,9 +404,18 @@ A successful login redirects to `/api/dashboard`, where you can:
 - Download an `.rdp` file (named after the VM, e.g. `alice-desktop.rdp`)
   preconfigured for the gateway.
 
-Manual shutdown immediately powers off the VM; save guest work before using
-it. The optional idle-shutdown policy requests a graceful guest shutdown first
-(see `VDI_AUTO_SHUTDOWN_HOURS`).
+**Stop** asks the guest to shut down gracefully through its ACPI power button.
+The request returns before shutdown completes; the VM stays running if the
+guest does not respond. **Force power off** immediately cuts power after a
+confirmation and can lose unsaved work or damage files. Use it when the guest
+cannot shut down normally. Manual Stop does not automatically escalate; the
+optional idle-shutdown policy has its own escalation timer (see
+`VDI_AUTO_SHUTDOWN_HOURS`).
+
+If **Remove** fails during storage or network cleanup, the VM remains listed
+with its ownership intact. Restore the failing dependency and retry Remove.
+Start and restart are refused once deletion has begun, including after a
+gateway restart, because some VM resources may already have been removed.
 
 The same `johndoe` / `dogood` credentials are exercised by the LDAP
 integration tests, so they are also the recommended local smoke-test account.
@@ -531,6 +540,7 @@ inline comments; put comments on their own lines.
 | `LDAP_AUTH_TIMEOUT`       | `10s` | Maximum total time for LDAP connection setup, TLS, bind, and search. Request cancellation also aborts authentication. Values `<=0` use the default. |
 | `LDAP_BASE_DN`            | `dc=glauth,dc=com`                                                                                               | LDAP search base.                                                                                 |
 | `LDAP_USER_FILTER`        | `(mail=%s)`                                                                                                      | LDAP search filter; `%s` is replaced with the submitted bare username plus `LDAP_USER_DOMAIN`.     |
+| `LDAP_USERNAME_ATTRIBUTE` | `mail` | Single-valued directory attribute providing the canonical gateway username. Accepts a bare name or a name with `LDAP_USER_DOMAIN`; the domain suffix is removed. Set to `userPrincipalName`, `sAMAccountName`, or `uid` when appropriate for your directory. |
 | `LDAP_USER_DOMAIN`        | `@example.com`                                                                                                   | Required domain suffix appended to every accepted username for LDAP bind and search. Login names containing `@` are rejected. |
 | `LDAP_REQUIRED_GROUPS`    | _(empty)_                                                                                                        | Groups a user must belong to (any one of them) for LDAP login. Bare group names may be `,`- or `;`-delimited; full group DNs must be `;`-delimited because DNs contain commas. Matched case-insensitively against the user's `memberOf` attribute (full DN or its first RDN value). Empty allows every authenticated user. |
 | `ADMIN_GROUP`             | _(empty)_                                                                                                        | Single LDAP group whose direct members receive administrator access at login. Accepts a bare name or full DN and matches `memberOf` case-insensitively. Empty disables administrator access. |
@@ -817,11 +827,31 @@ For local development, the bundled `glauth` container is configured in
 `testldap/default-config.cfg` and is reachable from the gateway container at
 `ldaps://127.0.0.1:389` (a host-loopback published port). For production, point
 `LDAP_URL` at your own directory and adjust `LDAP_BASE_DN`, `LDAP_USER_FILTER`,
-and `LDAP_USER_DOMAIN` to match.
+`LDAP_USERNAME_ATTRIBUTE`, and `LDAP_USER_DOMAIN` to match.
 Users must enter only their bare username (for example, `alice`). The gateway
 rejects domain-qualified input and always appends `LDAP_USER_DOMAIN` before the
 LDAP bind and search; an empty or malformed `LDAP_USER_DOMAIN` is therefore a
 startup error.
+
+After authentication, the gateway takes the account name from
+`LDAP_USERNAME_ATTRIBUTE` on the returned directory entry, preserving the
+directory's spelling. With the default `mail`, `alice@example.com` becomes
+`alice`. A login entered as `ALICE` that resolves to this entry therefore uses
+the same sessions, VM ownership, connection limit and VM quota as `alice`.
+For an AD filter such as `(userPrincipalName=%s)`, set
+`LDAP_USERNAME_ATTRIBUTE=userPrincipalName` (or `sAMAccountName` for a bare
+account name). The resulting bare name must identify one account uniquely
+across the search base: for example, `alice` and `alice@example.com` both
+produce `alice`. Missing, ambiguous, invalid or foreign-domain values reject login.
+
+**Upgrading existing ownership:** previous versions used the submitted login
+spelling as the VM owner. Before rollout, compare existing owner metadata with
+the canonical directory values. A VM whose owner differs remains visible to
+administrators but will not appear for the canonical user until an operator
+migrates its owner. Follow [the ownership migration procedure](docs/ldap-identity-migration.md).
+Keep the chosen identity attribute stable; changing it or renaming an account
+requires the same ownership review.
+
 Prefer `ldaps://` or `LDAP_STARTTLS=true`. Certificate verification is on by
 default; only set `LDAP_SKIP_TLS_VERIFY=true` as a stopgap for a directory
 whose CA chain is not yet trusted (the bundled glauth container uses a

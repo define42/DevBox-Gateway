@@ -577,6 +577,10 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 	registerAdminBaseImageRoutes(group, sessionManager, settings)
 	registerDashboardCreateRoute(group, sessionManager, settings)
 	registerDashboardRDPRoute(group, sessionManager, settings)
+	registerDashboardVMActions(group, sessionManager, settings)
+}
+
+func registerDashboardVMActions(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
 	for _, spec := range []dashboardVMActionSpec{
 		{
 			path:           "/dashboard/remove",
@@ -614,8 +618,18 @@ func registerAPI(api huma.API, sessionManager *session.Manager, settings *config
 			verb:           "shutdown",
 			auditAction:    audit.ActionVMStop,
 			auditOperation: "shutdown",
-			failureMessage: "Failed to shutdown VM.",
+			failureMessage: "Failed to request VM shutdown.",
 			successMessage: "VM shutdown requested.",
+			run:            virt.GracefulShutdownVM,
+		},
+		{
+			path:           "/dashboard/power-off",
+			action:         "dashboard force power off",
+			verb:           "force power off",
+			auditAction:    audit.ActionVMStop,
+			auditOperation: "force_power_off",
+			failureMessage: "Failed to power off VM.",
+			successMessage: "VM powered off.",
 			run:            virt.ShutdownVM,
 		},
 	} {
@@ -941,9 +955,14 @@ func registerDashboardVMActionRoute(group huma.API, sessionManager *session.Mana
 		if err := spec.run(name); err != nil {
 			auditVMAction(req, user, spec.auditAction, name, spec.auditOperation, audit.ResultFailure)
 			log.Printf("%s vm %q for user %q failed: %v", spec.verb, name, user.Name, err)
-			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
+			status, message := http.StatusInternalServerError, spec.failureMessage
+			if errors.Is(err, virt.ErrVMDeletionPending) {
+				status = http.StatusConflict
+				message = "VM deletion is pending. Retry removal before changing its power state."
+			}
+			dashboard.WriteJSON(w, status, dashboard.ActionResponse{
 				OK:    false,
-				Error: spec.failureMessage,
+				Error: message,
 			})
 			return
 		}
@@ -1000,15 +1019,10 @@ func authorizeDashboardVMAction(
 		return "", nil, false
 	}
 
-	nameParserUser := user.Name
-	if user.IsAdmin && scope == dashboardVMActionLifecycle {
-		// An administrator submits the inventory's exact full domain name. Do not
-		// interpret it as being in the administrator's own namespace: directory
-		// usernames may contain vmname.Separator, so a different owner's name can
-		// legitimately begin with the administrator's apparent prefix.
-		nameParserUser = ""
-	}
-	name, err := parseDashboardVMName(w, req, nameParserUser)
+	// Existing VM actions use the inventory's exact domain name. Its original
+	// owner prefix can differ after a directory identity migration; authorize
+	// against current metadata below instead of interpreting that prefix.
+	name, err := parseDashboardVMName(w, req)
 	if handleDashboardFormError(w, dashboardAction, err) {
 		auditFailedVMAction(req, user, auditAction, name, auditOperation)
 		return "", nil, false
@@ -1140,24 +1154,13 @@ func validateBaseImage(raw string, settings *config.Settings) (string, error) {
 	return "", fmt.Errorf("selected base image is not available")
 }
 
-func parseDashboardVMName(w http.ResponseWriter, req *http.Request, username string) (string, error) {
+func parseDashboardVMName(w http.ResponseWriter, req *http.Request) (string, error) {
 	if err := parseFormWithBodyLimit(w, req); err != nil {
 		return "", fmt.Errorf("%w: %w", errInvalidDashboardForm, err)
 	}
 	name := strings.TrimSpace(req.FormValue("vm_name"))
 	if name == "" {
 		return "", fmt.Errorf("vm name is required")
-	}
-	username = strings.TrimSpace(username)
-	if username != "" {
-		prefix := username + vmname.Separator
-		if suffix, ok := strings.CutPrefix(name, prefix); ok {
-			validatedSuffix, err := validateVMName(suffix)
-			if err != nil {
-				return "", err
-			}
-			return prefix + validatedSuffix, nil
-		}
 	}
 	if len(name) > maxVMNameFieldLen {
 		return "", fmt.Errorf("vm name is too long")

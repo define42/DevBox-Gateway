@@ -199,8 +199,8 @@ func StartAutoShutdownWorker(settings *config.Settings) (stop func()) {
 		lastUsed:            vmLastUsed,
 		loadLastUsed:        loadVMLastUsedFromMetadata,
 		persistLastUsed:     persistVMLastUsed,
-		requestShutdown:     GracefulShutdownVM,
-		forceShutdown:       ShutdownVM,
+		requestShutdown:     gracefulShutdownVM,
+		forceShutdown:       shutdownVM,
 		shutdownRequestedAt: make(map[string]time.Time),
 	}
 

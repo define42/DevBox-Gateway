@@ -394,6 +394,9 @@ func loadBootSettings() (*config.Settings, error) {
 	if err := config.ValidateLDAPUserDomain(settings); err != nil {
 		return nil, err
 	}
+	if err := config.ValidateLDAPUsernameAttribute(settings); err != nil {
+		return nil, err
+	}
 
 	// FRONT_DOMAIN is the shared hostname for the dashboard and RDP downloads.
 	if err := config.ValidateFrontDomain(settings); err != nil {

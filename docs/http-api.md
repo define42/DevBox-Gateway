@@ -43,7 +43,8 @@ See [session handling](../internal/session/session.go) and
 | POST | `/api/dashboard` | Session, same-origin | Create a VM using the fields below. Returns JSON or an opted-in NDJSON progress stream. |
 | POST | `/api/dashboard/start` | Owner or administrator, same-origin | Start the VM selected by `vm_name`. |
 | POST | `/api/dashboard/restart` | Owner or administrator, same-origin | Reboot the selected VM, or start it if shut off; field `vm_name`. |
-| POST | `/api/dashboard/shutdown` | Owner or administrator, same-origin | Force-stop the selected VM through libvirt's destroy operation; field `vm_name`. This does not wait for a graceful guest shutdown. |
+| POST | `/api/dashboard/shutdown` | Owner or administrator, same-origin | Request graceful ACPI shutdown of `vm_name`. Success means the request was accepted; it does not wait for the guest to stop or automatically force power off. |
+| POST | `/api/dashboard/power-off` | Owner or administrator, same-origin | Immediately power off `vm_name` through libvirt's destroy operation. This can lose unsaved work or damage files. The dashboard asks for confirmation before calling this route; API clients must obtain their own user confirmation. |
 | POST | `/api/dashboard/remove` | Owner or administrator, same-origin | Remove the selected VM and its managed volumes; field `vm_name`. |
 | POST | `/api/dashboard/rdp` | Owner, same-origin | Download an `.rdp` file for `vm_name`, containing a short-lived, single-use routing token bound to the session and client IP. Administrator status does not bypass ownership. |
 | GET | `/api/admin` | Administrator | Render the administrator dashboard. |
@@ -56,6 +57,12 @@ For existing VM actions, submit the full `name` returned by the inventory,
 including its owner prefix. Administrator lifecycle actions target an existing
 persistent libvirt domain. For creation, `vm_name` is only the hostname portion;
 the gateway adds the authenticated owner prefix.
+
+Once removal starts, the persistent definition and ownership remain until
+managed volume and network cleanup succeeds. If cleanup fails, the same owner
+or an administrator can retry `/api/dashboard/remove` after restoring the
+dependency. Power actions return `409` while deletion is pending; this
+state survives gateway restarts.
 
 Login failures normally render the HTML login form with an error and status
 `200`; rate limiting returns `429` with `Retry-After`. Do not treat status `200`

@@ -254,7 +254,7 @@ func TestGatewayHTTPSLifecycle(t *testing.T) {
 		t.Fatalf("expected display name %q, got %q", shortName, row.DisplayName)
 	}
 
-	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/shutdown", url.Values{
+	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/power-off", url.Values{
 		"vm_name": {fullName},
 	}, http.StatusOK)
 	waitForGatewayVMState(t, server, fullName, "shut off")
@@ -309,8 +309,8 @@ func assertGatewayLifecycleAuditRecords(t *testing.T, auditOutput *synchronizedL
 			t.Errorf("lifecycle audit record %d has vm %#v, want %q", i, record["vm"], fullName)
 		}
 	}
-	if records[2]["operation"] != "shutdown" {
-		t.Errorf("stop audit operation = %#v, want shutdown", records[2]["operation"])
+	if records[2]["operation"] != "force_power_off" {
+		t.Errorf("stop audit operation = %#v, want force_power_off", records[2]["operation"])
 	}
 	if records[4]["operation"] != "restart" {
 		t.Errorf("reboot audit operation = %#v, want restart", records[4]["operation"])

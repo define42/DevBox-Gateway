@@ -99,6 +99,17 @@ func mcovWriteBadConfigFile(t *testing.T) string {
 	return path
 }
 
+func TestLoadBootSettingsRejectsInvalidLDAPUsernameAttribute(t *testing.T) {
+	t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+	t.Setenv(config.LDAP_URL, "ldaps://ldap.example.com")
+	t.Setenv(config.LDAP_USER_DOMAIN, "@example.com")
+	t.Setenv(config.LDAP_USERNAME_ATTRIBUTE, "mail;binary")
+	settings, err := loadBootSettings()
+	if settings != nil || err == nil || !strings.Contains(err.Error(), config.LDAP_USERNAME_ATTRIBUTE) {
+		t.Fatalf("loadBootSettings() = %v, %v; want invalid LDAP attribute rejected at startup", settings, err)
+	}
+}
+
 func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 	requireSauronVSock(t)
 	mcovBootEnv(t)

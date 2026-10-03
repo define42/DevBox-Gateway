@@ -70,6 +70,45 @@ func TestValidateLDAPUserDomainRejectsNilSettings(t *testing.T) {
 	}
 }
 
+func TestValidateLDAPUsernameAttribute(t *testing.T) {
+	if err := ValidateLDAPUsernameAttribute(nil); err == nil {
+		t.Fatal("expected nil settings to be rejected")
+	}
+	tests := []struct {
+		name  string
+		value string
+		valid bool
+	}{
+		{name: "mail", value: "mail", valid: true},
+		{name: "upn", value: "userPrincipalName", valid: true},
+		{name: "account name", value: "sAMAccountName", valid: true},
+		{name: "hyphenated", value: "employee-login", valid: true},
+		{name: "numeric oid", value: "0.9.2342.19200300.100.1.1"},
+		{name: "empty"},
+		{name: "wildcard", value: "*"},
+		{name: "operational selector", value: "+"},
+		{name: "no attributes selector", value: "1.1"},
+		{name: "attribute option", value: "mail;binary"},
+		{name: "multiple attributes", value: "mail uid"},
+		{name: "filter injection", value: "mail)(uid=*"},
+		{name: "numeric descriptor", value: "123"},
+		{name: "oid leading zero", value: "1.02.3"},
+		{name: "leading hyphen", value: "-mail"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			settings := NewSettings(false)
+			if err := settings.OverwriteForTestString(LDAP_USERNAME_ATTRIBUTE, test.value); err != nil {
+				t.Fatal(err)
+			}
+			err := ValidateLDAPUsernameAttribute(settings)
+			if (err == nil) != test.valid {
+				t.Fatalf("ValidateLDAPUsernameAttribute(%q) = %v, valid=%t", test.value, err, test.valid)
+			}
+		})
+	}
+}
+
 func TestValidateFrontDomainAcceptsDefault(t *testing.T) {
 	// The default FRONT_DOMAIN is non-empty, so a freshly built settings object
 	// passes without any override.

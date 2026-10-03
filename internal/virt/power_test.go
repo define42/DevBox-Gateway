@@ -17,6 +17,8 @@ func TestPowerOperationsWaitForRemoval(t *testing.T) {
 	}{
 		{name: "start", run: StartExistingVM},
 		{name: "restart", run: RestartVM},
+		{name: "graceful shutdown", run: GracefulShutdownVM},
+		{name: "force power off", run: ShutdownVM},
 	}
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
@@ -42,8 +44,8 @@ func TestPowerOperationsWaitForRemoval(t *testing.T) {
 			if err := awaitVMLifecycleOperation(t, removed); err != nil {
 				t.Fatalf("remove VM: %v", err)
 			}
-			// Either operation may acquire the released mutex first. Starting
-			// before removal succeeds; starting after it finds no domain.
+			// Either operation may acquire the released mutex first. Power
+			// changes before removal succeed; afterward they find no domain.
 			if err := awaitVMLifecycleOperation(t, powered); err != nil && !errors.Is(err, libvirt.ERR_NO_DOMAIN) {
 				t.Fatalf("power operation after removal: %v", err)
 			}
@@ -97,4 +99,85 @@ func waitForVMLifecycleLock(t *testing.T, name string, want int, done <-chan err
 		case <-ticker.C:
 		}
 	}
+}
+
+func TestStopDomainGracefulRequestDoesNotForcePowerOff(t *testing.T) {
+	dom := &shutdownTestDomain{active: true}
+	if err := stopDomain(dom, "desktop", false); err != nil {
+		t.Fatal(err)
+	}
+	if !dom.active || dom.destroyCalls != 0 || dom.shutdownCalls != 1 {
+		t.Fatalf("graceful shutdown changed power state: %+v", dom)
+	}
+	if dom.flags != libvirt.DOMAIN_SHUTDOWN_ACPI_POWER_BTN {
+		t.Fatalf("shutdown flags = %v, want ACPI power button", dom.flags)
+	}
+	if err := stopDomain(dom, "desktop", true); err != nil {
+		t.Fatal(err)
+	}
+	if dom.active || dom.destroyCalls != 1 || dom.shutdownCalls != 1 {
+		t.Fatalf("force shutdown did not immediately power off: %+v", dom)
+	}
+}
+
+func TestStopDomainStoppedGuestIsUnchanged(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		dom := &shutdownTestDomain{}
+		if err := stopDomain(dom, "desktop", force); err != nil {
+			t.Fatal(err)
+		}
+		if dom.shutdownCalls != 0 || dom.destroyCalls != 0 {
+			t.Fatalf("stopped guest received power action (force=%v): %+v", force, dom)
+		}
+	}
+}
+
+func TestStopDomainPreservesErrorsWithoutEscalation(t *testing.T) {
+	failure := errors.New("libvirt unavailable")
+	for _, tt := range []struct {
+		name  string
+		force bool
+		dom   shutdownTestDomain
+	}{
+		{name: "state", dom: shutdownTestDomain{stateErr: failure}},
+		{name: "ACPI", dom: shutdownTestDomain{active: true, shutdownErr: failure}},
+		{name: "destroy", force: true, dom: shutdownTestDomain{active: true, destroyErr: failure}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := stopDomain(&tt.dom, "desktop", tt.force); !errors.Is(err, failure) {
+				t.Fatalf("shutdown error = %v, want underlying libvirt failure", err)
+			}
+			if !tt.force && tt.dom.destroyCalls != 0 {
+				t.Fatal("failed graceful request escalated to force power off")
+			}
+		})
+	}
+}
+
+type shutdownTestDomain struct {
+	active        bool
+	stateErr      error
+	shutdownErr   error
+	destroyErr    error
+	shutdownCalls int
+	destroyCalls  int
+	flags         libvirt.DomainShutdownFlags
+}
+
+func (d *shutdownTestDomain) IsActive() (bool, error) {
+	return d.active, d.stateErr
+}
+
+func (d *shutdownTestDomain) ShutdownFlags(flags libvirt.DomainShutdownFlags) error {
+	d.shutdownCalls++
+	d.flags = flags
+	return d.shutdownErr
+}
+
+func (d *shutdownTestDomain) Destroy() error {
+	d.destroyCalls++
+	if d.destroyErr == nil {
+		d.active = false
+	}
+	return d.destroyErr
 }

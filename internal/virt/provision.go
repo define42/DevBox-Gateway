@@ -332,10 +332,10 @@ func provisionVMResources(ctx context.Context, conn *libvirt.Connect, settings *
 	return ctx.Err()
 }
 
-// RemoveVM stops and undefines the named domain, releases its network reservation,
-// and removes its disk and seed ISO from the configured storage pool. Libvirt
-// owns cleanup of console resources. Errors can leave cleanup partially complete;
-// callers must authorize the operation before invoking it.
+// RemoveVM marks and stops the named domain, removes its disk, seed ISO and
+// network reservation, then undefines it. Failed cleanup preserves the domain,
+// its owner and a persistent deletion marker so authorized callers can retry
+// without allowing a partly removed VM to start. Callers must authorize first.
 func RemoveVM(name string, settings *config.Settings) error {
 	// Take the per-name lock so a remove and a create of the same VDI name
 	// cannot interleave (see vmNameLocks): the destroy and volume deletion below
@@ -351,17 +351,29 @@ func RemoveVM(name string, settings *config.Settings) error {
 		_, _ = conn.Close()
 	}()
 
-	poolName, _ := storage.PoolConfig(settings)
+	dom, err := lookupRemovalDomain(conn, name)
+	if err != nil {
+		return err
+	}
+	if dom != nil {
+		defer func() { _ = dom.Free() }()
+		if err := prepareDomainDeletion(dom); err != nil {
+			return err
+		}
+	}
 
-	if err := DestroyExistingDomain(conn, name); err != nil {
+	poolName, _ := storage.PoolConfig(settings)
+	seedISO := name + "_seed.iso"
+	if err := storage.RemoveVolumes(conn, poolName, name, seedISO); err != nil {
 		return err
 	}
 	if err := releaseNetworkIdentity(conn, name); err != nil {
 		return fmt.Errorf("release VM network identity: %w", err)
 	}
-	seedISO := name + "_seed.iso"
-	if err := storage.RemoveVolumes(conn, poolName, name, seedISO); err != nil {
-		return err
+	if dom != nil {
+		if err := dom.Undefine(); err != nil {
+			return fmt.Errorf("undefine deleting VM: %w", err)
+		}
 	}
 	vmLastUsed.remove(name)
 	// The VNC socket and serial PTY are libvirt-managed and removed with the

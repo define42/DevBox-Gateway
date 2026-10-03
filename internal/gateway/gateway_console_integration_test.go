@@ -183,7 +183,7 @@ func TestGatewayConsoleAndVNCFlows(t *testing.T) {
 	assertGatewayWebsocketDialOrPreparation(t, server, "/api/dashboard/console/"+fullName+"/ws", "Failed to open serial terminal.")
 	assertGatewayWebsocketDialOrPreparation(t, server, "/api/dashboard/vnc/"+fullName+"/ws", "Failed to open VNC session.")
 
-	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/shutdown", url.Values{
+	assertGatewayStatus(t, server.client, http.MethodPost, server.baseURL+"/api/dashboard/power-off", url.Values{
 		"vm_name": {fullName},
 	}, http.StatusOK)
 	waitForGatewayVMState(t, server, fullName, "shut off")

@@ -459,19 +459,18 @@ func TestParseDashboardVMName(t *testing.T) {
 		vmname.Separator +
 		strings.Repeat("b", vmname.MaxHostnameLength)
 	tests := []struct {
-		name     string
-		username string
-		vmName   string
-		want     string
-		wantErr  bool
+		name    string
+		vmName  string
+		want    string
+		wantErr bool
 	}{
-		{name: "valid owned vm name", username: "alice", vmName: "alice.desktop", want: "alice.desktop"},
-		{name: "valid owned vm name with email prefix", username: "alice@example.com", vmName: "alice@example.com.desktop", want: "alice@example.com.desktop"},
-		{name: "owned suffix too long", username: "alice", vmName: "alice." + strings.Repeat("x", maxVMNameLength+1), wantErr: true},
-		{name: "legacy unprefixed name", username: "alice", vmName: "legacy-imported-vm", want: "legacy-imported-vm"},
-		{name: "maximum canonical name for administrator", username: "", vmName: maxFullName, want: maxFullName},
-		{name: "empty", username: "alice", vmName: "", wantErr: true},
-		{name: "too long", username: "alice", vmName: strings.Repeat("x", maxVMNameFieldLen+1), wantErr: true},
+		{name: "valid owned vm name", vmName: "alice.desktop", want: "alice.desktop"},
+		{name: "valid owned vm name with email prefix", vmName: "alice@example.com.desktop", want: "alice@example.com.desktop"},
+		{name: "migrated dotted owner", vmName: "alice.ops.desktop", want: "alice.ops.desktop"},
+		{name: "legacy unprefixed name", vmName: "legacy-imported-vm", want: "legacy-imported-vm"},
+		{name: "maximum canonical name", vmName: maxFullName, want: maxFullName},
+		{name: "empty", vmName: "", wantErr: true},
+		{name: "too long", vmName: strings.Repeat("x", maxVMNameFieldLen+1), wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -480,7 +479,7 @@ func TestParseDashboardVMName(t *testing.T) {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rec := httptest.NewRecorder()
 
-			got, err := parseDashboardVMName(rec, req, tc.username)
+			got, err := parseDashboardVMName(rec, req)
 			if tc.wantErr && err == nil {
 				t.Fatal("expected error")
 			}
@@ -500,7 +499,7 @@ func TestParseDashboardVMNameRejectsOversizedForm(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
-	_, err := parseDashboardVMName(rec, req, "alice")
+	_, err := parseDashboardVMName(rec, req)
 	if !errors.Is(err, errInvalidDashboardForm) {
 		t.Fatalf("expected invalid dashboard form error, got %v", err)
 	}
@@ -1119,6 +1118,7 @@ func TestDashboardMutationEndpointsRejectMissingVMName(t *testing.T) {
 		"/api/dashboard/start",
 		"/api/dashboard/restart",
 		"/api/dashboard/shutdown",
+		"/api/dashboard/power-off",
 		"/api/dashboard/remove",
 	}
 

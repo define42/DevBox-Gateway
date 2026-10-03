@@ -230,6 +230,7 @@ func (s *Settings) setAuthDefaults() {
 	s.SetDuration(LDAP_AUTH_TIMEOUT, "Timeout for the complete LDAP authentication attempt; <=0 uses the 10s default", DefaultLDAPAuthTimeout)
 	s.SetString(LDAP_BASE_DN, "LDAP base DN", "dc=glauth,dc=com")
 	s.SetString(LDAP_USER_FILTER, "LDAP user filter", "(mail=%s)")
+	s.SetString(LDAP_USERNAME_ATTRIBUTE, "Single-valued LDAP attribute containing the canonical gateway username; a bare name or name@LDAP_USER_DOMAIN. Use mail, userPrincipalName, uid, or sAMAccountName as appropriate for the directory", "mail")
 	s.SetString(LDAP_REQUIRED_GROUPS, "List of groups (bare names or full DNs, DNs must be ';'-delimited, bare names may use ',' too); when non-empty, LDAP login also requires the user's memberOf attribute to contain at least one listed group", "")
 	s.SetString(ADMIN_GROUP, "LDAP group (bare name or full DN) whose direct members receive administrator access at login; empty disables administrator access", "")
 	s.SetString(LDAP_USER_DOMAIN, "Required LDAP domain suffix appended to every bare login username", "@example.com")
@@ -631,6 +632,7 @@ const (
 	LDAP_AUTH_TIMEOUT                 = "LDAP_AUTH_TIMEOUT"
 	LDAP_BASE_DN                      = "LDAP_BASE_DN"
 	LDAP_USER_FILTER                  = "LDAP_USER_FILTER"
+	LDAP_USERNAME_ATTRIBUTE           = "LDAP_USERNAME_ATTRIBUTE"
 	LDAP_REQUIRED_GROUPS              = "LDAP_REQUIRED_GROUPS"
 	LDAP_USER_DOMAIN                  = "LDAP_USER_DOMAIN"
 	LDAP_STARTTLS                     = "LDAP_STARTTLS"
