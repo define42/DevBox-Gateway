@@ -2,7 +2,6 @@ package virt
 
 import (
 	"context"
-	"crypto/hmac"
 	"fmt"
 	"log"
 	"maps"
@@ -11,8 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/define42/devbox-gateway/internal/hash"
 
 	"libvirt.org/go/libvirt"
 )
@@ -188,19 +185,6 @@ func (s *Inventory) VMIP(vmName string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("vm %s not found", vmName)
-}
-
-// ResolveVMNameByLabel returns the real VM name whose opaque SNI routing label
-// (HMAC-SHA256 of the name, keyed by secret) matches label. Because the label
-// is one-way, routing depends on the cached VM list being populated.
-func (s *Inventory) ResolveVMNameByLabel(secret []byte, label string) (string, bool) {
-	want := []byte(label)
-	for _, vm := range s.snapshotVMs() {
-		if hmac.Equal([]byte(hash.RoutingLabel(secret, vm.Name)), want) {
-			return vm.Name, true
-		}
-	}
-	return "", false
 }
 
 func (s *Inventory) snapshotVMs() []VMInfo {

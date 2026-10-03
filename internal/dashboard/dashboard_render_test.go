@@ -118,13 +118,20 @@ func TestHTMLPathValid(t *testing.T) {
 }
 
 func TestGenerateRDPContent(t *testing.T) {
-	got := GenerateRDPContent("vm1.example.test", "alice", 443)
+	const routingToken = "0123456789abcdef0123456789abcdef"
+	got := GenerateRDPContent(
+		"desktop.example.test",
+		"alice",
+		routingToken,
+		443,
+	)
 	// The downloadable .rdp body is the raw text (no data: URI wrapper).
 	if strings.HasPrefix(got, "data:") {
 		t.Fatalf("expected raw .rdp content, got data URI: %q", got)
 	}
 	for _, want := range []string{
-		"full address:s:vm1.example.test:443",
+		"full address:s:desktop.example.test:443",
+		"loadbalanceinfo:s:" + routingToken + "\n",
 		"username:s:alice",
 		"prompt for credentials:i:1",
 		"administrative session:i:1",

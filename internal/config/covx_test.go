@@ -35,73 +35,9 @@ func TestCovxLoadConfigFileSetenvError(t *testing.T) {
 	}
 }
 
-func TestCovxEnsureSNIHashSecretReadError(t *testing.T) {
-	// Point the data root at a regular file: reading <root>/sni_hash.secret
-	// then fails with ENOTDIR, which is not IsNotExist.
-	rootAsFile := filepath.Join(t.TempDir(), "data-root")
-	if err := os.WriteFile(rootAsFile, []byte("x"), 0o600); err != nil {
-		t.Fatalf("write data root file: %v", err)
-	}
-
-	t.Setenv(DATA_ROOT_DIR, rootAsFile)
-	t.Setenv(SNI_HASH_SECRET, "")
-	s := NewSettings(false)
-
-	err := EnsureSNIHashSecret(s)
-	if err == nil || !strings.Contains(err.Error(), "read sni hash secret") {
-		t.Fatalf("expected a secret read error, got %v", err)
-	}
-}
-
-func TestCovxEnsureSNIHashSecretMissingSetting(t *testing.T) {
-	dataRoot := t.TempDir()
-	s := &Settings{m: map[string]*Setting{
-		DATA_ROOT_DIR: {Kind: KindString, S: dataRoot, Raw: dataRoot},
-	}}
-
-	err := EnsureSNIHashSecret(s)
-	var notFound *SettingNotFoundError
-	if !errors.As(err, &notFound) {
-		t.Fatalf("expected SettingNotFoundError when SNI_HASH_SECRET is unregistered, got %v", err)
-	}
-	if notFound.ID != SNI_HASH_SECRET {
-		t.Fatalf("expected the missing setting to be %s, got %s", SNI_HASH_SECRET, notFound.ID)
-	}
-}
-
-func TestCovxLoadOrCreateSNIHashSecretMkdirError(t *testing.T) {
-	// A dangling symlink as data root: the secret read reports IsNotExist, but
-	// MkdirAll then fails because the name exists as a non-directory.
-	base := t.TempDir()
-	dataRoot := filepath.Join(base, "root-link")
-	if err := os.Symlink(filepath.Join(base, "missing-target"), dataRoot); err != nil {
-		t.Fatalf("symlink data root: %v", err)
-	}
-
-	_, err := loadOrCreateSNIHashSecret(dataRoot)
-	if err == nil || !strings.Contains(err.Error(), "create data root") {
-		t.Fatalf("expected a data root creation error, got %v", err)
-	}
-}
-
-func TestCovxLoadOrCreateSNIHashSecretWriteError(t *testing.T) {
-	// The secret file is a symlink dangling into a missing directory: reading
-	// reports IsNotExist and MkdirAll succeeds, but creating the file fails.
-	dataRoot := t.TempDir()
-	link := filepath.Join(dataRoot, sniHashSecretFile)
-	if err := os.Symlink(filepath.Join(dataRoot, "missing-dir", "secret"), link); err != nil {
-		t.Fatalf("symlink secret file: %v", err)
-	}
-
-	_, err := loadOrCreateSNIHashSecret(dataRoot)
-	if err == nil || !strings.Contains(err.Error(), "persist sni hash secret") {
-		t.Fatalf("expected a secret persist error, got %v", err)
-	}
-}
-
 func TestCovxNewSettingsPrintMasksSecrets(t *testing.T) {
 	const secretValue = "covx-secret-value"
-	t.Setenv(SNI_HASH_SECRET, secretValue)
+	t.Setenv(SPLUNK_HEC_TOKEN, secretValue)
 
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
@@ -122,7 +58,7 @@ func TestCovxNewSettingsPrintMasksSecrets(t *testing.T) {
 	os.Stdout = oldStdout
 	out := <-outCh
 
-	if got := s.Get(SNI_HASH_SECRET); got != secretValue {
+	if got := s.Get(SPLUNK_HEC_TOKEN); got != secretValue {
 		t.Fatalf("expected the real secret from Get, got %q", got)
 	}
 	if !strings.Contains(out, "***") {

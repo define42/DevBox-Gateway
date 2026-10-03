@@ -123,9 +123,9 @@ func TestHandleRejectsImpostorBackendBeforeForwardingCredentials(t *testing.T) {
 	received := startImpostorBackend(t, backendHost, impostorCertificate)
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	manager := session.New()
-	issueUserSession(t, manager, "alice", "192.0.2.187:5000", name)
+	tokens := issueUserSession(t, manager, "alice", "192.0.2.187:5000", name)
 	client, done := startHandleTestConnection(t, frontTLS, manager, settings, "192.0.2.187", trustedIdentity)
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	writeDone := make(chan struct{})
 	go func() {
 		defer close(writeDone)

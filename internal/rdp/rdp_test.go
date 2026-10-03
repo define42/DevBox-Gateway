@@ -61,7 +61,7 @@ func TestHandleRejectsSNIMismatch(t *testing.T) {
 	InitLogging()
 	t.Setenv(config.FRONT_DOMAIN, "example.test")
 	settings := config.NewSettings(false)
-	frontTLS, err := cert.NewTLSManager(settings, nil)
+	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestHandleRejectsSNIMismatch(t *testing.T) {
 		close(done)
 	}()
 
-	if err := writeTPKT(client, buildClientCRQ(x224.PROTOCOL_SSL)); err != nil {
+	if err := writeTPKT(client, buildTokenClientCRQ("0123456789abcdef0123456789abcdef")); err != nil {
 		t.Fatalf("write CRQ: %v", err)
 	}
 

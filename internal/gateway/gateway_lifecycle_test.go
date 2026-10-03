@@ -41,11 +41,11 @@ type gatewayTestServer struct {
 func startGatewayTestServer(t *testing.T, settings *config.Settings) gatewayTestServer {
 	t.Helper()
 
-	vmInventory := virt.NewInventory()
+	virt.NewInventory()
 
 	sessionManager := session.New()
 	mux := NewHandler(sessionManager, settings)
-	frontTLS, err := cert.NewTLSManager(settings, vmInventory.VMNames)
+	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}

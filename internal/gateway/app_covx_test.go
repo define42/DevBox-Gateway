@@ -63,7 +63,6 @@ func mcovBootEnv(t *testing.T) string {
 	t.Setenv(config.KEY_FILE, "")
 	t.Setenv(config.ACME_ENABLE, "false")
 	t.Setenv(config.FRONT_DOMAIN, "mcov.gateway.test")
-	t.Setenv(config.SNI_HASH_SECRET, "")
 	t.Setenv(config.AUDIT_LOG_FILE, filepath.Join(t.TempDir(), "audit.jsonl"))
 	t.Setenv(config.SAURON_EVENT_LOG_FILE, filepath.Join(t.TempDir(), "sauron.jsonl"))
 	t.Setenv(config.SAURON_SPLUNK_HEC_ENDPOINT, "")
@@ -291,21 +290,6 @@ func TestMcovBootGatewayRejectsRemovedSSHTunnelMode(t *testing.T) {
 	}
 }
 
-func TestMcovBootGatewaySNIHashSecretError(t *testing.T) {
-	root := mcovBootEnv(t)
-
-	// A directory at the persisted secret path makes reading it fail with a
-	// non-NotExist error after virt initialization has already succeeded.
-	if err := os.Mkdir(filepath.Join(root, "sni_hash.secret"), 0o755); err != nil {
-		t.Fatalf("create secret blocker dir: %v", err)
-	}
-
-	_, err := bootGateway()
-	if err == nil || !strings.Contains(err.Error(), "failed to resolve sni hash secret") {
-		t.Fatalf("expected SNI hash secret error, got %v", err)
-	}
-}
-
 func TestMcovBootGatewayListenError(t *testing.T) {
 	requireSauronVSock(t)
 	mcovBootEnv(t)
@@ -390,6 +374,7 @@ func TestMcovRunReturnsOneOnBootFailure(t *testing.T) {
 }
 
 func TestMcovRunReturnsZeroOnCanceledContext(t *testing.T) {
+	requireSauronVSock(t)
 	mcovBootEnv(t)
 
 	ctx, cancel := context.WithCancel(context.Background())

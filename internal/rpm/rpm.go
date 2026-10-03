@@ -14,7 +14,7 @@ import (
 const (
 	packageName = "devbox-gateway"
 	summary     = "DevBox Gateway for libvirt-backed development desktops"
-	description = "DevBox Gateway publishes libvirt-managed development desktops over a single HTTPS port. It terminates TLS from RDP clients, routes each connection to a backend VM by TLS SNI, and re-establishes TLS to that backend. The same port also serves an LDAP-authenticated web dashboard for self-service VM lifecycle management, in-browser serial and noVNC consoles, and downloadable .rdp connection files."
+	description = "DevBox Gateway publishes libvirt-managed development desktops over a single hostname and HTTPS port. It terminates TLS from RDP clients, routes each connection to a backend VM by a short-lived, single-use random token, and re-establishes TLS to that backend. The same hostname and port also serve an LDAP-authenticated web dashboard for self-service VM lifecycle management, in-browser serial and noVNC consoles, and downloadable .rdp connection files."
 	url         = "https://github.com/define42/devbox-gateway"
 
 	confDestination = "/etc/devbox-gateway/devbox-gateway.conf"
@@ -202,7 +202,7 @@ func relations(names []string) (requires rpmpack.Relations, err error) {
 
 // packageFiles returns the install manifest. The config file is installed 0640
 // (root read/write, no group or world read) because it can hold secrets such as
-// SNI_HASH_SECRET. Combined with the root:root
+// SPLUNK_HEC_TOKEN. Combined with the root:root
 // owner set in addFiles, that keeps the file readable only by root. The
 // remaining files carry no secrets and use the conventional world-readable
 // modes. The LICENSE file is bundled when present; packaging tolerates its

@@ -12,32 +12,6 @@ import (
 	"github.com/tomatome/grdp/protocol/x224"
 )
 
-func TestGetSubdomain(t *testing.T) {
-	tests := []struct {
-		host, root string
-		wantSub    string
-		wantOK     bool
-	}{
-		{"vm1.example.com", "example.com", "vm1", true},
-		{"deep.sub.example.com", "example.com", "deep.sub", true},
-		{"example.com", "example.com", "", false},
-		{"other.test", "example.com", "", false},
-		{"", "example.com", "", false},
-		{".example.com", "example.com", "", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.host+"/"+tc.root, func(t *testing.T) {
-			sub, ok := getSubdomain(tc.host, tc.root)
-			if ok != tc.wantOK {
-				t.Fatalf("getSubdomain(%q, %q) ok=%v, want %v", tc.host, tc.root, ok, tc.wantOK)
-			}
-			if sub != tc.wantSub {
-				t.Fatalf("getSubdomain(%q, %q) = %q, want %q", tc.host, tc.root, sub, tc.wantSub)
-			}
-		})
-	}
-}
-
 func TestTLSVersionLabel(t *testing.T) {
 	tests := []struct {
 		version uint16

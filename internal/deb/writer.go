@@ -96,7 +96,7 @@ func buildDirectoryEntries(entries []tarEntry, modTime time.Time) []tarEntry {
 
 // packageFiles returns the DevBox Gateway install manifest. The config file is
 // installed 0640 (root read/write, no group or world read) because it can hold
-// secrets such as SNI_HASH_SECRET. The data archive owns every entry as
+// secrets such as SPLUNK_HEC_TOKEN. The data archive owns every entry as
 // root:root (uid/gid 0), so 0640 keeps the file readable only by root. The
 // other files carry no secrets and use the conventional world-readable modes.
 func packageFiles(o Options) ([]File, error) {

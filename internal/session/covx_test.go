@@ -71,9 +71,6 @@ func TestCovxStoreNotIterable(t *testing.T) {
 	if err := m.DestroyAllSessionsForUser("alice"); err == nil {
 		t.Fatal("expected an error destroying sessions on a non-iterable store")
 	}
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.1", "vm1") {
-		t.Fatal("expected no grant consumption on a non-iterable store")
-	}
 }
 
 func TestCovxStoreIterationError(t *testing.T) {
@@ -86,9 +83,6 @@ func TestCovxStoreIterationError(t *testing.T) {
 	}
 	if err := m.DestroyAllSessionsForUser("alice"); !errors.Is(err, allErr) {
 		t.Fatalf("expected the iteration error to surface, got %v", err)
-	}
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.1", "vm1") {
-		t.Fatal("expected no grant consumption when iteration fails")
 	}
 }
 
@@ -129,28 +123,24 @@ func TestCovxDestroyAllSessionsForUserDeleteError(t *testing.T) {
 }
 
 func TestCovxConsumeStoredGrantRejectsInvalidStoredData(t *testing.T) {
-	m := New()
-	now := time.Now()
-
-	if err := m.Store.Commit("tok", []byte("not-a-gob-session"), now.Add(time.Hour)); err != nil {
-		t.Fatalf("commit invalid session: %v", err)
-	}
-	if _, consumed := m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1"); consumed {
-		t.Fatal("expected undecodable session data to be rejected")
-	}
-
-	deadline := now.Add(time.Hour)
-	userless, err := m.Codec.Encode(deadline, map[string]interface{}{
-		sessionKey: sessionData{ClientIP: "192.0.2.1"},
-	})
-	if err != nil {
-		t.Fatalf("encode userless session: %v", err)
-	}
-	if err := m.Store.Commit("tok", userless, deadline); err != nil {
-		t.Fatalf("commit userless session: %v", err)
-	}
-	if _, consumed := m.consumeStoredGrant("tok", "alice", "192.0.2.1", "vm1"); consumed {
-		t.Fatal("expected a session without a user to be rejected")
+	for _, userless := range []bool{false, true} {
+		m := New()
+		grant := commitTestRDPGrant(t, m, "alice")
+		deadline := time.Now().Add(time.Hour)
+		data := []byte("not-a-gob-session")
+		if userless {
+			var err error
+			data, err = m.Codec.Encode(deadline, map[string]interface{}{sessionKey: sessionData{ClientIP: "192.0.2.10"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := m.Store.Commit(grant.sessionToken, data, deadline); err != nil {
+			t.Fatal(err)
+		}
+		if m.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop") {
+			t.Fatal("invalid session authorized RDP")
+		}
 	}
 }
 
@@ -175,41 +165,33 @@ func TestCovxUserHasActiveSessionFromIPSkipsUserlessSession(t *testing.T) {
 
 func TestCovxGrantRDPConnectPrunesExpiredGrants(t *testing.T) {
 	m := New()
-	user := covxUser(t, "nora")
-	cookie := issueSession(t, m, user, covxRemoteAddr)
-
-	withLoadedSession(t, m, covxRemoteAddr, cookie, func(r *http.Request) {
-		sess, ok := m.Get(r.Context(), sessionKey).(sessionData)
-		if !ok {
-			t.Fatal("expected an authenticated session")
-		}
-		sess.RDPConnectGrants = map[string]time.Time{
-			"kept-vm":  time.Now().Add(time.Minute),
-			"stale-vm": time.Now().Add(-time.Minute),
-		}
-		m.Put(r.Context(), sessionKey, sess)
-	})
-	withLoadedSession(t, m, covxRemoteAddr, cookie, func(r *http.Request) {
-		if err := m.GrantRDPConnect(r.Context(), "new-vm"); err != nil {
-			t.Fatalf("grant rdp connect: %v", err)
-		}
-	})
-
+	cookie := issueSession(t, m, covxUser(t, "nora"), covxRemoteAddr)
+	kept := grantCookieRDPToken(t, m, cookie, "kept-vm")
+	stale := grantCookieRDPToken(t, m, cookie, "stale-vm")
+	updateStoredRDPGrant(t, m, cookie.Value, "stale-vm", func(grant *rdpConnectGrant) { grant.ExpiresAt = time.Now().Add(-time.Minute) })
+	verifier, _, _ := rdpTokenLookup(stale, "192.0.2.99")
+	ref := m.rdpTokens[verifier]
+	ref.expiresAt = time.Now().Add(-time.Minute)
+	m.rdpTokens[verifier] = ref
+	fresh := grantCookieRDPToken(t, m, cookie, "new-vm")
 	stored, ok := m.getSessionFromUserName("nora")
 	if !ok {
-		t.Fatal("expected the authenticated session to remain stored")
+		t.Fatal("session missing")
 	}
 	if _, exists := stored.RDPConnectGrants["stale-vm"]; exists {
-		t.Fatal("expected the expired grant to be removed from storage")
+		t.Fatal("expired stored grant not pruned")
 	}
-	if m.ConsumeRDPConnectGrant("nora", "192.0.2.99", "stale-vm") {
-		t.Fatal("expected the expired grant to be pruned by a new grant")
+	if _, exists := m.rdpTokens[verifier]; exists {
+		t.Fatal("expired index not pruned")
 	}
-	if !m.ConsumeRDPConnectGrant("nora", "192.0.2.99", "kept-vm") {
-		t.Fatal("expected the unexpired grant to be carried over")
+	if m.ConsumeRDPConnectGrant(stale, "nora", "192.0.2.99", "stale-vm") {
+		t.Fatal("expired token authorized")
 	}
-	if !m.ConsumeRDPConnectGrant("nora", "192.0.2.99", "new-vm") {
-		t.Fatal("expected the freshly issued grant to authorize")
+	if !m.ConsumeRDPConnectGrant(kept, "nora", "192.0.2.99", "kept-vm") {
+		t.Fatal("unexpired token lost")
+	}
+	if !m.ConsumeRDPConnectGrant(fresh, "nora", "192.0.2.99", "new-vm") {
+		t.Fatal("new token unavailable")
 	}
 }
 

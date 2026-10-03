@@ -34,13 +34,9 @@ type sessionData struct {
 	// the cleartext password itself is never retained. The hash format is
 	// exactly what cloud-init expects, so the cleartext is never needed again.
 	LoginPasswordHash string
-	// RDPConnectGrants records, per VM name, the instant until which an RDP
-	// connection for that VM is authorized from this session's client IP. A
-	// grant is created when the user clicks "Connect" (downloads the .rdp),
-	// expires after rdpConnectWindow, and is single-use, so a standing dashboard
-	// session no longer implicitly authorizes RDP — see ConsumeRDPConnectGrant
-	// and the RDP front handler's authorizeRDPAccess.
-	RDPConnectGrants map[string]time.Time
+	// RDPConnectGrants stores one unexpired token verifier per VM. The random
+	// token itself is returned only to the downloading client.
+	RDPConnectGrants map[string]rdpConnectGrant
 }
 
 const sessionKey = "session"
@@ -74,6 +70,9 @@ type Manager struct {
 	// renewal. Store methods lock individually, so a read-modify-write needs
 	// this additional lock to avoid recreating a token revoked between calls.
 	sessionsMu sync.Mutex
+	// rdpTokens is a direct lookup index only. Every use revalidates the
+	// authoritative session and grant under sessionsMu before authorizing.
+	rdpTokens map[[32]byte]rdpTokenReference
 
 	connectionsMu sync.Mutex
 	// connectionGenerations changes only on logout, including when no live
@@ -171,9 +170,11 @@ func (m *Manager) CreateSession(ctx context.Context, u *identity.User, clientIP,
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
 
+	oldToken := m.Token(ctx)
 	if err := m.RenewToken(ctx); err != nil {
 		return err
 	}
+	m.removeSessionRDPTokenIndex(oldToken)
 	canonicalIP, _ := CanonicalClientIP(clientIP)
 	m.Put(ctx, sessionKey, sessionData{
 		User:              u,
@@ -181,77 +182,6 @@ func (m *Manager) CreateSession(ctx context.Context, u *identity.User, clientIP,
 		ClientIP:          canonicalIP,
 		LoginPasswordHash: loginPasswordHash,
 	})
-	return nil
-}
-
-// GrantRDPConnect opens a short-lived RDP authorization window for vmName on the
-// caller's own session, recording that the user explicitly clicked "Connect".
-// It requires an already-persisted authenticated session and commits the grant
-// before returning, under the same lock as consumption and revocation. It leaves
-// the request snapshot unmodified so LoadAndSave cannot later overwrite the
-// latest stored grants or recreate a session deleted by logout.
-func (m *Manager) GrantRDPConnect(ctx context.Context, vmName string) error {
-	vmName = strings.TrimSpace(vmName)
-	if vmName == "" {
-		return errors.New("vm name is required")
-	}
-
-	caller, ok := m.Get(ctx, sessionKey).(sessionData)
-	if !ok || caller.User == nil {
-		return errors.New("no authenticated session")
-	}
-	token := m.Token(ctx)
-	if token == "" {
-		return errors.New("no persisted session")
-	}
-	return m.grantStoredRDPConnect(token, caller, vmName)
-}
-
-func (m *Manager) grantStoredRDPConnect(token string, caller sessionData, vmName string) error {
-	m.sessionsMu.Lock()
-	defer m.sessionsMu.Unlock()
-
-	raw, found, err := m.Store.Find(token)
-	if err != nil {
-		return fmt.Errorf("load session for RDP grant: %w", err)
-	}
-	if !found {
-		return errors.New("session is no longer active")
-	}
-	deadline, values, err := m.Codec.Decode(raw)
-	if err != nil {
-		return fmt.Errorf("decode session for RDP grant: %w", err)
-	}
-
-	now := time.Now()
-	if !now.Before(deadline) {
-		return errors.New("session has expired")
-	}
-	sess, ok := values[sessionKey].(sessionData)
-	if !ok || sess.User == nil || *sess.User != *caller.User ||
-		sess.ClientIP != caller.ClientIP || !sess.CreatedAt.Equal(caller.CreatedAt) {
-		return errors.New("authenticated session has changed")
-	}
-
-	grants := make(map[string]time.Time, len(sess.RDPConnectGrants)+1)
-	// Carry over only still-valid grants so the map cannot grow unbounded with
-	// expired entries for VMs the user connected to earlier.
-	for name, expiry := range sess.RDPConnectGrants {
-		if now.Before(expiry) {
-			grants[name] = expiry
-		}
-	}
-	grants[vmName] = now.Add(rdpConnectWindow)
-
-	sess.RDPConnectGrants = grants
-	values[sessionKey] = sess
-	encoded, err := m.Codec.Encode(deadline, values)
-	if err != nil {
-		return fmt.Errorf("encode RDP grant: %w", err)
-	}
-	if err := m.Store.Commit(token, encoded, deadline); err != nil {
-		return fmt.Errorf("persist RDP grant: %w", err)
-	}
 	return nil
 }
 
@@ -332,100 +262,6 @@ func (m *Manager) UserHasActiveSessionFromIP(username, clientIP string) bool {
 	return false
 }
 
-// ConsumeRDPConnectGrant reports whether username has an unexpired RDP connect
-// grant for vmName from clientIP — i.e. the user clicked "Connect" for that VM
-// from that address within the last rdpConnectWindow — and, on a match, removes
-// the grant so it authorizes exactly one RDP connection. This is the gate the RDP
-// front handler uses: it narrows authorization from "any active dashboard session
-// on this IP" to "one explicit, recent Connect action for this specific VM".
-//
-// Single-use: a reconnect (or any second TCP connection) needs a fresh Connect
-// click. Consumption happens at authorization time, so even a connection that
-// later fails (e.g. the backend is unreachable) spends the grant.
-//
-// Candidate tokens are enumerated without holding sessionsMu, then each session
-// is reloaded and updated under the same lock used by revocation. An enumeration
-// taken before logout can therefore never restore a revoked session, and
-// concurrent RDP consumers cannot spend the same stored grant twice.
-func (m *Manager) ConsumeRDPConnectGrant(username, clientIP, vmName string) bool {
-	_, ok := m.AuthorizeRDPConnection(username, clientIP, vmName)
-	return ok
-}
-
-// AuthorizeRDPConnection consumes a single-use Connect grant and returns the
-// authorization required to register the resulting connection after setup.
-func (m *Manager) AuthorizeRDPConnection(username, clientIP, vmName string) (ConnectionAuthorization, bool) {
-	username = strings.TrimSpace(username)
-	vmName = strings.TrimSpace(vmName)
-	if username == "" || vmName == "" {
-		return ConnectionAuthorization{}, false
-	}
-
-	canonicalIP, ok := CanonicalClientIP(clientIP)
-	if !ok {
-		return ConnectionAuthorization{}, false
-	}
-	// Capture before consuming the stored grant: logout during either grant
-	// validation or backend setup must make registration reject this ticket.
-	authorization := m.connectionAuthorization(username)
-
-	store, ok := m.Store.(scs.IterableStore)
-	if !ok {
-		return ConnectionAuthorization{}, false
-	}
-	sessions, err := store.All()
-	if err != nil {
-		return ConnectionAuthorization{}, false
-	}
-
-	for token := range sessions {
-		if deadline, consumed := m.consumeStoredGrant(token, username, canonicalIP, vmName); consumed {
-			authorization.deadline = deadline
-			return authorization, true
-		}
-	}
-	return ConnectionAuthorization{}, false
-}
-
-// consumeStoredGrant removes and persists an unexpired RDP connect grant for
-// (username, canonicalIP, vmName) held by the stored session at token, returning
-// its session deadline when it consumed one.
-func (m *Manager) consumeStoredGrant(token, username, canonicalIP, vmName string) (time.Time, bool) {
-	m.sessionsMu.Lock()
-	defer m.sessionsMu.Unlock()
-
-	// All returns a snapshot that may already have been revoked or consumed.
-	// Reload under the mutation lock and keep it until the update is committed.
-	raw, found, err := m.Store.Find(token)
-	if err != nil || !found {
-		return time.Time{}, false
-	}
-	deadline, values, err := m.Codec.Decode(raw)
-	if err != nil || !time.Now().Before(deadline) {
-		return time.Time{}, false
-	}
-	sess, ok := values[sessionKey].(sessionData)
-	if !ok || sess.User == nil {
-		return time.Time{}, false
-	}
-	if sess.User.Name != username || sess.ClientIP != canonicalIP {
-		return time.Time{}, false
-	}
-	expiry, ok := sess.RDPConnectGrants[vmName]
-	if !ok || !time.Now().Before(expiry) {
-		return time.Time{}, false
-	}
-
-	// Consume the grant: drop it and persist, so it authorizes one connection.
-	delete(sess.RDPConnectGrants, vmName)
-	values[sessionKey] = sess
-	encoded, err := m.Codec.Encode(deadline, values)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return deadline, m.Store.Commit(token, encoded, deadline) == nil
-}
-
 // allSessions decodes every stored (non-expired) session. It is a read-only
 // enumeration: sessions are trusted for their lifetime, so it performs no
 // credential revalidation and never contacts the identity source.
@@ -458,7 +294,12 @@ func (m *Manager) DestroySession(ctx context.Context) error {
 	m.sessionsMu.Lock()
 	defer m.sessionsMu.Unlock()
 
-	return m.Destroy(ctx)
+	token := m.Token(ctx)
+	if err := m.Destroy(ctx); err != nil {
+		return err
+	}
+	m.removeSessionRDPTokenIndex(token)
+	return nil
 }
 
 // invalidateSession claims the timeout record before destroying the current
@@ -475,6 +316,7 @@ func (m *Manager) invalidateSession(ctx context.Context) (bool, error) {
 		m.sessionExpiryStore.restore(token, tracked)
 		return tracked != nil, err
 	}
+	m.removeSessionRDPTokenIndex(token)
 	return tracked != nil, nil
 }
 
@@ -509,9 +351,13 @@ func (m *Manager) DestroyAllSessionsForUser(username string) error {
 		if !ok || sess.User == nil || sess.User.Name != username {
 			continue
 		}
-		if err := m.Store.Delete(token); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.Store.Delete(token); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		m.removeSessionRDPTokenIndex(token)
 	}
 	return firstErr
 }

@@ -45,7 +45,7 @@ func TestPackageRelations(t *testing.T) {
 	}
 }
 
-// The config file can hold secrets such as SNI_HASH_SECRET, so it must be
+// The config file can hold secrets such as SPLUNK_HEC_TOKEN, so it must be
 // installed 0640 and never group- or
 // world-readable. The binary and unit carry no secrets and keep their
 // conventional world-readable modes.

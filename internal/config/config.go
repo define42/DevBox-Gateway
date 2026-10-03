@@ -159,8 +159,11 @@ func NewSettings(printSettings bool) *Settings {
 	s.SetBool(ACME_ENABLE, "enable ACME certificate management with certmagic for front TLS", false)
 	s.SetString(ACME_EMAIL, "ACME account email (recommended)", "")
 	s.SetString(ACME_CA, "ACME CA directory URL or 'staging'", "")
-	s.SetString(FRONT_DOMAIN, "Front domain to serve front page on HTTPS requests and also the prefix for vm names", "desktop.local.gd")
-	s.SetSecretString(SNI_HASH_SECRET, "Secret keying the HMAC that turns VM names into opaque SNI routing labels; auto-generated and persisted under the data root when empty", "")
+	s.SetString(
+		FRONT_DOMAIN,
+		"Single hostname for the dashboard, WebSockets, and RDP downloads; the only hostname managed by ACME",
+		"desktop.local.gd",
+	)
 
 	s.SetBool(DEBUG_CONNECTIONS, "Verbose debug logging of every accepted front connection and HTTP/WebSocket request (type, source address, method, path); use to trace connectivity", false)
 
@@ -637,7 +640,6 @@ const (
 	SAURON_SPLUNK_HEC_TOKEN           = "SAURON_SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
 	SAURON_SPOOL_DIR                  = "SAURON_SPOOL_DIR"
 	SAURON_SPOOL_MAX_MIB              = "SAURON_SPOOL_MAX_MIB"
-	SNI_HASH_SECRET                   = "SNI_HASH_SECRET" // #nosec G101 -- setting key name, not a credential
 	SPLUNK_HEC_ACK_ENABLED            = "SPLUNK_HEC_ACK_ENABLED"
 	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
 	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"

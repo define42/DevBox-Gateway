@@ -247,7 +247,7 @@ func TestCovxNegotiateFrontRDPReadCRQFailure(t *testing.T) {
 	client, server := net.Pipe()
 	_ = client.Close()
 
-	if _, ok := negotiateFrontRDP(server, nil, settings, time.Now()); ok {
+	if _, ok := negotiateFrontRDP(server, nil, nil, settings, time.Now()); ok {
 		t.Fatal("expected failure when the client closes before sending a CRQ")
 	}
 	_ = server.Close()
@@ -265,7 +265,7 @@ func TestCovxNegotiateFrontRDPWriteCCFFailure(t *testing.T) {
 		_ = client.Close()
 	}()
 
-	if _, ok := negotiateFrontRDP(server, nil, settings, time.Now()); ok {
+	if _, ok := negotiateFrontRDP(server, nil, nil, settings, time.Now()); ok {
 		t.Fatal("expected failure when the CCF cannot be written")
 	}
 	_ = server.Close()
@@ -286,7 +286,7 @@ func TestCovxNegotiateFrontRDPHandshakeFailure(t *testing.T) {
 		_ = client.Close()
 	}()
 
-	if _, ok := negotiateFrontRDP(server, frontTLS, settings, time.Now()); ok {
+	if _, ok := negotiateFrontRDP(server, frontTLS, nil, settings, time.Now()); ok {
 		t.Fatal("expected failure when the front TLS handshake fails")
 	}
 	_ = server.Close()
@@ -296,7 +296,7 @@ func TestCovxAuthorizeRDPAccessOwnerLookupError(t *testing.T) {
 	t.Setenv("LIBVIRT_URI", "qemu+unix:///system?socket=/nonexistent/covx-libvirt.sock")
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
-	if _, ok := authorizeRDPAccess(addr, session.New(), "covx.example.test", "covxvm"); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), "covxvm", ""); ok {
 		t.Fatal("expected denial when the owner lookup errors")
 	}
 }
@@ -305,7 +305,7 @@ func TestCovxAuthorizeRDPAccessMissingOwner(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
 	// An empty hostname resolves to "no owner" without a libvirt round trip.
-	if _, ok := authorizeRDPAccess(addr, session.New(), "covx.example.test", ""); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), "", ""); ok {
 		t.Fatal("expected denial for a VM without owner metadata")
 	}
 }
@@ -314,7 +314,7 @@ func TestCovxAuthorizeRDPAccessInvalidClientAddr(t *testing.T) {
 	name := covxUniqueName("addr")
 	covxDefineOwnedDomain(t, name)
 
-	if _, ok := authorizeRDPAccess(covxAddr{}, session.New(), name+".example.test", name); ok {
+	if _, ok := authorizeRDPAccess(covxAddr{}, session.New(), name, ""); ok {
 		t.Fatal("expected denial for an unparseable client address")
 	}
 }
@@ -325,7 +325,7 @@ func TestCovxAuthorizeRDPAccessWithoutGrant(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(192, 0, 2, 90), Port: 42424}
 
 	// Owner and client IP resolve fine, but no Connect grant was recorded.
-	if _, ok := authorizeRDPAccess(addr, session.New(), name+".example.test", name); ok {
+	if _, ok := authorizeRDPAccess(addr, session.New(), name, ""); ok {
 		t.Fatal("expected denial without an unused Connect authorization")
 	}
 }
@@ -334,13 +334,13 @@ func TestCovxResolveBackendAddrBranches(t *testing.T) {
 	stubVMIPs(t, map[string]string{"covxgood": "127.0.0.9", "covxempty": ""})
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 
-	if _, ok := resolveBackendAddr(addr, "sni", "covxmissing"); ok {
+	if _, ok := resolveBackendAddr(addr, "covxmissing"); ok {
 		t.Fatal("expected failure when the IP lookup errors")
 	}
-	if _, ok := resolveBackendAddr(addr, "sni", "covxempty"); ok {
+	if _, ok := resolveBackendAddr(addr, "covxempty"); ok {
 		t.Fatal("expected failure when the VM has no trusted route")
 	}
-	got, ok := resolveBackendAddr(addr, "sni", "covxgood")
+	got, ok := resolveBackendAddr(addr, "covxgood")
 	if !ok {
 		t.Fatal("expected success for a routable VM")
 	}
@@ -364,13 +364,13 @@ func TestCovxHandleClientClosesBeforeCRQ(t *testing.T) {
 	waitDone(t, done)
 }
 
-func TestCovxHandleRejectsUnknownRoutingLabel(t *testing.T) {
+func TestCovxHandleRejectsUnknownRoutingToken(t *testing.T) {
 	InitLogging()
 	stubVMIPs(t, map[string]string{})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 
 	client, done := startHandleTestConnection(t, frontTLS, nil, settings, "192.0.2.184")
-	tlsClient := performFrontHandshake(t, client, "covxunknown.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, "0123456789abcdef0123456789abcdef")
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
@@ -380,12 +380,14 @@ func TestCovxHandleRejectsUnknownRoutingLabel(t *testing.T) {
 func TestCovxHandleDeniesWhenVMHasNoOwner(t *testing.T) {
 	InitLogging()
 	name := covxUniqueName("noown")
-	// Route the label, but never define the domain: owner resolution denies.
+	// Issue a token, but never define the domain: owner resolution denies.
 	stubVMIPs(t, map[string]string{name: "127.0.0.71"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 
-	client, done := startHandleTestConnection(t, frontTLS, session.New(), settings, "192.0.2.180")
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	manager := session.New()
+	tokens := issueUserSession(t, manager, "alice", "192.0.2.180:5000", name)
+	client, done := startHandleTestConnection(t, frontTLS, manager, settings, "192.0.2.180")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
@@ -400,10 +402,10 @@ func TestCovxHandleNoRouteForVM(t *testing.T) {
 	covxDefineOwnedDomain(t, name)
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.181:5000", name)
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.181:5000", name)
 
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.181")
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
@@ -420,10 +422,10 @@ func TestCovxHandleBackendDialRefused(t *testing.T) {
 	t.Setenv(config.TIMEOUT, "2s")
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.182:5000", name)
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.182:5000", name)
 
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.182", identity)
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	defer func() { _ = tlsClient.Close() }()
 	go func() { _, _ = io.Copy(io.Discard, tlsClient) }()
 
@@ -449,10 +451,10 @@ func TestCovxHandleRevocationClosesActiveProxy(t *testing.T) {
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.185:5000", name)
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.185:5000", name)
 
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.185", identity)
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	defer func() { _ = tlsClient.Close() }()
 
 	// Receiving backend data proves the registered proxy has started forwarding.

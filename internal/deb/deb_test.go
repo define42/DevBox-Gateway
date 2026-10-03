@@ -153,7 +153,7 @@ func TestWriteDebWithLicense(t *testing.T) {
 	})
 }
 
-// The config file can hold secrets such as SNI_HASH_SECRET, so the data archive
+// The config file can hold secrets such as SPLUNK_HEC_TOKEN, so the data archive
 // must install it 0640, never group- or
 // world-readable, no matter how the source file is checked out. stageInputs
 // writes the sources 0600, so a pass here also proves the mode is set by the

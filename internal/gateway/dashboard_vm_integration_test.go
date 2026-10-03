@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/hash"
 	"github.com/define42/devbox-gateway/internal/identity"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
@@ -107,11 +106,14 @@ func assertDashboardVMRow(t *testing.T, settings *config.Settings, row dashboard
 	}
 }
 
-func assertRDPFileContent(t *testing.T, content, wantConnectHost, username string) {
+func assertRDPFileContent(t *testing.T, content, wantRoutingToken, username string) {
 	t.Helper()
 
-	if !strings.Contains(content, "full address:s:"+wantConnectHost+":443") {
-		t.Fatalf("expected RDP file to contain connect host %q, got %q", wantConnectHost, content)
+	if !strings.Contains(content, "full address:s:dashboard.test:443\n") {
+		t.Fatalf("expected RDP file to contain shared gateway host, got %q", content)
+	}
+	if !strings.Contains(content, "loadbalanceinfo:s:"+wantRoutingToken+"\n") {
+		t.Fatalf("expected RDP file to contain routing token %q, got %q", wantRoutingToken, content)
 	}
 	if !strings.Contains(content, "username:s:"+username) {
 		t.Fatalf("expected RDP file to contain username %q, got %q", username, content)
@@ -125,15 +127,20 @@ func TestListVMs(t *testing.T) {
 	username, vmName := createDashboardVM(t, settings)
 	row := waitForDashboardVM(t, username, vmName, dashboardVMTestTimeout)
 	wantDisplayName := vmname.BareHostname(vmName, username)
-	wantConnectHost := hash.RoutingLabel([]byte(settings.Get(config.SNI_HASH_SECRET)), vmName) + ".dashboard.test"
+	const wantRoutingToken = "0123456789abcdef0123456789abcdef"
 
 	assertDashboardVMRow(t, settings, row, wantDisplayName)
 
 	// The .rdp now comes from the explicit Connect download, not an inline field,
 	// so assert the file the user would actually receive for their owned VM.
-	_, content, ok := dashboard.RDPFileForUser(settings, username, vmName)
+	_, content, ok := dashboard.RDPFileForUser(settings, username, vmName, wantRoutingToken)
 	if !ok {
 		t.Fatalf("expected an RDP file for owned VM %q", vmName)
 	}
-	assertRDPFileContent(t, string(content), wantConnectHost, username)
+	assertRDPFileContent(
+		t,
+		string(content),
+		wantRoutingToken,
+		username,
+	)
 }

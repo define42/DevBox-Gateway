@@ -209,7 +209,8 @@ func (g *gatewayRuntime) closeAuditSink() error {
 }
 
 func bootGateway() (_ *gatewayRuntime, retErr error) {
-	vmInventory := virt.NewInventory()
+	// Start the shared VM inventory worker used by routing and the dashboard.
+	virt.NewInventory()
 
 	rdp.InitLogging()
 
@@ -241,10 +242,6 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 		return nil, fmt.Errorf("failed to initialize virtualization: %w", err)
 	}
 
-	if err := config.EnsureSNIHashSecret(settings); err != nil {
-		return nil, fmt.Errorf("failed to resolve sni hash secret: %w", err)
-	}
-
 	// Started before the front listener so a collector that cannot listen
 	// fails the boot with nothing else to unwind.
 	collector, err := startSauronCollector(settings)
@@ -252,7 +249,7 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 		return nil, err
 	}
 
-	runtime, err := startGatewayRuntime(settings, vmInventory, sessionManager, auditSink)
+	runtime, err := startGatewayRuntime(settings, sessionManager, auditSink)
 	if err != nil {
 		return nil, errors.Join(err, collector.Close())
 	}
@@ -297,11 +294,10 @@ func resolveSauronGuest(cid uint32) (sauron.VM, bool, error) {
 
 func startGatewayRuntime(
 	settings *config.Settings,
-	vmInventory *virt.Inventory,
 	sessionManager *session.Manager,
 	auditSink io.Closer,
 ) (*gatewayRuntime, error) {
-	frontTLS, err := cert.NewTLSManager(settings, vmInventory.VMNames)
+	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
 		return nil, fmt.Errorf("tls setup: %w", err)
 	}
@@ -397,10 +393,7 @@ func loadBootSettings() (*config.Settings, error) {
 		return nil, err
 	}
 
-	// FRONT_DOMAIN is the suffix the RDP front handler strips to recover a VM's
-	// routing label; with it empty every RDP connection is rejected while the
-	// dashboard still issues .rdp files. Refuse to boot in that broken state
-	// rather than fail silently at connect time.
+	// FRONT_DOMAIN is the shared hostname for the dashboard and RDP downloads.
 	if err := config.ValidateFrontDomain(settings); err != nil {
 		return nil, err
 	}

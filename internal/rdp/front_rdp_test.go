@@ -2,18 +2,16 @@ package rdp
 
 import (
 	"net"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/hash"
 
 	"github.com/tomatome/grdp/protocol/x224"
 )
 
 func TestClientOfferedTLSWithStandardTLS(t *testing.T) {
-	crq := wrapTPKT(buildClientCRQ(x224.PROTOCOL_SSL))
+	crq := &clientConnectionRequest{requestedProtocols: x224.PROTOCOL_SSL}
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	if !clientOfferedTLS(addr, crq) {
 		t.Fatal("expected clientOfferedTLS=true for PROTOCOL_SSL request")
@@ -21,7 +19,7 @@ func TestClientOfferedTLSWithStandardTLS(t *testing.T) {
 }
 
 func TestClientOfferedTLSWithHybridFallsBackToTLS(t *testing.T) {
-	crq := wrapTPKT(buildClientCRQ(x224.PROTOCOL_HYBRID | x224.PROTOCOL_SSL))
+	crq := &clientConnectionRequest{requestedProtocols: x224.PROTOCOL_HYBRID | x224.PROTOCOL_SSL}
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	if !clientOfferedTLS(addr, crq) {
 		t.Fatal("expected clientOfferedTLS=true when both HYBRID and SSL are offered")
@@ -29,7 +27,7 @@ func TestClientOfferedTLSWithHybridFallsBackToTLS(t *testing.T) {
 }
 
 func TestClientOfferedTLSWithRDPOnly(t *testing.T) {
-	crq := wrapTPKT(buildClientCRQ(x224.PROTOCOL_RDP))
+	crq := &clientConnectionRequest{requestedProtocols: x224.PROTOCOL_RDP}
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	if clientOfferedTLS(addr, crq) {
 		t.Fatal("expected clientOfferedTLS=false when only standard RDP is offered")
@@ -38,7 +36,7 @@ func TestClientOfferedTLSWithRDPOnly(t *testing.T) {
 
 func TestClientOfferedTLSMalformed(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-	if clientOfferedTLS(addr, []byte{0x03, 0x00, 0x00, 0x04}) {
+	if clientOfferedTLS(addr, nil) {
 		t.Fatal("expected clientOfferedTLS=false for malformed CRQ")
 	}
 }
@@ -147,75 +145,9 @@ func TestDialBackendRDPReturnsFalseOnTLSNegotiationFailure(t *testing.T) {
 	}
 }
 
-func TestValidateFrontSNIRejectsMismatch(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	settings := config.NewSettings(false)
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-	_, ok := validateFrontSNI(strings.ToLower("vm.other.example"), addr, settings)
-	if ok {
-		t.Fatal("expected SNI not matching the front domain to be rejected")
-	}
-}
-
-func TestValidateFrontSNIRequiresSubdomain(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	settings := config.NewSettings(false)
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-	_, ok := validateFrontSNI("example.test", addr, settings)
-	if ok {
-		t.Fatal("expected bare front domain (no subdomain) to be rejected")
-	}
-}
-
-func TestValidateFrontSNIAcceptsValidSubdomain(t *testing.T) {
-	t.Setenv(config.SNI_HASH_SECRET, "test-secret")
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-
-	label := hash.RoutingLabel([]byte("test-secret"), "vm")
-	original := vmNameByLabelLookup
-	t.Cleanup(func() { vmNameByLabelLookup = original })
-	vmNameByLabelLookup = func(secret []byte, gotLabel string) (string, bool) {
-		if string(secret) != "test-secret" || gotLabel != label {
-			return "", false
-		}
-		return "vm", true
-	}
-
-	for _, domain := range []string{"example.test", "Example.Test", "EXAMPLE.TEST", " Example.Test "} {
-		t.Run(domain, func(t *testing.T) {
-			t.Setenv(config.FRONT_DOMAIN, domain)
-			settings := config.NewSettings(false)
-			got, ok := validateFrontSNI(label+".example.test", addr, settings)
-			if !ok || got != "vm" {
-				t.Fatalf("routing with FRONT_DOMAIN=%q returned %q, %v; want vm, true", domain, got, ok)
-			}
-			for _, badSNI := range []string{"example.test", label + ".notexample.test", label + ".example.test.attacker.test"} {
-				if _, ok := validateFrontSNI(badSNI, addr, settings); ok {
-					t.Fatalf("routing with FRONT_DOMAIN=%q accepted %q outside its subdomain", domain, badSNI)
-				}
-			}
-		})
-	}
-}
-
-func TestValidateFrontSNIRejectsUnknownLabel(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "example.test")
-	t.Setenv(config.SNI_HASH_SECRET, "test-secret")
-	settings := config.NewSettings(false)
-	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-
-	original := vmNameByLabelLookup
-	t.Cleanup(func() { vmNameByLabelLookup = original })
-	vmNameByLabelLookup = func([]byte, string) (string, bool) { return "", false }
-
-	if _, ok := validateFrontSNI("deadbeef.example.test", addr, settings); ok {
-		t.Fatal("expected an unknown routing label to be rejected")
-	}
-}
-
 func TestAuthorizeRDPAccessRejectsNilSessionManager(t *testing.T) {
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-	if _, ok := authorizeRDPAccess(addr, nil, "vm.example.test", "vm"); ok {
+	if _, ok := authorizeRDPAccess(addr, nil, "vm", ""); ok {
 		t.Fatal("expected authorizeRDPAccess to return false when session manager is nil")
 	}
 }

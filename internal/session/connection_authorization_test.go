@@ -13,16 +13,16 @@ import (
 func pendingConnectionAuthorization(
 	t *testing.T,
 	manager *Manager,
-	token, username string,
+	grant testRDPGrant, username string,
 	rdp bool,
 ) ConnectionAuthorization {
 	t.Helper()
 	var auth ConnectionAuthorization
 	var allowed bool
 	if rdp {
-		auth, allowed = manager.AuthorizeRDPConnection(username, "192.0.2.10", username+".desktop")
+		auth, allowed = manager.AuthorizeRDPConnection(grant.token, username, "192.0.2.10", username+".desktop")
 	} else {
-		ctx := loadConnectionSession(t, manager, token)
+		ctx := loadConnectionSession(t, manager, grant.sessionToken)
 		auth, allowed = manager.AuthorizeConnection(ctx)
 	}
 	if !allowed {
@@ -110,7 +110,7 @@ func checkPendingConnectionLogout(t *testing.T, rdp bool) {
 func TestAuthorizeConnectionRejectsRevokedLoadedSession(t *testing.T) {
 	manager := New()
 	oldToken := commitTestRDPGrant(t, manager, "alice")
-	loadedBeforeLogout := loadConnectionSession(t, manager, oldToken)
+	loadedBeforeLogout := loadConnectionSession(t, manager, oldToken.sessionToken)
 	if err := manager.DestroyAllSessionsForUser("alice"); err != nil {
 		t.Fatalf("delete Alice's sessions: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAuthorizeConnectionRejectsRevokedLoadedSession(t *testing.T) {
 	if _, allowed := manager.AuthorizeConnection(loadedBeforeLogout); allowed {
 		t.Error("fresh login reauthorized a request carrying the revoked token")
 	}
-	if _, found, err := manager.Store.Find(oldToken); err != nil || found {
+	if _, found, err := manager.Store.Find(oldToken.sessionToken); err != nil || found {
 		t.Errorf("old token lookup after fresh login: found=%v, err=%v", found, err)
 	}
 	registerConnectionAuthorization(t, manager,
@@ -160,7 +160,7 @@ func TestAuthorizeConnectionRejectsUnauthenticatedSession(t *testing.T) {
 	if _, allowed := manager.AuthorizeConnection(ctx); allowed {
 		t.Error("unauthenticated request received a connection authorization")
 	}
-	if _, allowed := manager.AuthorizeRDPConnection("alice", "192.0.2.10", "alice.desktop"); allowed {
+	if _, allowed := manager.AuthorizeRDPConnection("", "alice", "192.0.2.10", "alice.desktop"); allowed {
 		t.Error("missing RDP grant received a connection authorization")
 	}
 }
@@ -251,11 +251,11 @@ func checkLogoutDuringConnectionAuthorization(t *testing.T, rdp bool) {
 	t.Helper()
 	manager := New()
 	token := commitTestRDPGrant(t, manager, "alice")
-	ctx := loadConnectionSession(t, manager, token)
+	ctx := loadConnectionSession(t, manager, token.sessionToken)
 	store := &pausedConnectionAuthorizationStore{
 		Store:         manager.Store,
 		IterableStore: manager.Store.(scs.IterableStore),
-		pauseAll:      rdp,
+		pauseAll:      false,
 		entered:       make(chan struct{}),
 		resume:        make(chan struct{}),
 	}
@@ -271,7 +271,7 @@ func checkLogoutDuringConnectionAuthorization(t *testing.T, rdp bool) {
 	go func() {
 		defer close(done)
 		if rdp {
-			auth, allowed = manager.AuthorizeRDPConnection("alice", "192.0.2.10", "alice.desktop")
+			auth, allowed = manager.AuthorizeRDPConnection(token.token, "alice", "192.0.2.10", "alice.desktop")
 		} else {
 			auth, allowed = manager.AuthorizeConnection(ctx)
 		}

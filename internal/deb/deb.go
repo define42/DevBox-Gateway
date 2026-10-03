@@ -9,7 +9,7 @@ const Maintainer = "define42 <define42@users.noreply.github.com>"
 const (
 	packageName = "devbox-gateway"
 	summary     = "DevBox Gateway for libvirt-backed development desktops"
-	description = "DevBox Gateway publishes libvirt-managed development desktops over a single HTTPS port. It terminates TLS from RDP clients, routes each connection to a backend VM by TLS SNI, and re-establishes TLS to that backend. The same port also serves an LDAP-authenticated web dashboard for self-service VM lifecycle management, in-browser serial and noVNC consoles, and downloadable .rdp connection files."
+	description = "DevBox Gateway publishes libvirt-managed development desktops over a single hostname and HTTPS port. It terminates TLS from RDP clients, routes each connection to a backend VM by a short-lived, single-use random token, and re-establishes TLS to that backend. The same hostname and port also serve an LDAP-authenticated web dashboard for self-service VM lifecycle management, in-browser serial and noVNC consoles, and downloadable .rdp connection files."
 	url         = "https://github.com/define42/devbox-gateway"
 	section     = "net"
 

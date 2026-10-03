@@ -319,11 +319,7 @@ func TestDestroyAllSessionsForUser(t *testing.T) {
 	issueSession(t, m, alice, "192.0.2.21:5001")
 	issueSession(t, m, bob, "192.0.2.30:5002")
 
-	withLoadedSession(t, m, "192.0.2.20:5000", aliceCookie, func(r *http.Request) {
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err != nil {
-			t.Fatalf("grant rdp connect: %v", err)
-		}
-	})
+	rdpToken := grantCookieRDPToken(t, m, aliceCookie, "alice-desk")
 
 	if err := m.DestroyAllSessionsForUser("alice"); err != nil {
 		t.Fatalf("destroy all sessions for alice: %v", err)
@@ -335,7 +331,7 @@ func TestDestroyAllSessionsForUser(t *testing.T) {
 	if m.UserHasActiveSessionFromIP("alice", "192.0.2.21") {
 		t.Fatal("expected alice session from second IP to be destroyed")
 	}
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.20", "alice-desk") {
+	if m.ConsumeRDPConnectGrant(rdpToken, "alice", "192.0.2.20", "alice-desk") {
 		t.Fatal("expected alice RDP grant to be removed with her sessions")
 	}
 	if !m.UserHasActiveSessionFromIP("bob", "192.0.2.30") {
@@ -896,30 +892,16 @@ func withLoadedSession(t *testing.T, m *Manager, remoteAddr string, cookie *http
 
 func TestConsumeRDPConnectGrantIsSingleUse(t *testing.T) {
 	m := New()
-
-	user, err := identity.New("alice")
-	if err != nil {
-		t.Fatalf("new user: %v", err)
+	cookie := issueSession(t, m, &identity.User{Name: "alice"}, testSessionRemoteAddr)
+	if m.ConsumeRDPConnectGrant("", "alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("standing session authorized RDP without a token")
 	}
-	cookie := issueSession(t, m, user, testSessionRemoteAddr)
-
-	// No grant yet: a standing session must not authorize RDP on its own.
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-		t.Fatal("did not expect a grant before Connect was clicked")
+	token := grantCookieRDPToken(t, m, cookie, "alice-desk")
+	if !m.ConsumeRDPConnectGrant(token, "alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("first connection did not consume token")
 	}
-
-	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err != nil {
-			t.Fatalf("grant rdp connect: %v", err)
-		}
-	})
-
-	// The grant authorizes exactly one RDP connection.
-	if !m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-		t.Fatal("expected the Connect grant to authorize the first RDP connection")
-	}
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-		t.Fatal("expected the grant to be single-use (second connection denied)")
+	if m.ConsumeRDPConnectGrant(token, "alice", "192.0.2.10", "alice-desk") {
+		t.Fatal("token authorized a second connection")
 	}
 }
 
@@ -934,7 +916,7 @@ func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
 
 	var blankErr, noSessionErr error
 	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
-		blankErr = m.GrantRDPConnect(r.Context(), "   ")
+		_, blankErr = m.GrantRDPConnect(r.Context(), "   ")
 	})
 	if blankErr == nil {
 		t.Fatal("expected an error granting a blank VM name")
@@ -942,7 +924,7 @@ func TestGrantRDPConnectRejectsBadInput(t *testing.T) {
 
 	// A loaded but unauthenticated session (no cookie) must not grant.
 	withLoadedSession(t, m, testSessionRemoteAddr, nil, func(r *http.Request) {
-		noSessionErr = m.GrantRDPConnect(r.Context(), "alice-desk")
+		_, noSessionErr = m.GrantRDPConnect(r.Context(), "alice-desk")
 	})
 	if noSessionErr == nil {
 		t.Fatal("expected an error granting without an authenticated session")
@@ -955,12 +937,12 @@ func TestGrantRDPConnectRejectsUncommittedSession(t *testing.T) {
 		if err := m.CreateSession(r.Context(), &identity.User{Name: "alice"}, r.RemoteAddr, testLoginPasswordHash); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+		if _, err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
 			t.Fatal("expected an uncommitted session to be rejected")
 		}
 	})
-	if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-		t.Fatal("failed Connect must not issue a grant when login is later committed")
+	if len(m.rdpTokens) != 0 {
+		t.Fatal("failed Connect indexed a token when login was later committed")
 	}
 }
 
@@ -971,7 +953,7 @@ func TestGrantRDPConnectRejectsDeletedSession(t *testing.T) {
 		if err := m.Store.Delete(cookie.Value); err != nil {
 			t.Fatalf("delete stored session: %v", err)
 		}
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+		if _, err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
 			t.Fatal("expected a deleted session to be rejected")
 		}
 	})
@@ -1018,7 +1000,7 @@ func checkConnectRejectsChangedSession(t *testing.T, mutate func(*sessionData, *
 		if err := m.Store.Commit(cookie.Value, replacement, time.Now().Add(time.Hour)); err != nil {
 			t.Fatalf("commit replacement session: %v", err)
 		}
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
+		if _, err := m.GrantRDPConnect(r.Context(), "alice-desk"); err == nil {
 			t.Fatal("expected the stale request's Connect grant to be rejected")
 		}
 	})
@@ -1038,7 +1020,7 @@ func TestGrantRDPConnectPreservesSessionDeadlineAndValues(t *testing.T) {
 	originalSession := originalValues[sessionKey].(sessionData)
 
 	withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
-		if err := m.GrantRDPConnect(r.Context(), "alice-desk"); err != nil {
+		if _, err := m.GrantRDPConnect(r.Context(), "alice-desk"); err != nil {
 			t.Fatalf("grant RDP connect: %v", err)
 		}
 		deadline, values := storedSessionValues(t, m, cookie.Value)
@@ -1053,7 +1035,7 @@ func TestGrantRDPConnectPreservesSessionDeadlineAndValues(t *testing.T) {
 			!sess.CreatedAt.Equal(originalSession.CreatedAt) || sess.LoginPasswordHash != originalSession.LoginPasswordHash {
 			t.Fatal("Connect changed the authenticated session identity")
 		}
-		if !time.Now().Before(sess.RDPConnectGrants["alice-desk"]) {
+		if !time.Now().Before(sess.RDPConnectGrants["alice-desk"].ExpiresAt) {
 			t.Fatal("Connect grant was not persisted before the response")
 		}
 	})
@@ -1082,14 +1064,15 @@ func TestGrantRDPConnectFailsClosedOnPersistenceError(t *testing.T) {
 			withLoadedSession(t, m, testSessionRemoteAddr, cookie, func(r *http.Request) {
 				store, codec := m.Store, m.Codec
 				tt.fail(m)
-				err := m.GrantRDPConnect(r.Context(), "alice-desk")
+				_, err := m.GrantRDPConnect(r.Context(), "alice-desk")
 				m.Store, m.Codec = store, codec
 				if err == nil {
 					t.Fatal("Connect succeeded despite failing to persist its grant")
 				}
 			})
-			if m.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice-desk") {
-				t.Fatal("failed Connect persisted its grant when writing the response")
+			_, values := storedSessionValues(t, m, cookie.Value)
+			if len(values[sessionKey].(sessionData).RDPConnectGrants) != 0 || len(m.rdpTokens) != 0 {
+				t.Fatal("failed Connect persisted or indexed a grant when writing the response")
 			}
 		})
 	}
@@ -1110,83 +1093,39 @@ func storedSessionValues(t *testing.T, m *Manager, token string) (time.Time, map
 
 func TestConsumeRDPConnectGrantIgnoresExpiredGrant(t *testing.T) {
 	m := New()
-
-	user, err := identity.New("dora")
-	if err != nil {
-		t.Fatalf("new user: %v", err)
+	cookie := issueSession(t, m, &identity.User{Name: "dora"}, "192.0.2.20:4321")
+	token := grantCookieRDPToken(t, m, cookie, "vm1")
+	updateStoredRDPGrant(t, m, cookie.Value, "vm1", func(grant *rdpConnectGrant) { grant.ExpiresAt = time.Now().Add(-time.Minute) })
+	if m.ConsumeRDPConnectGrant(token, "dora", "192.0.2.20", "vm1") {
+		t.Fatal("expired token authorized")
 	}
-
-	// The session itself is still valid; only the grant has expired.
-	deadline := time.Now().Add(time.Hour)
-	values := map[string]interface{}{
-		sessionKey: sessionData{
-			User:             user,
-			CreatedAt:        time.Now(),
-			ClientIP:         "192.0.2.20",
-			RDPConnectGrants: map[string]time.Time{"vm1": time.Now().Add(-time.Minute)},
-		},
-	}
-	data, err := m.Codec.Encode(deadline, values)
-	if err != nil {
-		t.Fatalf("encode session: %v", err)
-	}
-	if err := m.Store.Commit("token", data, deadline); err != nil {
-		t.Fatalf("commit session: %v", err)
-	}
-
-	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
-		t.Fatal("expected an expired connect grant to be ignored")
+	if _, ok := m.RDPConnectTarget(token, "192.0.2.20"); ok {
+		t.Fatal("expired token routed")
 	}
 }
 
 func TestConsumeRDPConnectGrantRejectsScopeAndInputMismatches(t *testing.T) {
 	m := New()
-
-	user, err := identity.New("dora")
-	if err != nil {
-		t.Fatalf("new user: %v", err)
+	cookie := issueSession(t, m, &identity.User{Name: "dora"}, "192.0.2.20:4321")
+	token := grantCookieRDPToken(t, m, cookie, "vm1")
+	tests := []struct{ username, ip, vmName string }{
+		{"dora", "192.0.2.20", "vm2"},
+		{"dora", "192.0.2.21", "vm1"},
+		{"erin", "192.0.2.20", "vm1"},
+		{"", "192.0.2.20", "vm1"},
+		{"dora", "192.0.2.20", ""},
+		{"dora", "not-an-ip", "vm1"},
 	}
-
-	deadline := time.Now().Add(time.Hour)
-	values := map[string]interface{}{
-		sessionKey: sessionData{
-			User:             user,
-			CreatedAt:        time.Now(),
-			ClientIP:         "192.0.2.20",
-			RDPConnectGrants: map[string]time.Time{"vm1": time.Now().Add(time.Minute)},
-		},
+	for _, tt := range tests {
+		if m.ConsumeRDPConnectGrant(token, tt.username, tt.ip, tt.vmName) {
+			t.Errorf("scope mismatch authorized: %+v", tt)
+		}
 	}
-	data, err := m.Codec.Encode(deadline, values)
-	if err != nil {
-		t.Fatalf("encode session: %v", err)
+	if !m.ConsumeRDPConnectGrant(token, "dora", "192.0.2.20", "vm1") {
+		t.Fatal("valid grant lost after rejected attempts")
 	}
-	if err := m.Store.Commit("token", data, deadline); err != nil {
-		t.Fatalf("commit session: %v", err)
-	}
-
-	// Mismatches never match, so they must not consume the grant.
-	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm2") {
-		t.Fatal("did not expect authorization for a different VM")
-	}
-	if m.ConsumeRDPConnectGrant("dora", "192.0.2.21", "vm1") {
-		t.Fatal("did not expect authorization from a different IP")
-	}
-	if m.ConsumeRDPConnectGrant("erin", "192.0.2.20", "vm1") {
-		t.Fatal("did not expect authorization for a different user")
-	}
-	if m.ConsumeRDPConnectGrant("", "192.0.2.20", "vm1") || m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "") {
-		t.Fatal("expected blank user or VM name to fail authorization")
-	}
-	if m.ConsumeRDPConnectGrant("dora", "not-an-ip", "vm1") {
-		t.Fatal("expected an invalid client IP to fail authorization")
-	}
-
-	// The real grant survived every mismatch and authorizes exactly once.
-	if !m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
-		t.Fatal("expected the unexpired grant to authorize")
-	}
-	if m.ConsumeRDPConnectGrant("dora", "192.0.2.20", "vm1") {
-		t.Fatal("expected the grant to be single-use")
+	if m.ConsumeRDPConnectGrant(token, "dora", "192.0.2.20", "vm1") {
+		t.Fatal("grant authorized twice")
 	}
 }
 

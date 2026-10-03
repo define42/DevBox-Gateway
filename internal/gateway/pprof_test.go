@@ -11,7 +11,6 @@ import (
 
 	"github.com/define42/devbox-gateway/internal/config"
 	"github.com/define42/devbox-gateway/internal/session"
-	"github.com/define42/devbox-gateway/internal/virt"
 )
 
 func TestValidatePprofListenAddress(t *testing.T) {
@@ -143,7 +142,7 @@ func TestStartGatewayRuntimeOwnsSeparatePprofServer(t *testing.T) {
 		}
 	}
 
-	runtime, err := startGatewayRuntime(settings, virt.NewInventory(), session.New(), nil)
+	runtime, err := startGatewayRuntime(settings, session.New(), nil)
 	if err != nil {
 		t.Fatalf("startGatewayRuntime() error = %v", err)
 	}

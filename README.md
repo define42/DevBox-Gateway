@@ -6,7 +6,7 @@
 desktops over a single HTTPS port. It combines three things on TCP `:443`:
 
 1. An **RDP-over-TLS reverse proxy** that terminates TLS from the client, picks
-   a backend VM based on the client's TLS SNI, and re-establishes TLS to that
+   a backend VM using its RDP routing token, and re-establishes TLS to that
    backend. The proxy speaks raw RDP (X.224 / TPKT), not the Microsoft RD
    Gateway HTTP/UDP transports.
 2. An **HTTPS web dashboard** for end users to create, start, stop, restart and
@@ -51,7 +51,7 @@ else is treated as an RDP X.224 Connection Request.
 
 ## Features
 
-- **RDP-over-TLS reverse proxy** with SNI-based backend routing.
+- **RDP-over-TLS reverse proxy** with short-lived, single-use random tokens.
 - **HTTPS dashboard** for self-service VM lifecycle management (create, start,
   restart, shutdown, remove). VM CPU and RAM are fixed by the gateway
   configuration (`VM_VCPU_COUNT` / `VM_MEMORY_MIB`), not chosen by users.
@@ -62,7 +62,8 @@ else is treated as an RDP X.224 Connection Request.
   a self-signed fallback for local development.
 - **Libvirt integration** for managing QEMU/KVM virtual machines from a
   configurable storage pool, with base image auto-download.
-- **Single port** (`:443`) for everything: dashboard, websockets, and RDP.
+- **Single hostname and port** (`:443`) for everything: dashboard, websockets,
+  and RDP.
 - **Structured JSON audit events** for authentication, VM lifecycle,
   console/RDP connections, and administrator actions, sent directly to Splunk
   HEC when configured or written as JSON Lines to a local file otherwise.
@@ -77,7 +78,7 @@ client ──TLS──►   │  byte-sniff: 0x16 → HTTPS, else → RDP X.224 
                        HTTPS / WebSocket                 RDP / TLS
                                  │                          │
                 ┌────────────────▼─────────────┐  ┌─────────▼─────────────────┐
-                │ chi router + Huma API        │  │ TLS terminate, read SNI   │
+                │ chi router + Huma API        │  │ Read token, terminate TLS │
                 │  /login, /logout             │  │ → dial backend VM         │
                 │  /api/dashboard/*            │  │ → new RDP TLS handshake   │
                 │  /api/dashboard/console/...  │  │ → bidirectional proxy     │
@@ -94,9 +95,10 @@ client ──TLS──►   │  byte-sniff: 0x16 → HTTPS, else → RDP X.224 
 
 The RDP flow on the front side is:
 
-1. Read the client's X.224 Connection Request (TPKT).
+1. Read the client's X.224 Connection Request (TPKT) and its routing token.
 2. Reply with an X.224 Connection Confirm selecting `PROTOCOL_SSL` (TLS).
-3. Complete the TLS handshake with the client and read SNI.
+3. Complete the TLS handshake and resolve the required token to a VM. Missing,
+   invalid, and unknown routing tokens are rejected.
 4. Authorize the VM owner and consume the single-use Connect grant.
 5. Load the VM's host-assigned address and provisioned certificate identity,
    then TCP-connect to the backend.
@@ -404,23 +406,45 @@ button to get a ready-to-use file (named after the VM, e.g.
 Remmina, …). The file already targets the gateway on port `443` with the
 correct server name and TLS settings; there is nothing to configure manually.
 
-**The download is single-use and expires in 2 minutes.** Clicking **RDP** is
-both the download action *and* an explicit authorization: it asks the gateway
-to admit a **single** RDP connection for that VM from your current IP, valid for
-at most **2 minutes**, then hands you the file. Open it in your RDP client
-within that window. The grant is **single-use and consumed at connection
-time** — a standing dashboard login no longer implicitly authorizes RDP — so
-**any reconnect, or even a first attempt that fails before the session is up,
-requires clicking RDP again** to re-authorize and download a fresh file.
+**Each downloaded file contains a new, single-use token valid for 2 minutes.**
+Clicking **RDP** authorizes one connection for that VM and downloads its file.
+Open the file in your RDP client within that window. The token is consumed
+atomically after the frontend TLS handshake succeeds and before the gateway
+connects to the VM. A consumed token cannot be reused, including after a failed
+backend connection; click **RDP** again to reconnect.
 
-You cannot build the connection by hand because the **server name** in the
-`.rdp` file is an opaque routing label of the form `<label>.<FRONT_DOMAIN>`
-(for example `a1b2c3d4….desktop.local.gd`). The label is
-`HMAC-SHA256(SNI_HASH_SECRET, vmName)` truncated to a DNS-safe length, so the VM
-name (which embeds the username) is never sent in cleartext in the TLS
-ClientHello, and because it is one-way and keyed you cannot construct it
-yourself. (DNS is unaffected: a wildcard `*.<FRONT_DOMAIN>` record still points
-every label at the gateway.)
+Downloaded files use the shared `FRONT_DOMAIN` hostname and carry the token in
+`loadbalanceinfo`:
+
+```ini
+full address:s:desktop.example.com:443
+loadbalanceinfo:s:0123456789abcdef0123456789abcdef
+```
+
+Each token contains 16 cryptographically random bytes encoded as 32 lowercase
+hexadecimal characters. The gateway stores its association with the VM, the
+issuing browser session, the owner, the client's IP, and the expiry time. It
+checks these conditions when admitting the connection. Clicking **RDP** again
+for the same VM in the same browser session replaces that session's previous
+token for the VM. Logging out or losing the issuing session invalidates its
+unused tokens, and a gateway restart invalidates all outstanding tokens.
+The two-minute limit applies to starting a connection; it does not disconnect
+an active desktop session.
+
+Configure DNS and a frontend certificate for the single `FRONT_DOMAIN` hostname.
+ACME manages only this hostname. RDP routing requires the `loadbalanceinfo`
+token; TLS SNI does not select a VM. VM subdomains and their wildcard DNS or
+frontend certificates are unnecessary. **Older HMAC-token and SNI-only `.rdp`
+files no longer work; download a fresh file for each connection.**
+`SNI_HASH_SECRET` and the persisted `sni_hash.secret` file are no longer used.
+Existing secret files are left untouched and can be removed by the operator.
+
+The token travels in cleartext in the initial X.224 request before TLS. TLS
+authenticates the shared gateway hostname but does not bind that pre-TLS token
+to the connection. Randomness, a short expiry, and single use limit guessing
+and replay, but do not prevent an active network intermediary from intercepting
+or replacing a token. The gateway still enforces the issuing session, VM
+ownership, and client IP checks, including for an intercepted token.
 
 The gateway requires TLS-protected RDP (`PROTOCOL_SSL`); clients and backends
 that only offer the legacy Standard RDP Security will be rejected. Backend TLS
@@ -454,8 +478,7 @@ file**, which keeps container and development overrides working.
 | `ACME_ENABLE`             | `false`                                                                                                          | Enable ACME (Let's Encrypt) certificate management via certmagic on the front side.               |
 | `ACME_EMAIL`              | _(empty)_                                                                                                        | ACME account contact email (recommended when `ACME_ENABLE=true`).                                 |
 | `ACME_CA`                 | _(empty)_                                                                                                        | ACME directory URL, or `staging` for the Let's Encrypt staging endpoint.                          |
-| `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Domain served by the dashboard and used as the suffix for VM SNI routing labels.                  |
-| `SNI_HASH_SECRET`         | _(empty)_                                                                                                        | Secret keying the HMAC that turns VM names into opaque SNI labels. Empty → auto-generated once and persisted to `<DATA_ROOT_DIR>/sni_hash.secret` so labels stay stable across restarts. |
+| `FRONT_DOMAIN`            | `desktop.local.gd`                                                                                               | Single hostname for the dashboard, WebSockets, and downloaded RDP files. ACME manages only this hostname. |
 | `AUDIT_LOG_FILE`          | `/var/log/devbox-gateway/audit.jsonl`                                                                            | Required JSON Lines application audit destination when `SPLUNK_HEC_ENDPOINT` is unset; ignored when HEC is configured. The Docker Compose value `/data/logs/audit.jsonl` is used only if application HEC is disabled. |
 | `SPLUNK_HEC_ENDPOINT`     | _(empty)_                                                                                                        | Splunk HTTP Event Collector URL, e.g. `https://splunk.example.com:8088`. A nonblank value selects HEC as the sole application audit output and disables local audit-file writes. A URL without a path uses `/services/collector/event`. Empty selects `AUDIT_LOG_FILE`. See [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_TOKEN`        | _(empty)_                                                                                                        | HEC token. Required when `SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table.      |
@@ -724,15 +747,16 @@ There are three supported modes for the front-side certificate:
 2. **Static PEM files.** Set `CERT_FILE` and `KEY_FILE` to readable PEM files
    inside the container/process.
 3. **ACME.** Set `ACME_ENABLE=true`, set `FRONT_DOMAIN` to the public hostname,
-   and set `ACME_EMAIL`. Optionally set `ACME_CA=staging` while testing. ACME
-   state is persisted under `$DATA_ROOT_DIR/acme`.
+   and set `ACME_EMAIL`. Only `FRONT_DOMAIN` is managed; creating or deleting VMs
+   does not request public certificates. Optionally set `ACME_CA=staging` while
+   testing. ACME state is persisted under `$DATA_ROOT_DIR/acme`.
 
 Each new VM receives a unique backend certificate and private key through its
 cloud-init seed ISO. Libvirt metadata stores the public certificate, its internal
 server name, and the domain UUID. The gateway validates certificate trust,
 server name, validity, and the exact leaf certificate before forwarding RDP
-traffic. The public routing SNI is separate from this backend identity. Backend
-TLS session resumption is disabled so every connection verifies the current
+traffic. The public routing token is separate from this backend identity.
+Backend TLS session resumption is disabled so every connection verifies the current
 provisioned identity. Certificates are valid for ten years; recreating a VM
 generates a new key and certificate.
 
@@ -1008,7 +1032,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   ├── dashboard/   Dashboard HTML / JSON rendering and VM listing.
 │   ├── deb/         Debian package construction and archive writing.
 │   ├── gateway/     Application lifecycle, HTTP handlers, TLS dispatch, and listeners.
-│   ├── hash/        Password/credential hashing helpers.
+│   ├── hash/        Password hashing for cloud-init.
 │   ├── ldap/        LDAP login authentication.
 │   ├── rdp/         RDP/X.224/MCS parsing, TLS-to-TLS proxy.
 │   ├── rpm/         RPM package construction and manifests.

@@ -15,28 +15,12 @@ import (
 	"github.com/alexedwards/scs/v2"
 )
 
-// pausedSessionSnapshotStore lets an RDP connection retain the result of All
-// while another request revokes its session. Later All calls continue normally
-// so user-wide logout can enumerate and delete sessions before RDP resumes.
-type pausedSessionSnapshotStore struct {
-	scs.Store
-	scs.IterableStore
-
-	paused   atomic.Bool
-	captured chan struct{}
-	resume   chan struct{}
+type testRDPGrant struct {
+	sessionToken string
+	token        string
 }
 
-func (s *pausedSessionSnapshotStore) All() (map[string][]byte, error) {
-	snapshot, err := s.IterableStore.All()
-	if s.paused.CompareAndSwap(false, true) {
-		close(s.captured)
-		<-s.resume
-	}
-	return snapshot, err
-}
-
-func commitTestRDPGrant(t *testing.T, manager *Manager, username string) string {
+func commitTestRDPGrant(t *testing.T, manager *Manager, username string) testRDPGrant {
 	t.Helper()
 	ctx, err := manager.Load(t.Context(), "")
 	if err != nil {
@@ -53,10 +37,11 @@ func commitTestRDPGrant(t *testing.T, manager *Manager, username string) string 
 	if err != nil {
 		t.Fatalf("load committed session: %v", err)
 	}
-	if err := manager.GrantRDPConnect(ctx, username+".desktop"); err != nil {
+	rdpToken, err := manager.GrantRDPConnect(ctx, username+".desktop")
+	if err != nil {
 		t.Fatalf("grant RDP access: %v", err)
 	}
-	return token
+	return testRDPGrant{sessionToken: token, token: rdpToken}
 }
 
 // pauseConnectRequest suspends a real LoadAndSave request either immediately
@@ -64,7 +49,7 @@ func commitTestRDPGrant(t *testing.T, manager *Manager, username string) string 
 // the middleware's deferred persistence as well as the handler to complete.
 func pauseConnectRequest(
 	t *testing.T, manager *Manager, cookie *http.Cookie, vmName string, beforeGrant bool,
-) func() (*httptest.ResponseRecorder, error) {
+) (func() (*httptest.ResponseRecorder, error), *string) {
 	t.Helper()
 	captured, resume, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	resumeRequest := sync.OnceFunc(func() { close(resume) })
@@ -73,12 +58,13 @@ func pauseConnectRequest(
 	request.RemoteAddr = testSessionRemoteAddr
 	request.AddCookie(cookie)
 	var grantErr error
+	var rdpToken string
 	handler := manager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if beforeGrant {
 			close(captured)
 			<-resume
 		}
-		grantErr = manager.GrantRDPConnect(r.Context(), vmName)
+		rdpToken, grantErr = manager.GrantRDPConnect(r.Context(), vmName)
 		if !beforeGrant {
 			close(captured)
 			<-resume
@@ -102,7 +88,7 @@ func pauseConnectRequest(
 		resumeRequest()
 		<-done
 		return response, grantErr
-	}
+	}, &rdpToken
 }
 
 func TestGrantRDPConnectPendingResponseCannotRestoreRevokedSession(t *testing.T) {
@@ -156,7 +142,7 @@ func checkPendingConnectRevocation(t *testing.T, revoke func(*Manager, context.C
 	if err != nil {
 		t.Fatalf("load session for revocation: %v", err)
 	}
-	finish := pauseConnectRequest(t, manager, cookie, "alice.desktop", beforeGrant)
+	finish, rdpToken := pauseConnectRequest(t, manager, cookie, "alice.desktop", beforeGrant)
 	if err := revoke(manager, ctx); err != nil {
 		t.Fatalf("revoke session: %v", err)
 	}
@@ -177,7 +163,7 @@ func checkPendingConnectRevocation(t *testing.T, revoke func(*Manager, context.C
 	if _, exists, err := manager.Store.Find(cookie.Value); err != nil || exists {
 		t.Errorf("pending Connect response restored revoked token: exists=%v, err=%v", exists, err)
 	}
-	if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
+	if manager.ConsumeRDPConnectGrant(*rdpToken, "alice", "192.0.2.10", "alice.desktop") {
 		t.Error("pending Connect response restored revoked RDP access")
 	}
 }
@@ -200,26 +186,22 @@ func checkPendingConnectConsumption(t *testing.T, beforeGrant bool) {
 	t.Helper()
 	manager := New()
 	cookie := issueSession(t, manager, &identity.User{Name: "alice"}, testSessionRemoteAddr)
-	withLoadedSession(t, manager, testSessionRemoteAddr, cookie, func(r *http.Request) {
-		if err := manager.GrantRDPConnect(r.Context(), "alice.first"); err != nil {
-			t.Fatalf("grant first VM access: %v", err)
-		}
-	})
-	finish := pauseConnectRequest(t, manager, cookie, "alice.second", beforeGrant)
-	if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.first") {
+	firstToken := grantCookieRDPToken(t, manager, cookie, "alice.first")
+	finish, secondToken := pauseConnectRequest(t, manager, cookie, "alice.second", beforeGrant)
+	if !manager.ConsumeRDPConnectGrant(firstToken, "alice", "192.0.2.10", "alice.first") {
 		t.Fatal("first VM grant was unavailable before response completed")
 	}
 	response, err := finish()
 	if err != nil || response.Code != http.StatusNoContent {
 		t.Fatalf("second VM Connect failed: status=%d, err=%v", response.Code, err)
 	}
-	if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.first") {
+	if manager.ConsumeRDPConnectGrant(firstToken, "alice", "192.0.2.10", "alice.first") {
 		t.Error("pending Connect response restored an already-consumed grant")
 	}
-	if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.second") {
+	if !manager.ConsumeRDPConnectGrant(*secondToken, "alice", "192.0.2.10", "alice.second") {
 		t.Error("second VM Connect did not persist its grant")
 	}
-	if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.second") {
+	if manager.ConsumeRDPConnectGrant(*secondToken, "alice", "192.0.2.10", "alice.second") {
 		t.Error("second VM grant authorized more than one connection")
 	}
 }
@@ -227,48 +209,20 @@ func checkPendingConnectConsumption(t *testing.T, beforeGrant bool) {
 func TestGrantRDPConnectConcurrentRequestsPreserveDifferentVMGrants(t *testing.T) {
 	manager := New()
 	cookie := issueSession(t, manager, &identity.User{Name: "alice"}, testSessionRemoteAddr)
-	finish := pauseConnectRequest(t, manager, cookie, "alice.first", false)
-	withLoadedSession(t, manager, testSessionRemoteAddr, cookie, func(r *http.Request) {
-		if err := manager.GrantRDPConnect(r.Context(), "alice.second"); err != nil {
-			t.Fatalf("grant second VM access: %v", err)
-		}
-	})
+	finish, firstToken := pauseConnectRequest(t, manager, cookie, "alice.first", false)
+	secondToken := grantCookieRDPToken(t, manager, cookie, "alice.second")
 	response, err := finish()
 	if err != nil || response.Code != http.StatusNoContent {
 		t.Fatalf("first VM Connect failed: status=%d, err=%v", response.Code, err)
 	}
-	for _, vmName := range []string{"alice.first", "alice.second"} {
-		if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", vmName) {
+	for vmName, rdpToken := range map[string]string{"alice.first": *firstToken, "alice.second": secondToken} {
+		if !manager.ConsumeRDPConnectGrant(rdpToken, "alice", "192.0.2.10", vmName) {
 			t.Errorf("concurrent Connect requests lost grant for %s", vmName)
 		}
-		if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", vmName) {
+		if manager.ConsumeRDPConnectGrant(rdpToken, "alice", "192.0.2.10", vmName) {
 			t.Errorf("grant for %s authorized more than one connection", vmName)
 		}
 	}
-}
-
-func consumeWithPausedSnapshot(t *testing.T, manager *Manager) (<-chan bool, func()) {
-	t.Helper()
-	store := &pausedSessionSnapshotStore{
-		Store:         manager.Store,
-		IterableStore: manager.Store.(scs.IterableStore),
-		captured:      make(chan struct{}),
-		resume:        make(chan struct{}),
-	}
-	manager.Store = store
-	resume := sync.OnceFunc(func() { close(store.resume) })
-	result := make(chan bool, 1)
-	done := make(chan struct{})
-	t.Cleanup(func() {
-		resume()
-		<-done
-	})
-	go func() {
-		defer close(done)
-		result <- manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop")
-	}()
-	<-store.captured
-	return result, resume
 }
 
 func TestConsumeRDPConnectGrantDoesNotRestoreRevokedSession(t *testing.T) {
@@ -310,60 +264,59 @@ func TestConsumeRDPConnectGrantDoesNotRestoreRevokedSession(t *testing.T) {
 func checkRDPGrantRevocation(t *testing.T, revoke func(*Manager, context.Context) error) {
 	t.Helper()
 	manager := New()
-	oldToken := commitTestRDPGrant(t, manager, "alice")
-	commitTestRDPGrant(t, manager, "bob")
-	ctx, err := manager.Load(t.Context(), oldToken)
+	old := commitTestRDPGrant(t, manager, "alice")
+	bob := commitTestRDPGrant(t, manager, "bob")
+	ctx, err := manager.Load(t.Context(), old.sessionToken)
 	if err != nil {
-		t.Fatalf("load session for revocation: %v", err)
+		t.Fatal(err)
 	}
-
-	result, resume := consumeWithPausedSnapshot(t, manager)
-
-	// Revocation completes while RDP still holds the old enumeration.
+	// Routing may finish before logout, but subsequent consumption must reload
+	// the session and reject that exact token rather than reuse a stale decision.
+	if vm, ok := manager.RDPConnectTarget(old.token, "192.0.2.10"); !ok || vm != "alice.desktop" {
+		t.Fatal("initial token did not route")
+	}
 	if err := revoke(manager, ctx); err != nil {
-		t.Fatalf("revoke session: %v", err)
+		t.Fatal(err)
 	}
-	if _, exists, err := manager.Store.Find(oldToken); err != nil || exists {
-		t.Fatalf("token was not revoked: exists=%v, err=%v", exists, err)
+	if _, exists, err := manager.Store.Find(old.sessionToken); err != nil || exists {
+		t.Fatalf("token was not revoked: exists=%v err=%v", exists, err)
 	}
-	resume()
-	if <-result {
-		t.Error("stale RDP enumeration authorized a revoked session")
+	if manager.ConsumeRDPConnectGrant(old.token, "alice", "192.0.2.10", "alice.desktop") {
+		t.Fatal("revoked token authorized a connection")
 	}
-	if _, exists, err := manager.Store.Find(oldToken); err != nil || exists {
-		t.Errorf("RDP consumption restored the old session: exists=%v, err=%v", exists, err)
+	if !manager.ConsumeRDPConnectGrant(bob.token, "bob", "192.0.2.10", "bob.desktop") {
+		t.Fatal("Alice logout invalidated Bob token")
 	}
-	if !manager.UserHasActiveSessionFromIP("bob", "192.0.2.10") {
-		t.Error("revoking Alice's session invalidated Bob's session")
+	fresh := commitTestRDPGrant(t, manager, "alice")
+	if fresh.sessionToken == old.sessionToken || fresh.token == old.token {
+		t.Fatal("fresh login reused a token")
 	}
-	if !manager.ConsumeRDPConnectGrant("bob", "192.0.2.10", "bob.desktop") {
-		t.Error("revoking Alice's session invalidated Bob's grant")
+	if manager.ConsumeRDPConnectGrant(old.token, "alice", "192.0.2.10", "alice.desktop") {
+		t.Fatal("fresh login reactivated old token")
 	}
-
-	freshToken := commitTestRDPGrant(t, manager, "alice")
-	if freshToken == oldToken {
-		t.Error("fresh login reused the revoked token")
-	}
-	if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
-		t.Error("fresh login and Connect did not authorize RDP")
+	if !manager.ConsumeRDPConnectGrant(fresh.token, "alice", "192.0.2.10", "alice.desktop") {
+		t.Fatal("fresh login token did not authorize")
 	}
 }
 
 func TestConsumeRDPConnectGrantConcurrentConnections(t *testing.T) {
 	manager := New()
-	commitTestRDPGrant(t, manager, "alice")
-	first, resume := consumeWithPausedSnapshot(t, manager)
-	// A second connection consumes the grant while the first still holds an
-	// enumeration in which that grant was unused.
-	if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
-		t.Fatal("second connection did not consume the available grant")
+	grant := commitTestRDPGrant(t, manager, "alice")
+	start := make(chan struct{})
+	var consumers sync.WaitGroup
+	var allowed atomic.Int32
+	for range 32 {
+		consumers.Go(func() {
+			<-start
+			if manager.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop") {
+				allowed.Add(1)
+			}
+		})
 	}
-	resume()
-	if <-first {
-		t.Error("both concurrent connections consumed the same grant")
-	}
-	if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
-		t.Error("consumed grant still authorizes another connection")
+	close(start)
+	consumers.Wait()
+	if allowed.Load() != 1 {
+		t.Fatalf("token consumed %d times, want exactly once", allowed.Load())
 	}
 }
 
@@ -408,14 +361,14 @@ func TestConsumeRDPConnectGrantFailsClosedOnPersistenceError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := New()
-			commitTestRDPGrant(t, manager, "alice")
+			grant := commitTestRDPGrant(t, manager, "alice")
 			store, codec := manager.Store, manager.Codec
 			tt.fail(manager)
-			if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
+			if manager.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop") {
 				t.Error("RDP authorized despite failing to persist grant consumption")
 			}
 			manager.Store, manager.Codec = store, codec
-			if !manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
+			if !manager.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop") {
 				t.Error("grant was lost despite failed persistence")
 			}
 		})
@@ -441,25 +394,26 @@ func (s *pausedGrantCommitStore) Commit(token string, data []byte, expiry time.T
 
 func TestConsumeRDPConnectGrantCommitCannotUndoLogout(t *testing.T) {
 	manager := New()
-	oldToken := commitTestRDPGrant(t, manager, "alice")
-	checkGrantCommitCannotUndoLogout(t, manager, oldToken, func() bool {
-		return manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop")
+	grant := commitTestRDPGrant(t, manager, "alice")
+	checkGrantCommitCannotUndoLogout(t, manager, grant, func() bool {
+		return manager.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop")
 	})
 }
 
 func TestGrantRDPConnectCommitCannotUndoLogout(t *testing.T) {
 	manager := New()
-	oldToken := commitTestRDPGrant(t, manager, "alice")
-	ctx, err := manager.Load(t.Context(), oldToken)
+	grant := commitTestRDPGrant(t, manager, "alice")
+	ctx, err := manager.Load(t.Context(), grant.sessionToken)
 	if err != nil {
 		t.Fatalf("load session for Connect: %v", err)
 	}
-	checkGrantCommitCannotUndoLogout(t, manager, oldToken, func() bool {
-		return manager.GrantRDPConnect(ctx, "alice.desktop") == nil
+	checkGrantCommitCannotUndoLogout(t, manager, grant, func() bool {
+		_, err := manager.GrantRDPConnect(ctx, "alice.desktop")
+		return err == nil
 	})
 }
 
-func checkGrantCommitCannotUndoLogout(t *testing.T, manager *Manager, oldToken string, update func() bool) {
+func checkGrantCommitCannotUndoLogout(t *testing.T, manager *Manager, grant testRDPGrant, update func() bool) {
 	t.Helper()
 	store := &pausedGrantCommitStore{
 		Store:         manager.Store,
@@ -505,10 +459,10 @@ func checkGrantCommitCannotUndoLogout(t *testing.T, manager *Manager, oldToken s
 	if err := <-logoutResult; err != nil {
 		t.Fatalf("logout: %v", err)
 	}
-	if _, exists, err := manager.Store.Find(oldToken); err != nil || exists {
+	if _, exists, err := manager.Store.Find(grant.sessionToken); err != nil || exists {
 		t.Errorf("pending RDP commit restored a logged-out session: exists=%v, err=%v", exists, err)
 	}
-	if manager.ConsumeRDPConnectGrant("alice", "192.0.2.10", "alice.desktop") {
+	if manager.ConsumeRDPConnectGrant(grant.token, "alice", "192.0.2.10", "alice.desktop") {
 		t.Error("logged-out session still authorizes RDP")
 	}
 }

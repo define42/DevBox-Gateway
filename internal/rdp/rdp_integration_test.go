@@ -58,7 +58,7 @@ func newServerConnWithRemoteIP(conn net.Conn, remoteIP string) net.Conn {
 // and, for each VM in grantVMs, records an explicit RDP connect grant (as the
 // dashboard "Connect" action does). A session without a grant no longer
 // authorizes RDP, so success-path tests must pass the target VM name.
-func issueUserSession(t *testing.T, sessionManager *session.Manager, username, remoteAddr string, grantVMs ...string) {
+func issueUserSession(t *testing.T, sessionManager *session.Manager, username, remoteAddr string, grantVMs ...string) map[string]string {
 	t.Helper()
 
 	user, err := identity.New(username)
@@ -77,8 +77,9 @@ func issueUserSession(t *testing.T, sessionManager *session.Manager, username, r
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	handler.ServeHTTP(rec, req)
+	tokens := make(map[string]string, len(grantVMs))
 	if len(grantVMs) == 0 {
-		return
+		return tokens
 	}
 
 	response := rec.Result()
@@ -90,13 +91,16 @@ func issueUserSession(t *testing.T, sessionManager *session.Manager, username, r
 	}
 	connectHandler := sessionManager.LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, vm := range grantVMs {
-			if err := sessionManager.GrantRDPConnect(r.Context(), vm); err != nil {
+			token, err := sessionManager.GrantRDPConnect(r.Context(), vm)
+			if err != nil {
 				t.Fatalf("grant rdp connect for %q: %v", vm, err)
 			}
+			tokens[vm] = token
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	connectHandler.ServeHTTP(httptest.NewRecorder(), connectRequest)
+	return tokens
 }
 
 const (
@@ -214,17 +218,8 @@ func stubVMIPs(t *testing.T, entries map[string]string) {
 		return ip, nil
 	}
 
-	// These tests use the plaintext VM name as the SNI label, so resolve a
-	// label back to itself when it names a known VM.
-	originalLabel := vmNameByLabelLookup
-	vmNameByLabelLookup = func(_ []byte, label string) (string, bool) {
-		_, ok := entries[label]
-		return label, ok
-	}
-
 	t.Cleanup(func() {
 		vmIPAddressLookup = originalLookup
-		vmNameByLabelLookup = originalLabel
 	})
 }
 
@@ -328,7 +323,7 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	t.Setenv(config.FRONT_DOMAIN, frontDomain)
 
 	settings := config.NewSettings(false)
-	frontTLS, err := cert.NewTLSManager(settings, nil)
+	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
 		t.Fatalf("new TLS manager: %v", err)
 	}
@@ -340,29 +335,16 @@ func newFrontTLSManager(t *testing.T, frontDomain string) (*cert.TLSManager, *co
 	return frontTLS, settings
 }
 
-func performFrontHandshake(t *testing.T, client net.Conn, serverName string) *tls.Conn {
+func performFrontHandshake(t *testing.T, client net.Conn, settings *config.Settings, token string) *tls.Conn {
 	t.Helper()
 
-	if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("set client deadline: %v", err)
-	}
+	return performTokenFrontHandshake(t, client, settings.Get(config.FRONT_DOMAIN), token)
+}
 
-	if err := writeTPKT(client, buildClientCRQ(x224.PROTOCOL_SSL)); err != nil {
-		t.Fatalf("write client CRQ: %v", err)
-	}
-	if _, err := readTPKT(client); err != nil {
-		t.Fatalf("read front CCF: %v", err)
-	}
+func performFrontHandshakeWithoutToken(t *testing.T, client net.Conn, serverName string) *tls.Conn {
+	t.Helper()
 
-	tlsClient := tls.Client(client, &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         serverName,
-		MinVersion:         tls.VersionTLS10,
-	})
-	if err := tlsClient.Handshake(); err != nil {
-		t.Fatalf("front TLS handshake: %v", err)
-	}
-	return tlsClient
+	return performTokenFrontHandshake(t, client, serverName, "")
 }
 
 func startTLSServingBackend(t *testing.T, host string, certificate tls.Certificate, handler func(*tls.Conn)) func() {
@@ -520,10 +502,10 @@ func TestHandleSuccessfulProxy(t *testing.T) {
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.100:5000", "vm1")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.100:5000", "vm1")
 
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.100", identity)
-	tlsClient := performFrontHandshake(t, client, "vm1.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vm1"])
 	defer func() { _ = tlsClient.Close() }()
 
 	if _, err := tlsClient.Write([]byte("ping")); err != nil {
@@ -555,7 +537,7 @@ func TestHandleSuccessfulProxy(t *testing.T) {
 	}
 }
 
-func TestHandleRejectsMissingSubdomain(t *testing.T) {
+func TestHandleRejectsMissingRoutingToken(t *testing.T) {
 	InitLogging()
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
@@ -569,7 +551,7 @@ func TestHandleRejectsMissingSubdomain(t *testing.T) {
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "example.test")
+	tlsClient := performFrontHandshakeWithoutToken(t, client, "example.test")
 	defer func() { _ = tlsClient.Close() }()
 	go func() {
 		_, _ = io.Copy(io.Discard, tlsClient)
@@ -585,7 +567,7 @@ func TestHandleRejectsMissingRoute(t *testing.T) {
 	defineOwnedRDPTestDomains(t, map[string]string{"missing": "alice"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.101:5000", "missing")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.101:5000", "missing")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
 	defer func() { _ = server.Close() }()
@@ -597,7 +579,7 @@ func TestHandleRejectsMissingRoute(t *testing.T) {
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "missing.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["missing"])
 	defer func() { _ = tlsClient.Close() }()
 	go func() {
 		_, _ = io.Copy(io.Discard, tlsClient)
@@ -614,7 +596,7 @@ func TestHandleBackendDialFailure(t *testing.T) {
 	defineOwnedRDPTestDomains(t, map[string]string{"vmdial": "alice"})
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.102:5000", "vmdial")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.102:5000", "vmdial")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
 	defer func() { _ = server.Close() }()
@@ -626,7 +608,7 @@ func TestHandleBackendDialFailure(t *testing.T) {
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmdial.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vmdial"])
 	defer func() { _ = tlsClient.Close() }()
 	go func() {
 		_, _ = io.Copy(io.Discard, tlsClient)
@@ -657,7 +639,7 @@ func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.103:5000", "vmbad")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.103:5000", "vmbad")
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
 	defer func() { _ = server.Close() }()
@@ -669,7 +651,7 @@ func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmbad.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vmbad"])
 	defer func() { _ = tlsClient.Close() }()
 	go func() {
 		_, _ = io.Copy(io.Discard, tlsClient)
@@ -683,6 +665,7 @@ func TestHandleRejectsBackendWithoutTLS(t *testing.T) {
 
 func TestHandleRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 
 	backendHost := "127.0.0.45"
 	stubVMIPs(t, map[string]string{"vmnosession": backendHost})
@@ -705,11 +688,11 @@ func TestHandleRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmnosession.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, "0123456789abcdef0123456789abcdef")
 	defer func() { _ = tlsClient.Close() }()
 	_ = tlsClient.Close()
 
@@ -718,6 +701,7 @@ func TestHandleRejectsWithoutOwnerSessionBeforeDial(t *testing.T) {
 
 func TestHandleRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 
 	backendHost := "127.0.0.46"
 	stubVMIPs(t, map[string]string{"vmdiffip": backendHost})
@@ -732,7 +716,7 @@ func TestHandleRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "alice", "192.0.2.200:5000")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.200:5000", "vmdiffip")
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -741,19 +725,23 @@ func TestHandleRejectsDifferentOwnerSessionIPBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmdiffip.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vmdiffip"])
 	defer func() { _ = tlsClient.Close() }()
 	_ = tlsClient.Close()
 
 	waitDone(t, done)
+	if !sessionManager.ConsumeRDPConnectGrant(tokens["vmdiffip"], "alice", "192.0.2.200", "vmdiffip") {
+		t.Fatal("connection from another IP consumed the valid Connect grant")
+	}
 }
 
 func TestHandleRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 
 	backendHost := "127.0.0.47"
 	stubVMIPs(t, map[string]string{"vmotheruser": backendHost})
@@ -768,7 +756,7 @@ func TestHandleRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	sessionManager := session.New()
-	issueUserSession(t, sessionManager, "bob", "192.0.2.106:5000")
+	tokens := issueUserSession(t, sessionManager, "bob", "192.0.2.106:5000", "vmotheruser")
 
 	client, server := net.Pipe()
 	defer func() { _ = client.Close() }()
@@ -777,19 +765,23 @@ func TestHandleRejectsOtherUserSessionFromSameIPBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmotheruser.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vmotheruser"])
 	defer func() { _ = tlsClient.Close() }()
 	_ = tlsClient.Close()
 
 	waitDone(t, done)
+	if !sessionManager.ConsumeRDPConnectGrant(tokens["vmotheruser"], "bob", "192.0.2.106", "vmotheruser") {
+		t.Fatal("connection to another owner's VM consumed the other user's Connect grant")
+	}
 }
 
 func TestHandleRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 	InitLogging()
+	identity, _, _ := backendTLSFixture(t)
 
 	backendHost := "127.0.0.49"
 	stubVMIPs(t, map[string]string{"vmnogrant": backendHost})
@@ -815,11 +807,11 @@ func TestHandleRejectsWithoutConnectGrantBeforeDial(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Handle(server, frontTLS, sessionManager, settings)
+		handleWithBackendIdentity(server, frontTLS, sessionManager, settings, testBackendIdentityLookup(identity))
 		close(done)
 	}()
 
-	tlsClient := performFrontHandshake(t, client, "vmnogrant.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, "0123456789abcdef0123456789abcdef")
 	defer func() { _ = tlsClient.Close() }()
 	_ = tlsClient.Close()
 
@@ -846,10 +838,10 @@ func TestHandleAllowsConnectGrantFromMatchingSessionIP(t *testing.T) {
 	// One session without a grant, and the connecting session (.107) with an
 	// explicit grant for the VM: the grant on the matching IP is what authorizes.
 	issueUserSession(t, sessionManager, "alice", "192.0.2.201:5000")
-	issueUserSession(t, sessionManager, "alice", "192.0.2.107:5001", "vmmulti")
+	tokens := issueUserSession(t, sessionManager, "alice", "192.0.2.107:5001", "vmmulti")
 
 	client, done := startHandleTestConnection(t, frontTLS, sessionManager, settings, "192.0.2.107", identity)
-	tlsClient := performFrontHandshake(t, client, "vmmulti.example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens["vmmulti"])
 	defer func() { _ = tlsClient.Close() }()
 
 	reply := make([]byte, 2)

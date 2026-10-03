@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/hash"
 	"github.com/define42/devbox-gateway/internal/virt"
 	"github.com/define42/devbox-gateway/internal/vmname"
 )
@@ -99,9 +98,9 @@ func vmBareName(vm virt.VMInfo) string {
 
 // rdpDownloadFilename derives a friendly per-VM download filename (e.g.
 // "alice-desktop.rdp") so the saved file and many RDP clients label the
-// connection by VM name. The on-wire SNI is unaffected — it still uses the
-// hashed connect host. The VM name is sanitized to safe filename characters
-// because the username portion is not otherwise constrained.
+// connection by VM name. Routing uses an opaque single-use token independently of
+// this filename. The VM name is sanitized to safe filename characters because
+// the username portion is not otherwise constrained.
 func rdpDownloadFilename(vmName string) string {
 	name := strings.Map(func(r rune) rune {
 		switch {
@@ -120,12 +119,12 @@ func rdpDownloadFilename(vmName string) string {
 	return name + ".rdp"
 }
 
-// GenerateRDPContent builds the raw .rdp file body for the provided server, user,
-// and public port. It is the single source of truth for the connection settings
-// used by the downloadable file (WriteRDPFile).
-func GenerateRDPContent(server, username string, port int) string {
+// GenerateRDPContent builds the downloadable .rdp file using the shared gateway
+// host and the caller's short-lived, single-use RDP token.
+func GenerateRDPContent(server, username, routingToken string, port int) string {
 	lines := []string{
 		fmt.Sprintf("full address:s:%s", net.JoinHostPort(server, strconv.Itoa(port))),
+		fmt.Sprintf("loadbalanceinfo:s:%s", routingToken),
 		fmt.Sprintf("username:s:%s", username),
 		"screen mode id:i:2",
 		"prompt for credentials:i:1",
@@ -136,23 +135,10 @@ func GenerateRDPContent(server, username string, port int) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// rdpConnectHost returns the host an RDP client connects to for the VM: the
-// opaque HMAC routing label under FRONT_DOMAIN, or the bare VM name when no
-// front domain is configured, so the downloaded .rdp file routes to the right VM
-// without leaking the username-hostname in the cleartext TLS SNI.
-func rdpConnectHost(settings *config.Settings, vmName string) string {
-	domain := strings.TrimSpace(settings.String(config.FRONT_DOMAIN))
-	if domain == "" {
-		return vmName
-	}
-	secret := []byte(settings.Get(config.SNI_HASH_SECRET))
-	return hash.RoutingLabel(secret, vmName) + "." + domain
-}
-
 // RDPFileForUser builds the .rdp download (filename and body) for the named VM,
 // resolved from the requesting user's own VM list so callers cannot mint a file
 // for a VM the user does not own. ok is false when the VM is not in that list.
-func RDPFileForUser(settings *config.Settings, user, vmName string) (filename string, content []byte, ok bool) {
+func RDPFileForUser(settings *config.Settings, user, vmName, routingToken string) (filename string, content []byte, ok bool) {
 	for _, vm := range virt.NewInventory().VMs(user) {
 		if vm.Name != vmName {
 			continue
@@ -161,7 +147,12 @@ func RDPFileForUser(settings *config.Settings, user, vmName string) (filename st
 		if rdpUser == "" {
 			rdpUser = user
 		}
-		body := GenerateRDPContent(rdpConnectHost(settings, vm.Name), rdpUser, config.RDPPort(settings))
+		body := GenerateRDPContent(
+			strings.TrimSpace(settings.String(config.FRONT_DOMAIN)),
+			rdpUser,
+			routingToken,
+			config.RDPPort(settings),
+		)
 		return rdpDownloadFilename(vm.Name), []byte(body), true
 	}
 	return "", nil, false
@@ -169,9 +160,9 @@ func RDPFileForUser(settings *config.Settings, user, vmName string) (filename st
 
 // WriteRDPFile writes the named VM's .rdp connection file as an attachment
 // download. The caller is responsible for authenticating the session and
-// verifying ownership (and for recording the RDP connect grant) before calling.
-func WriteRDPFile(w http.ResponseWriter, settings *config.Settings, user, vmName string) {
-	filename, content, ok := RDPFileForUser(settings, user, vmName)
+// verifying ownership and issuing the RDP token before calling.
+func WriteRDPFile(w http.ResponseWriter, settings *config.Settings, user, vmName, routingToken string) {
+	filename, content, ok := RDPFileForUser(settings, user, vmName, routingToken)
 	if !ok {
 		WriteJSON(w, http.StatusNotFound, ActionResponse{OK: false, Error: "VM not found."})
 		return
@@ -234,8 +225,7 @@ func DataForAdmin(settings *config.Settings) (DataResponse, error) {
 func buildDashboardRows(vmList []virt.VMInfo, user string) []VM {
 	rows := make([]VM, 0, len(vmList))
 	for _, vm := range vmList {
-		// The UI shows the bare VM name (the part the user typed at creation,
-		// without the owner prefix) — the old FQDN was never the on-wire SNI.
+		// The UI shows the name the user entered at creation, without the owner prefix.
 		displayName := vmBareName(vm)
 		// Prefer the guest account stored on the VM; older VMs without that
 		// metadata fall back to their owner, then to the requesting user's name

@@ -57,31 +57,10 @@ var vmIPAddressLookup = func(hostname string) (string, error) {
 	return virt.NewInventory().VMIP(hostname)
 }
 
-//nolint:gochecknoglobals // package-level singleton needed for one-time registration
-var vmNameByLabelLookup = func(secret []byte, label string) (string, bool) {
-	return virt.NewInventory().ResolveVMNameByLabel(secret, label)
-}
-
-func getSubdomain(host, root string) (string, bool) {
-	suffix := "." + root
-
-	if !strings.HasSuffix(host, suffix) {
-		return "", false
-	}
-
-	sub := strings.TrimSuffix(host, suffix)
-
-	if sub == "" {
-		return "", false // no subdomain
-	}
-
-	return sub, true
-}
-
 type frontRDPConnection struct {
-	tlsConn  *tls.Conn
-	sni      string
-	hostname string
+	tlsConn      *tls.Conn
+	hostname     string
+	routingToken string
 }
 
 type backendIdentityLookup func(string) (certificatePEM, serverName string, err error)
@@ -95,11 +74,11 @@ func handleWithBackendIdentity(raw net.Conn, frontTLS *cert.TLSManager, sessionM
 	started := time.Now()
 	debugf("new connection remote=%s local=%s", raw.RemoteAddr(), raw.LocalAddr())
 
-	clientConn, ok := negotiateFrontRDP(raw, frontTLS, settings, started)
+	clientConn, ok := negotiateFrontRDP(raw, frontTLS, sessionManager, settings, started)
 	if !ok {
 		return
 	}
-	authorization, ok := authorizeRDPAccess(raw.RemoteAddr(), sessionManager, clientConn.sni, clientConn.hostname)
+	authorization, ok := authorizeRDPAccess(raw.RemoteAddr(), sessionManager, clientConn.hostname, clientConn.routingToken)
 	if !ok {
 		_ = clientConn.tlsConn.Close()
 		return
@@ -107,7 +86,7 @@ func handleWithBackendIdentity(raw net.Conn, frontTLS *cert.TLSManager, sessionM
 	endVMUse := virt.TrackVMUse(clientConn.hostname)
 	defer endVMUse()
 
-	backendAddr, ok := resolveBackendAddr(raw.RemoteAddr(), clientConn.sni, clientConn.hostname)
+	backendAddr, ok := resolveBackendAddr(raw.RemoteAddr(), clientConn.hostname)
 	if !ok {
 		_ = clientConn.tlsConn.Close()
 		return
@@ -261,14 +240,13 @@ func readTPKT(c net.Conn) ([]byte, error) {
 	return b, nil
 }
 
-// findClientRequestedProtocols finds an embedded RDP_NEG_REQ and returns requestedProtocols.
-// We scan the payload for the 8-byte structure: type=0x01, len=8, then uint32 LE protocols.
+// findClientRequestedProtocols returns the protocols from a validated request.
 func findClientRequestedProtocols(tpktPayload []byte) (uint32, bool) {
-	neg, ok := findX224Negotiation(tpktPayload, x224.TYPE_RDP_NEG_REQ)
-	if !ok {
+	request, err := parseClientConnectionRequest(tpktPayload)
+	if err != nil {
 		return 0, false
 	}
-	return neg.Result, true
+	return request.requestedProtocols, true
 }
 
 // findServerSelectedProtocol finds an embedded RDP_NEG_RSP and returns selectedProtocol.
@@ -370,7 +348,7 @@ func tlsVersionLabel(version uint16) string {
 	}
 }
 
-func negotiateFrontRDP(raw net.Conn, frontTLS *cert.TLSManager, settings *config.Settings, started time.Time) (*frontRDPConnection, bool) {
+func negotiateFrontRDP(raw net.Conn, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, started time.Time) (*frontRDPConnection, bool) {
 	crq, ok := readClientConnectionRequest(raw)
 	if !ok {
 		return nil, false
@@ -387,40 +365,48 @@ func negotiateFrontRDP(raw net.Conn, frontTLS *cert.TLSManager, settings *config
 		return nil, false
 	}
 
-	hostname, ok := validateFrontSNI(sni, raw.RemoteAddr(), settings)
+	hostname, ok := resolveFrontRoute(crq.routingToken, sni, raw.RemoteAddr(), settings, sessionManager)
 	if !ok {
 		_ = clientTLS.Close()
 		return nil, false
 	}
 
 	return &frontRDPConnection{
-		tlsConn:  clientTLS,
-		sni:      sni,
-		hostname: hostname,
+		tlsConn:      clientTLS,
+		hostname:     hostname,
+		routingToken: crq.routingToken,
 	}, true
 }
 
-func readClientConnectionRequest(raw net.Conn) ([]byte, bool) {
+func readClientConnectionRequest(raw net.Conn) (*clientConnectionRequest, bool) {
 	crq, err := readTPKT(raw)
 	if err != nil {
 		log.Printf("read client CRQ: %v", err)
 		return nil, false
 	}
 	debugf("client CRQ len=%d", len(crq))
-	return crq, true
+	request, err := parseClientConnectionRequest(crq)
+	if err != nil {
+		log.Printf("parse client CRQ from %s: %v", raw.RemoteAddr(), err)
+		return nil, false
+	}
+	return request, true
 }
 
-func clientOfferedTLS(remoteAddr net.Addr, crq []byte) bool {
-	reqProto, ok := findClientRequestedProtocols(crq)
-	debugf("client requested protocols ok=%v value=0x%08x", ok, reqProto)
+func clientOfferedTLS(remoteAddr net.Addr, crq *clientConnectionRequest) bool {
+	if crq == nil {
+		return false
+	}
+	reqProto := crq.requestedProtocols
+	debugf("client requested protocols value=0x%08x", reqProto)
 	if reqProto&(x224.PROTOCOL_HYBRID|x224.PROTOCOL_HYBRID_EX) != 0 {
 		debugf("client offered NLA (HYBRID/HYBRID_EX); gateway only supports TLS (PROTOCOL_SSL)")
 	}
-	if ok && (reqProto&x224.PROTOCOL_SSL) != 0 {
+	if (reqProto & x224.PROTOCOL_SSL) != 0 {
 		return true
 	}
 
-	log.Printf("client did not offer TLS (ok=%v requested=0x%08x) from %s", ok, reqProto, remoteAddr)
+	log.Printf("client did not offer TLS (requested=0x%08x) from %s", reqProto, remoteAddr)
 	return false
 }
 
@@ -452,38 +438,9 @@ func handshakeFrontTLS(raw net.Conn, frontTLS *cert.TLSManager, started time.Tim
 	return clientTLS, sni, true
 }
 
-func validateFrontSNI(sni string, remoteAddr net.Addr, settings *config.Settings) (string, bool) {
-	frontDomain := strings.ToLower(strings.TrimSpace(settings.Get(config.FRONT_DOMAIN)))
-	if frontDomain != "" {
-		debugf("enforcing front domain %q", frontDomain)
-	}
-	if frontDomain != "" && !strings.HasSuffix(sni, frontDomain) {
-		log.Printf("client SNI=%q does not match required domain %q from %s", sni, frontDomain, remoteAddr)
-		return "", false
-	}
-
-	label, ok := getSubdomain(sni, frontDomain)
-	if !ok {
-		log.Printf("client SNI=%q does not have valid subdomain for domain %q from %s", sni, frontDomain, remoteAddr)
-		return "", false
-	}
-
-	// The subdomain is an opaque HMAC routing label, not the VM name. Map it
-	// back to the real name via the cached VM list; an unknown label is denied.
-	secret := []byte(settings.Get(config.SNI_HASH_SECRET))
-	hostname, ok := vmNameByLabelLookup(secret, label)
-	if !ok {
-		log.Printf("client SNI=%q routing label %q from %s did not match any VM", sni, label, remoteAddr)
-		return "", false
-	}
-
-	debugf("resolved routing label %q to vm=%q", label, hostname)
-	return hostname, true
-}
-
-func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sni, hostname string) (session.ConnectionAuthorization, bool) {
+func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, hostname, token string) (session.ConnectionAuthorization, bool) {
 	if sessionManager == nil {
-		log.Printf("rdp denied SNI=%q vm=%q remote=%s: session manager unavailable", sni, hostname, remoteAddr)
+		log.Printf("rdp denied vm=%q remote=%s: session manager unavailable", hostname, remoteAddr)
 		return session.ConnectionAuthorization{}, false
 	}
 
@@ -493,18 +450,18 @@ func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sn
 		return session.ConnectionAuthorization{}, false
 	}
 	if !hasOwner {
-		log.Printf("rdp denied SNI=%q vm=%q remote=%s: missing VM owner", sni, hostname, remoteAddr)
+		log.Printf("rdp denied vm=%q remote=%s: missing VM owner", hostname, remoteAddr)
 		return session.ConnectionAuthorization{}, false
 	}
 
 	clientIP, ok := session.CanonicalClientIP(remoteAddr.String())
 	if !ok {
-		log.Printf("rdp denied SNI=%q vm=%q remote=%s: invalid client IP", sni, hostname, remoteAddr)
+		log.Printf("rdp denied vm=%q remote=%s: invalid client IP", hostname, remoteAddr)
 		return session.ConnectionAuthorization{}, false
 	}
-	authorization, ok := sessionManager.AuthorizeRDPConnection(owner, clientIP, hostname)
+	authorization, ok := sessionManager.AuthorizeRDPConnection(token, owner, clientIP, hostname)
 	if !ok {
-		log.Printf("rdp denied SNI=%q vm=%q owner=%q client_ip=%q remote=%s: no unused Connect authorization (owner must click Connect in the dashboard for each connection)", sni, hostname, owner, clientIP, remoteAddr)
+		log.Printf("rdp denied vm=%q owner=%q client_ip=%q remote=%s: no unused Connect authorization (owner must click Connect in the dashboard for each connection)", hostname, owner, clientIP, remoteAddr)
 		return session.ConnectionAuthorization{}, false
 	}
 
@@ -512,7 +469,7 @@ func authorizeRDPAccess(remoteAddr net.Addr, sessionManager *session.Manager, sn
 	return authorization, true
 }
 
-func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool) {
+func resolveBackendAddr(remoteAddr net.Addr, hostname string) (string, bool) {
 	backendIP, err := vmIPAddressLookup(hostname)
 	if err != nil {
 		log.Printf("get IP of VM %s: %v", hostname, err)
@@ -522,12 +479,12 @@ func resolveBackendAddr(remoteAddr net.Addr, sni, hostname string) (string, bool
 	// The virt layer returns the host-assigned address inside the VM NAT subnet.
 	// An empty result means there is no trusted route, so fail closed.
 	if backendIP == "" {
-		log.Printf("no route for SNI=%q from %s", sni, remoteAddr)
+		log.Printf("no route for vm=%q from %s", hostname, remoteAddr)
 		return "", false
 	}
 
 	backendAddr := net.JoinHostPort(backendIP, "3389")
-	log.Printf("client %s SNI=%q -> %s", remoteAddr, sni, backendAddr)
+	log.Printf("client %s vm=%q -> %s", remoteAddr, hostname, backendAddr)
 	return backendAddr, true
 }
 
@@ -618,6 +575,6 @@ func backendTLSConfig(hostname string, lookup backendIdentityLookup) (*tls.Confi
 		return nil, fmt.Errorf("load provisioned backend identity: %w", err)
 	}
 	// Backend identity comes from host-owned VM metadata, never the client's
-	// public routing SNI. Each connection performs full certificate verification.
+	// public gateway domain. Each connection performs full certificate verification.
 	return backendidentity.TLSConfig(certificatePEM, serverName)
 }

@@ -3,52 +3,7 @@ package virt
 import (
 	"fmt"
 	"testing"
-
-	"github.com/define42/devbox-gateway/internal/hash"
 )
-
-//nolint:gocognit // Nested size and hit/miss sub-benchmarks keep each measured scenario explicit.
-func BenchmarkInventoryResolveVMNameByLabel(b *testing.B) {
-	secret := []byte("deterministic-benchmark-routing-secret")
-	for _, vmCount := range []int{10, 100, 1_000} {
-		b.Run(fmt.Sprintf("VMs_%d", vmCount), func(b *testing.B) {
-			worker := &Inventory{}
-			vms := benchmarkInventoryVMs(vmCount)
-			worker.setVMs(vms)
-			targetName := vms[len(vms)-1].Name
-
-			b.Run("HitLast", func(b *testing.B) {
-				label := hash.RoutingLabel(secret, targetName)
-				var got string
-				var ok bool
-
-				b.ReportAllocs()
-				b.ResetTimer()
-				for b.Loop() {
-					got, ok = worker.ResolveVMNameByLabel(secret, label)
-				}
-				if !ok || got != targetName {
-					b.Fatalf("ResolveVMNameByLabel() = %q, %v; want %q, true", got, ok, targetName)
-				}
-			})
-
-			b.Run("Miss", func(b *testing.B) {
-				label := hash.RoutingLabel(secret, "missing-vm")
-				var got string
-				var ok bool
-
-				b.ReportAllocs()
-				b.ResetTimer()
-				for b.Loop() {
-					got, ok = worker.ResolveVMNameByLabel(secret, label)
-				}
-				if ok || got != "" {
-					b.Fatalf("ResolveVMNameByLabel() = %q, %v; want empty result", got, ok)
-				}
-			})
-		})
-	}
-}
 
 //nolint:gocognit // Nested size and hit/miss sub-benchmarks keep each measured scenario explicit.
 func BenchmarkInventoryVMIP(b *testing.B) {

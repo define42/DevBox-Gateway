@@ -709,8 +709,8 @@ func TestHcovAdminRoleDoesNotBypassRDPOwnership(t *testing.T) {
 		url.Values{"vm_name": {domainName}},
 	)
 	hcovAssertAction(t, rec, http.StatusForbidden, "You do not have permission to connect to this VM.")
-	if sessionManager.ConsumeRDPConnectGrant(admin.Name, "192.0.2.1", domainName) {
-		t.Fatal("administrator RDP denial must not leave a connection grant")
+	if strings.Contains(rec.Body.String(), "loadbalanceinfo:s:") {
+		t.Fatal("administrator RDP denial must not return a connection token")
 	}
 }
 
@@ -869,9 +869,8 @@ func hcovAssertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, user st
 
 // TestHcovDashboardRDPDownloadsFileForOwnedVM drives the full authorized RDP
 // download: an owned (TCG, never-booted) domain, the ownership check, the RDP
-// connect grant, and the .rdp attachment. The dashboard VM cache refreshes
-// every couple of seconds, so the request is polled until the cache lists the
-// domain.
+// token, and the .rdp attachment. Each new download replaces the previous token
+// for the same session and VM, and a consumed file cannot reuse a later grant.
 func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	virt.NewInventory()
 
@@ -880,25 +879,28 @@ func TestHcovDashboardRDPDownloadsFileForOwnedVM(t *testing.T) {
 	hcovDefineOwnedDomain(t, domainName, user)
 
 	sessionManager := session.New()
+	t.Cleanup(func() { _ = sessionManager.Close() })
 	router := NewHandler(sessionManager, config.NewSettings(false))
 	cookie := issueSessionCookie(t, sessionManager, user)
-	form := url.Values{"vm_name": {domainName}}
+	hcovWaitForCachedVM(t, user)
 
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		rec := hcovPostForm(t, router, cookie, "/api/dashboard/rdp", form)
-		if rec.Code == http.StatusOK {
-			hcovAssertRDPDownload(t, rec, user)
-			return
-		}
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("unexpected RDP response %d: %s", rec.Code, rec.Body.String())
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("VM %s never appeared in the dashboard cache", domainName)
-		}
-		time.Sleep(250 * time.Millisecond)
+	first := downloadRDPToken(t, router, cookie, domainName, user)
+	assertRDPTokenTarget(t, sessionManager, first, "192.0.2.1", domainName)
+	assertRDPTokenTarget(t, sessionManager, first, "192.0.2.2", "")
+	second := downloadRDPToken(t, router, cookie, domainName, user)
+	if first == second {
+		t.Fatal("each Connect download must receive a fresh token")
 	}
+	assertRDPTokenTarget(t, sessionManager, first, "192.0.2.1", "")
+	assertRDPTokenTarget(t, sessionManager, second, "192.0.2.1", domainName)
+	if _, ok := sessionManager.AuthorizeRDPConnection(second, user, "192.0.2.1", domainName); !ok {
+		t.Fatal("newly downloaded token did not authorize its VM")
+	}
+	assertRDPTokenTarget(t, sessionManager, second, "192.0.2.1", "")
+	third := downloadRDPToken(t, router, cookie, domainName, user)
+	assertRDPTokenTarget(t, sessionManager, first, "192.0.2.1", "")
+	assertRDPTokenTarget(t, sessionManager, second, "192.0.2.1", "")
+	assertRDPTokenTarget(t, sessionManager, third, "192.0.2.1", domainName)
 }
 
 // TestHcovDashboardStartThenShutdown starts a protected domain through the

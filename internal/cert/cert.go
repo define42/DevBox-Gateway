@@ -20,32 +20,21 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/hash"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/mholt/acmez"
 )
 
-// VMNameProvider returns the current VM names used to maintain the ACME domain set.
-type VMNameProvider func() []string
-
-// acmeDomainUpdateTimeout bounds a synchronous refresh; failed domains are
-// retried on the next worker tick without holding up later refreshes forever.
-const acmeDomainUpdateTimeout = 5 * time.Minute
-
-// TLSManager owns the frontend TLS configuration and ACME domain updates.
+// TLSManager owns the shared frontend TLS configuration and ACME lifecycle.
 type TLSManager struct {
-	magic          *certmagic.Config
-	settings       *config.Settings
-	vmNames        VMNameProvider
-	tlsConfig      *tls.Config
-	initialDomains []string
-	domainsMu      sync.RWMutex
-	domains        []string
-	workerMu       sync.Mutex
-	cancel         context.CancelFunc
-	workerDone     chan struct{}
-	stopOnce       sync.Once
+	magic       *certmagic.Config
+	tlsConfig   *tls.Config
+	domains     []string
+	startOnce   sync.Once
+	startErr    error
+	lifecycleMu sync.Mutex
+	cancel      context.CancelFunc
+	closed      bool
 }
 
 // TLSConfig returns the tls.Config used for incoming frontend connections.
@@ -53,97 +42,25 @@ func (tm *TLSManager) TLSConfig() *tls.Config {
 	return tm.tlsConfig
 }
 
-func (tm *TLSManager) worker(ctx context.Context, ticker *time.Ticker) {
-	defer ticker.Stop()
-	defer close(tm.workerDone)
-
-	for {
-		select {
-		case <-ticker.C:
-			tm.updateDomains(ctx)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// Close stops the background ACME domain worker, if one is running.
+// Close cancels ACME issuance and retries. It is safe to call more than once.
 func (tm *TLSManager) Close() error {
-	tm.workerMu.Lock()
+	tm.lifecycleMu.Lock()
+	tm.closed = true
 	cancel := tm.cancel
-	done := tm.workerDone
-	tm.workerMu.Unlock()
+	tm.lifecycleMu.Unlock()
 
-	if cancel == nil {
-		return nil
-	}
-
-	tm.stopOnce.Do(func() {
+	if cancel != nil {
 		cancel()
-		<-done
-	})
+	}
 	return nil
-}
-
-func (tm *TLSManager) updateDomains(ctx context.Context) {
-	if ctx.Err() != nil {
-		return
-	}
-	vmNames := tm.vmNames()
-	frontPageDomain := tm.settings.Get(config.FRONT_DOMAIN)
-	secret := []byte(tm.settings.Get(config.SNI_HASH_SECRET))
-
-	domains := managedDomainList(vmNames, frontPageDomain, secret)
-
-	if sameElements(tm.managedDomains(), domains) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, acmeDomainUpdateTimeout)
-	defer cancel()
-	if err := tm.magic.ManageSync(ctx, domains); err != nil {
-		log.Printf("acme: error updating managed domains: %v", err)
-		return
-	}
-	tm.setManagedDomains(domains)
-	log.Printf("acme: updated managed domains: %s", strings.Join(domains, ", "))
-}
-
-// managedDomainList builds the set of domains ACME should manage: the front-page
-// domain plus, for every VM, its opaque HMAC routing label under that domain.
-// Using the routing label (rather than the cleartext VM name) keeps the
-// certificate from leaking the username-hostname and matches the SNI the RDP
-// client sends — see the dashboard .rdp connect host and the RDP front handler.
-func managedDomainList(vmNames []string, frontPageDomain string, secret []byte) []string {
-	domains := []string{frontPageDomain}
-	for _, name := range vmNames {
-		domains = append(domains, hash.RoutingLabel(secret, name)+"."+frontPageDomain)
-	}
-	return domains
-}
-
-func (tm *TLSManager) managedDomains() []string {
-	tm.domainsMu.RLock()
-	defer tm.domainsMu.RUnlock()
-	return slices.Clone(tm.domains)
-}
-
-func (tm *TLSManager) setManagedDomains(domains []string) {
-	tm.domainsMu.Lock()
-	defer tm.domainsMu.Unlock()
-	tm.domains = slices.Clone(domains)
 }
 
 // NewTLSManager builds the frontend TLS manager from the active settings. When
 // ACME is enabled it prepares certificate management but does not yet obtain any
 // certificates: the caller must invoke StartManaging once the front listener is
 // accepting connections, so that ACME TLS-ALPN-01 validation can be answered.
-// vmNames is required only when ACME is enabled.
-func NewTLSManager(settings *config.Settings, vmNames VMNameProvider) (*TLSManager, error) {
+func NewTLSManager(settings *config.Settings) (*TLSManager, error) {
 	acmeEnabled := settings.IsTrue(config.ACME_ENABLE)
-	if acmeEnabled && vmNames == nil {
-		return nil, errors.New("cert: vm name provider is required when acme is enabled")
-	}
-
 	fallback, err := LoadOrGenerateCert(settings)
 	if err != nil {
 		log.Fatalf("cert setup: %v", err)
@@ -151,10 +68,10 @@ func NewTLSManager(settings *config.Settings, vmNames VMNameProvider) (*TLSManag
 	}
 
 	if !acmeEnabled {
-		return newStaticTLSManager(settings, fallback), nil
+		return newStaticTLSManager(fallback), nil
 	}
 
-	return newACMETLSManager(settings, fallback, vmNames)
+	return newACMETLSManager(settings, fallback)
 }
 
 // LoadOrGenerateCert loads the configured certificate pair or creates a self-signed fallback.
@@ -164,7 +81,7 @@ func LoadOrGenerateCert(settings *config.Settings) (tls.Certificate, error) {
 	acmeEnabled := settings.IsTrue(config.ACME_ENABLE)
 	if certPath == "" && keyPath == "" {
 		if acmeEnabled {
-			log.Printf("acme enabled; no -cert/-key provided; generating self-signed fallback certificate for non-SNI clients")
+			log.Printf("acme enabled; no -cert/-key provided; generating self-signed fallback certificate")
 		} else {
 			log.Printf("no -cert/-key provided; generating self-signed certificate for this run")
 		}
@@ -181,7 +98,7 @@ func IsACMETLSALPN(protocol string) bool {
 	return protocol == acmez.ACMETLS1Protocol
 }
 
-func newStaticTLSManager(settings *config.Settings, fallback tls.Certificate) *TLSManager {
+func newStaticTLSManager(fallback tls.Certificate) *TLSManager {
 	frontTLS := &tls.Config{
 		Certificates: []tls.Certificate{fallback},
 	}
@@ -191,14 +108,12 @@ func newStaticTLSManager(settings *config.Settings, fallback tls.Certificate) *T
 
 	return &TLSManager{
 		tlsConfig: frontTLS,
-		settings:  settings,
 	}
 }
 
 func newACMETLSManager(
 	settings *config.Settings,
 	fallback tls.Certificate,
-	vmNames VMNameProvider,
 ) (*TLSManager, error) {
 	configureACMEDefaults(settings)
 
@@ -210,11 +125,9 @@ func newACMETLSManager(
 	magic := certmagic.NewDefault()
 
 	return &TLSManager{
-		magic:          magic,
-		tlsConfig:      newManagedTLSConfig(magic, fallback),
-		settings:       settings,
-		vmNames:        vmNames,
-		initialDomains: domains,
+		magic:     magic,
+		tlsConfig: newManagedTLSConfig(magic, fallback, domains[0]),
+		domains:   domains,
 	}, nil
 }
 
@@ -230,23 +143,24 @@ func (tm *TLSManager) StartManaging() error {
 		return nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	tm.startOnce.Do(func() {
+		tm.lifecycleMu.Lock()
+		if tm.closed {
+			tm.startErr = errors.New("cert: TLS manager is closed")
+			tm.lifecycleMu.Unlock()
+			return
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		tm.cancel = cancel
+		tm.lifecycleMu.Unlock()
 
-	log.Printf("acme: managing certificates for: %s", strings.Join(tm.initialDomains, ", "))
-	if err := tm.magic.ManageAsync(ctx, tm.initialDomains); err != nil {
-		cancel()
-		return fmt.Errorf("acme: manage domains: %w", err)
-	}
-	tm.setManagedDomains(tm.initialDomains)
-
-	tm.workerMu.Lock()
-	tm.cancel = cancel
-	tm.workerDone = make(chan struct{})
-	tm.workerMu.Unlock()
-
-	go tm.worker(ctx, time.NewTicker(5*time.Second))
-
-	return nil
+		log.Printf("acme: managing certificate for: %s", strings.Join(tm.domains, ", "))
+		if err := tm.magic.ManageAsync(ctx, tm.domains); err != nil {
+			cancel()
+			tm.startErr = fmt.Errorf("acme: manage domain: %w", err)
+		}
+	})
+	return tm.startErr
 }
 
 func configureACMEDefaults(settings *config.Settings) {
@@ -268,32 +182,44 @@ func configureACMEDefaults(settings *config.Settings) {
 	}
 }
 
-func initialManagedDomains(frontPageDomain string) ([]string, error) {
-	var domains []string
-	if frontPageDomain != "" {
-		domains = append(domains, frontPageDomain)
+func initialManagedDomains(frontDomain string) ([]string, error) {
+	frontDomain = strings.ToLower(strings.TrimSpace(frontDomain))
+	if frontDomain == "" {
+		return nil, errors.New("acme enabled but FRONT_DOMAIN is empty")
 	}
-	if len(domains) == 0 {
-		return nil, fmt.Errorf("acme enabled but no explicit hostnames provided in -routes or -frontpage-domain")
-	}
-	return domains, nil
+	return []string{frontDomain}, nil
 }
 
-func newManagedTLSConfig(magic *certmagic.Config, fallback tls.Certificate) *tls.Config {
+func newManagedTLSConfig(magic *certmagic.Config, fallback tls.Certificate, frontDomain string) *tls.Config {
 	tlsCfg := magic.TLSConfig()
 	tlsCfg.NextProtos = append([]string{"http/1.1"}, tlsCfg.NextProtos...)
-	tlsCfg.GetCertificate = acmeGetCertificate(magic, fallback)
+	tlsCfg.GetCertificate = acmeGetCertificate(magic, fallback, frontDomain)
 	tlsCfg.MinVersion = tls.VersionTLS12
 	tlsCfg.CipherSuites = secureCipherSuiteIDs()
 	return tlsCfg
 }
 
-func acmeGetCertificate(magic *certmagic.Config, fallback tls.Certificate) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+func acmeGetCertificate(
+	magic *certmagic.Config,
+	fallback tls.Certificate,
+	frontDomain string,
+) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-		if hello == nil || hello.ServerName == "" {
+		if hello == nil {
 			return &fallback, nil
 		}
-		return magic.GetCertificate(hello)
+		if hello.ServerName != "" && !strings.EqualFold(hello.ServerName, frontDomain) {
+			return nil, errors.New("tls: server name does not match FRONT_DOMAIN")
+		}
+		// Use the shared certificate for clients without SNI too. Copying the
+		// hello preserves its handshake context and TLS-ALPN challenge fields.
+		sharedHello := *hello
+		sharedHello.ServerName = frontDomain
+		certificate, err := magic.GetCertificate(&sharedHello)
+		if err != nil && !slices.Contains(hello.SupportedProtos, acmez.ACMETLS1Protocol) {
+			return &fallback, nil
+		}
+		return certificate, err
 	}
 }
 
@@ -343,26 +269,6 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 
 	return tls.X509KeyPair(certPEM, keyPEM)
-}
-
-func sameElements(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	count := make(map[string]int, len(a))
-	for _, s := range a {
-		count[s]++
-	}
-
-	for _, s := range b {
-		if count[s] == 0 {
-			return false
-		}
-		count[s]--
-	}
-
-	return true
 }
 
 // secureCipherSuiteIDs returns the IDs of the cipher suites Go considers secure

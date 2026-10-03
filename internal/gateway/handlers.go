@@ -870,9 +870,8 @@ func dashboardCreateResult(name, vmName string, err error, settings *config.Sett
 }
 
 // registerDashboardRDPRoute serves the per-VM "Connect" action. It verifies the
-// caller owns the VM, opens a short-lived RDP authorization window for the
-// caller's client IP (so the RDP front handler's authorizeRDPAccess will admit
-// the connection), and returns the .rdp connection file as a download. Making
+// caller owns the VM, issues a short-lived single-use token bound to their
+// session and client IP, and returns it in the .rdp connection download. Making
 // the download an explicit, authenticated, same-origin POST is what narrows RDP
 // authorization to a deliberate action instead of any standing dashboard session.
 func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, settings *config.Settings) {
@@ -891,7 +890,8 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 		if !ok {
 			return
 		}
-		if err := sessionManager.GrantRDPConnect(req.Context(), name); err != nil {
+		routingToken, err := sessionManager.GrantRDPConnect(req.Context(), name)
+		if err != nil {
 			log.Printf("grant rdp connect for vm %q failed: %v", name, err)
 			dashboard.WriteJSON(w, http.StatusInternalServerError, dashboard.ActionResponse{
 				OK:    false,
@@ -901,7 +901,7 @@ func registerDashboardRDPRoute(group huma.API, sessionManager *session.Manager, 
 		}
 		// The RDP connect click counts as use for auto-shutdown.
 		virt.MarkVMUsed(name)
-		dashboard.WriteRDPFile(w, settings, user.Name, name)
+		dashboard.WriteRDPFile(w, settings, user.Name, name, routingToken)
 	})
 }
 

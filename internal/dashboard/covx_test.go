@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/define42/devbox-gateway/internal/config"
-	"github.com/define42/devbox-gateway/internal/hash"
 	"github.com/define42/devbox-gateway/internal/virt"
 
 	"libvirt.org/go/libvirt"
@@ -22,7 +21,7 @@ const (
 	covxOwnerMetadataNamespace = "urn:devboxgateway:domain:owner"
 	covxOwnerMetadataPrefix    = "devboxgateway"
 	covxFrontDomain            = "covx.example.test"
-	covxSNISecret              = "covx-secret"
+	covxRoutingToken           = "0123456789abcdef0123456789abcdef"
 )
 
 type covxOwnerMetadata struct {
@@ -166,7 +165,7 @@ func TestWriteRDPFileNotFound(t *testing.T) {
 	settings := config.NewSettings(false)
 
 	rec := httptest.NewRecorder()
-	WriteRDPFile(rec, settings, fmt.Sprintf("covx-nobody-%d", time.Now().UnixNano()), "covx-missing-vm")
+	WriteRDPFile(rec, settings, fmt.Sprintf("covx-nobody-%d", time.Now().UnixNano()), "covx-missing-vm", covxRoutingToken)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected %d, got %d", http.StatusNotFound, rec.Code)
@@ -188,7 +187,6 @@ func TestWriteRDPFileWithLibvirtVM(t *testing.T) {
 	covxWaitForVM(t, owner)
 
 	t.Setenv(config.FRONT_DOMAIN, covxFrontDomain)
-	t.Setenv(config.SNI_HASH_SECRET, covxSNISecret)
 	settings := config.NewSettings(false)
 
 	for _, tc := range []struct {
@@ -206,20 +204,20 @@ func TestWriteRDPFileWithLibvirtVM(t *testing.T) {
 			t.Setenv(config.LISTEN_ADDR, tc.listen)
 			t.Setenv(config.RDP_PORT, tc.public)
 			rec := httptest.NewRecorder()
-			WriteRDPFile(rec, config.NewSettings(false), owner, vmName)
+			WriteRDPFile(rec, config.NewSettings(false), owner, vmName, covxRoutingToken)
 			assertRDPDownload(t, rec, owner, vmName, tc.want)
 		})
 	}
 
 	t.Run("other VM name not found", func(t *testing.T) {
-		if _, _, ok := RDPFileForUser(settings, owner, vmName+"-other"); ok {
+		if _, _, ok := RDPFileForUser(settings, owner, vmName+"-other", covxRoutingToken); ok {
 			t.Fatal("expected no .rdp file for a VM name the user does not own")
 		}
 	})
 
 	t.Run("write error is tolerated", func(t *testing.T) {
 		writer := &covxFailingWriter{}
-		WriteRDPFile(writer, settings, owner, vmName)
+		WriteRDPFile(writer, settings, owner, vmName, covxRoutingToken)
 		if writer.status != http.StatusOK {
 			t.Fatalf("expected status %d despite write failure, got %d", http.StatusOK, writer.status)
 		}
@@ -241,23 +239,16 @@ func assertRDPDownload(t *testing.T, rec *httptest.ResponseRecorder, owner, vmNa
 	}
 
 	body := rec.Body.String()
-	wantHost := hash.RoutingLabel([]byte(covxSNISecret), vmName) + "." + covxFrontDomain
-	if !strings.Contains(body, fmt.Sprintf("full address:s:%s:%d\n", wantHost, port)) {
-		t.Fatalf("expected connect host %q in body %q", wantHost, body)
+	if !strings.Contains(body, fmt.Sprintf("full address:s:%s:%d\n", covxFrontDomain, port)) {
+		t.Fatalf("expected connect host %q in body %q", covxFrontDomain, body)
+	}
+	if !strings.Contains(body, "loadbalanceinfo:s:"+covxRoutingToken+"\n") {
+		t.Fatalf("expected routing token %q in body %q", covxRoutingToken, body)
 	}
 	// The test domain carries no guest-user metadata, so the RDP login falls
 	// back to the requesting user.
 	if !strings.Contains(body, "username:s:"+owner) {
 		t.Fatalf("expected fallback RDP username %q in body %q", owner, body)
-	}
-}
-
-func TestRDPConnectHostWithoutFrontDomain(t *testing.T) {
-	t.Setenv(config.FRONT_DOMAIN, "")
-	settings := config.NewSettings(false)
-
-	if got := rdpConnectHost(settings, "covx-vm"); got != "covx-vm" {
-		t.Fatalf("expected bare VM name without a front domain, got %q", got)
 	}
 }
 

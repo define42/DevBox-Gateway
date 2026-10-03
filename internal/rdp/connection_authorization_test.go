@@ -43,7 +43,7 @@ func TestHandleRejectsConnectionAfterLogoutDuringBackendSetup(t *testing.T) {
 	covxDefineOwnedDomain(t, name)
 	frontTLS, settings := newFrontTLSManager(t, "example.test")
 	manager := session.New()
-	issueUserSession(t, manager, "alice", "192.0.2.186:5000", name)
+	tokens := issueUserSession(t, manager, "alice", "192.0.2.186:5000", name)
 	identity, certificate, _ := backendTLSFixture(t)
 	requested, negotiated, resume := startPausedRDPBackend(t, backendHost, certificate)
 	defer resume()
@@ -53,7 +53,7 @@ func TestHandleRejectsConnectionAfterLogoutDuringBackendSetup(t *testing.T) {
 		_ = client.Close()
 		waitDone(t, done)
 	})
-	tlsClient := performFrontHandshake(t, client, name+".example.test")
+	tlsClient := performFrontHandshake(t, client, settings, tokens[name])
 	clientClosed := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(io.Discard, tlsClient)
