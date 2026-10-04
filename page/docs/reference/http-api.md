@@ -223,4 +223,4 @@ not reject otherwise admitted activity. Already-running operations can finish;
 if their audit write hits the hard limit it fails promptly and latches the
 persistence failure rather than waiting indefinitely.
 See [readiness handling](https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/readiness.go) and
-[audit delivery boundaries](https://github.com/define42/DevBox-Gateway/blob/main/compliance.md#delivery-and-compliance-boundaries).
+[audit delivery boundaries](../compliance.md#delivery-and-compliance-boundaries).

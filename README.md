@@ -69,6 +69,7 @@ The [documentation index](page/docs/index.md) links to the complete guides:
 - [Dashboard and login](page/docs/usage/dashboard.md), [RDP clients](page/docs/usage/rdp.md)
 - [Configuration reference](page/docs/configuration/index.md), [LDAP](page/docs/configuration/ldap.md), [TLS](page/docs/configuration/tls.md), [libvirt and storage](page/docs/configuration/storage.md)
 - [Audit logs and Splunk](page/docs/operations/audit-logs.md), [SauronAgent guest events](page/docs/operations/guest-events.md), [health checks](page/docs/operations/health-checks.md)
+- [Audit coverage comparison](page/docs/compliance.md)
 - [Architecture](page/docs/architecture.md), [security](page/docs/security.md), [HTTP API](page/docs/reference/http-api.md)
 - [Building from source](page/docs/development/building.md), [testing](page/docs/development/testing.md), [repository layout](page/docs/development/repository-layout.md)
 

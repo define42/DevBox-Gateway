@@ -83,6 +83,7 @@ nav:
       - Libvirt and storage: configuration/storage.md
   - Operations:
       - Audit logs and Splunk: operations/audit-logs.md
+      - Audit coverage comparison: compliance.md
       - SauronAgent guest events: operations/guest-events.md
       - Health checks: operations/health-checks.md
   - Security: security.md

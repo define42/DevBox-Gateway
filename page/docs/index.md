@@ -43,6 +43,7 @@ For a custom guest image, see [installing SauronAgent](installation/sauronagent.
 | [TLS certificates](configuration/tls.md) | Public certificates and each VM's backend identity. |
 | [Libvirt and storage](configuration/storage.md) | Host requirements, VM networking, base images, and isolation. |
 | [Audit logs and Splunk](operations/audit-logs.md) | Application events, local logs, durable forwarding, and HEC acknowledgements. |
+| [Audit coverage comparison](compliance.md) | Implemented audit coverage, event inventories, and deployment checks. |
 | [SauronAgent guest events](operations/guest-events.md) | Guest collection, attribution, spooling, and delivery limits. |
 | [Health checks](operations/health-checks.md) | Liveness, readiness, and recovery considerations. |
 | [Security](security.md) | Trust boundaries, connection grants, and session behavior. |

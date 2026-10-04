@@ -32,7 +32,7 @@ source before changing documentation.
 - [SauronAgent deployment](SauronAgent/docs/deployment.md): Configuration, sizing, monitoring, and recovery.
 - [SauronAgent protocol](SauronAgent/docs/protocol.md): Framing, sequencing, acknowledgements, and replay.
 - [SauronAgent security](SauronAgent/docs/security.md): Trust boundaries, privileges, and collection limits.
-- [Audit coverage comparison](compliance.md): Implemented audit coverage and deployment checks; not certification.
+- [Audit coverage comparison](page/docs/compliance.md): Implemented audit coverage and deployment checks; not certification.
 
 ## Source references
 

@@ -1,6 +1,6 @@
 # Audit logs and Splunk
 
-See [compliance.md](https://github.com/define42/DevBox-Gateway/blob/main/compliance.md) for the NATO AC/35-D/2003-REV5 §26.3.1
+See the [audit coverage comparison](../compliance.md) for the NATO AC/35-D/2003-REV5 §26.3.1
 coverage comparison, audit-rule and event inventories, Splunk index routing,
 JSON event examples and remaining compliance gaps.
 
