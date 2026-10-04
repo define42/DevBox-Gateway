@@ -23,10 +23,22 @@ run-command dnf -y --setopt=tsflags=nodocs install code
 # Install an XFCE desktop from EPEL without pulling in GNOME or gdm.
 run-command dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install Thunar xfce4-panel xfce4-session xfce4-settings xfconf xfdesktop xfwm4 network-manager-applet openssh-askpass thunar-archive-plugin thunar-volman tumbler xfce-polkit xfce4-appfinder xfce4-power-manager xfce4-pulseaudio-plugin xfce4-screensaver xfce4-terminal lightdm lightdm-gtk --exclude=*-firmware --exclude=linux-firmware
 
-run-command dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install firefox xrdp xorgxrdp xorg-x11-server-Xorg xorg-x11-xinit xorg-x11-drv-libinput xorg-x11-xauth dbus-x11 dejavu-sans-fonts net-tools vim nmap cloud-init python3 NetworkManager firewalld audit
+run-command dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install firefox xrdp xorgxrdp xorg-x11-server-Xorg xorg-x11-xinit xorg-x11-drv-libinput xorg-x11-xauth dbus-x11 dejavu-sans-fonts net-tools vim nmap cloud-init python3 NetworkManager firewalld audit ca-certificates wget tar gzip
 run-command systemctl enable xrdp lightdm NetworkManager firewalld
 run-command systemctl disable gdm || true
 run-command systemctl set-default graphical.target
+
+# Install the same IntelliJ IDEA archive and bundled runtime as the Ubuntu image.
+run-command wget --tries=3 --timeout=60 -q https://download.jetbrains.com/idea/idea-2026.2.3.tar.gz -O /tmp/idea-2026.2.3.tar.gz
+run-command printf '%s\n' '68751c8ae4d49407251cd197df795fbed91b6fdc85d10c73c4649a99e496ab37  /tmp/idea-2026.2.3.tar.gz' | sha256sum --check
+run-command install -d -m 0755 /opt/intellij-idea
+run-command tar -xzf /tmp/idea-2026.2.3.tar.gz --strip-components=1 --no-same-owner -C /opt/intellij-idea
+run-command rm /tmp/idea-2026.2.3.tar.gz
+run-command test -x /opt/intellij-idea/bin/idea && test -x /opt/intellij-idea/jbr/bin/java && test -r /opt/intellij-idea/bin/idea.svg
+run-command ln -s /opt/intellij-idea/bin/idea /usr/local/bin/idea
+upload jetbrains-idea.desktop:/usr/share/applications/jetbrains-idea.desktop
+run-command chown root:root /usr/share/applications/jetbrains-idea.desktop
+run-command chmod 0644 /usr/share/applications/jetbrains-idea.desktop
 
 # Set XFCE as the default desktop/session selection.
 run-command sh -c 'printf "DESKTOP=XFCE\nDISPLAYMANAGER=LIGHTDM\n" > /etc/sysconfig/desktop'

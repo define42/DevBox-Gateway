@@ -107,6 +107,12 @@ write_files:
       systemctl is-active --quiet xrdp.service
       command -v startxfce4
       test -x /etc/xrdp/startwm.sh
+      echo 'Checking IntelliJ IDEA and its bundled runtime'
+      test "$(readlink -f /usr/local/bin/idea)" = /opt/intellij-idea/bin/idea
+      test -x /opt/intellij-idea/bin/idea
+      test -r /opt/intellij-idea/bin/idea.svg
+      test -r /usr/share/applications/jetbrains-idea.desktop
+      timeout 30s /opt/intellij-idea/jbr/bin/java -version
       echo 'Checking SauronAgent installation and built-in configuration'
       test "$(systemctl is-enabled sauronagent.service)" = enabled
       /usr/bin/sauronagent -check-config
@@ -153,4 +159,4 @@ if ! grep -Eq $'^DEVBOX_IMAGE_SMOKE_OK\r?$' "$work_dir/serial.log"; then
     echo "The guest shut down without passing all image checks." >&2
     exit 1
 fi
-echo "Image smoke test passed: cloud-init, networking, firewall, XRDP, XFCE and SauronAgent configuration."
+echo "Image smoke test passed: cloud-init, networking, firewall, XRDP, XFCE, IntelliJ IDEA runtime and SauronAgent configuration."

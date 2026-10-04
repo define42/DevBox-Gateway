@@ -270,6 +270,40 @@ jobs:
           body: |
             ${{ needs.build.outputs.changelog }}
 
+            ### DevBox Gateway packages
+
+            Install DevBox Gateway version ${{ needs.build.outputs.version }} on your libvirt/KVM host.
+            Both packages include the gateway binary, systemd service, and default configuration.
+            They are built and installation-tested on the platforms below.
+
+            **RPM — Rocky Linux 9 (x86_64)**
+
+            Download `devbox-gateway-${{ needs.build.outputs.version }}-1.x86_64.rpm`, then install it with its dependencies:
+
+            ```sh
+            sudo dnf install ./devbox-gateway-${{ needs.build.outputs.version }}-1.x86_64.rpm
+            ```
+
+            **DEB — Debian 12 (amd64)**
+
+            Download `devbox-gateway_${{ needs.build.outputs.version }}_amd64.deb`, then install it with its dependencies:
+
+            ```sh
+            sudo apt install ./devbox-gateway_${{ needs.build.outputs.version }}_amd64.deb
+            ```
+
+            Before starting the gateway, configure libvirt/KVM, a storage pool, and a base image, then edit
+            `/etc/devbox-gateway/devbox-gateway.conf`. Follow the [RPM setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-the-rpm)
+            or [DEB setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-the-deb) for the complete host setup.
+            Once configured, enable and start the service:
+
+            ```sh
+            sudo systemctl enable --now devbox-gateway
+            ```
+
+            Separate SauronAgent RPM and DEB packages are described in the [SauronAgent installation guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-sauronagent).
+            The Ubuntu and Rocky Linux images below are guest desktop images and already include the matching SauronAgent.
+
             ### Ubuntu 26.04 XFCE image
 
             The image and its embedded SauronAgent use version ${{ needs.build.outputs.version }}.

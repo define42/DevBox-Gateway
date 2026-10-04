@@ -19,6 +19,9 @@ Connections are demultiplexed by sniffing the first byte on the accepted TCP
 socket: a TLS handshake record (`0x16`) is routed to the HTTPS handler, anything
 else is treated as an RDP X.224 Connection Request.
 
+Download gateway and SauronAgent packages, plus Ubuntu 26.04 and Rocky Linux 9
+XFCE VM images, from [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases).
+
 > ⚠️ This is **not** Microsoft RD Gateway. It is a TLS-to-TLS RDP proxy plus a
 > companion management UI. There is no HTTP- or UDP-tunneled RDP transport.
 
@@ -30,6 +33,7 @@ else is treated as an RDP X.224 Connection Request.
 - [Installing the RPM](#installing-the-rpm)
 - [Installing the deb](#installing-the-deb)
 - [Installing SauronAgent](#installing-sauronagent)
+- [Downloading VM images](#downloading-vm-images)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Login flow](#login-flow)
@@ -69,8 +73,8 @@ Requirements on the host:
   guest log and forwarding spool).
 - At least one QCOW2 base disk image in `/data/baseimages`, named with an
   `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
-  valid QCOW2 image — see
-  [Libvirt and VM storage](#libvirt-and-vm-storage) for a download example.
+  valid QCOW2 image — follow
+  [Downloading VM images](#downloading-vm-images) before starting the stack.
 
 Start the stack:
 
@@ -160,7 +164,8 @@ by default, or your custom
    least one base image in `<DATA_ROOT_DIR>/baseimages` (the gateway refuses to
    start with an empty library). The default lives under `/var/lib/libvirt` so
    images and sockets sit in a tree QEMU can use under SELinux without
-   relabeling. See [Libvirt and VM storage](#libvirt-and-vm-storage).
+   relabeling. Use a [prebuilt release image](#downloading-vm-images); see
+   [Libvirt and VM storage](#libvirt-and-vm-storage) for the host setup.
 
    Make sure libvirt itself is enabled — the gateway's unit only *wants*
    `libvirtd.service`, it does not enable libvirt for you. On Fedora / RHEL 9+
@@ -259,6 +264,9 @@ built from [`SauronAgent/`](SauronAgent), with the same version as the gateway
 packages (the version is also compiled into the binaries, so a guest reports the
 release it runs).
 
+The [prebuilt VM images](#downloading-vm-images) already include SauronAgent
+with its guest service enabled.
+
 One package carries both components, laid out like
 `make -C SauronAgent install PREFIX=/usr`. Install it on the hypervisor and in
 each guest, then enable the component that machine runs:
@@ -314,6 +322,52 @@ Package removal leaves the guest spool intact.
 
 > Building the deb yourself instead of downloading it is covered under
 > [Building from source](#building-from-source).
+
+## Downloading VM images
+
+The [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases) page
+includes prebuilt VM images alongside the gateway and SauronAgent RPM and DEB packages.
+Open the chosen release's **Assets** list and select an image:
+
+| Guest desktop | Reconstructed filename | Image details |
+| --- | --- | --- |
+| Ubuntu 26.04 XFCE | `ubuntu26.04-xfce-v<version>.img` | [Ubuntu image README](images/ubuntu26.04-xfce/README.md) |
+| Rocky Linux 9 XFCE | `rocky9-xfce-v<version>.img` | [Rocky image README](images/rocky9-xfce/README.md) |
+
+Both are x86_64 QCOW2 disks with XFCE, XRDP, cloud-init, IntelliJ IDEA, and
+SauronAgent. The `v<version>` suffix and the installed SauronAgent use the
+gateway release version; `26.04` and `9` identify the guest operating systems.
+
+For your chosen image and release, download **every** `.img.part-*` asset,
+its `.img.sha256` checksum, and its `.img.manifest.json` into one directory.
+The manifest records the source image and build provenance. Reconstruct the
+complete disk and verify it from that directory, replacing `1.2.3` with the
+chosen release version:
+
+```sh
+image="ubuntu26.04-xfce-v1.2.3.img"
+# For Rocky Linux 9, use image="rocky9-xfce-v1.2.3.img" instead.
+cat "$image".part-* > "$image"
+sha256sum --check "$image.sha256"
+```
+
+After the checksum reports `OK`, copy the complete `.img` into `BASE_IMAGE_DIR`
+**before the first gateway start**. For Docker Compose:
+
+```sh
+sudo install -d /data/baseimages
+sudo install -m 0644 "$image" /data/baseimages/
+```
+
+For native RPM or DEB installations, use
+`/var/lib/libvirt/devbox-gateway/baseimages` instead, unless you configured a
+different `DATA_ROOT_DIR` or `BASE_IMAGE_DIR`. Once the gateway is running,
+administrators can also upload complete images through the **Base Images** modal.
+The gateway provisions each VM's login account when it creates the VM; these
+images have no preset desktop login.
+
+See [Libvirt and VM storage](#libvirt-and-vm-storage) for host prerequisites,
+or [Building VM images](#building-vm-images) to build an image locally.
 
 ## Features
 
@@ -1037,14 +1091,10 @@ clear error, so populate it first. An administrator can delete the final image
 at runtime, but VM creation then remains unavailable and another image must be
 uploaded before the gateway can restart successfully.
 
-Before the first run, populate the library, for example (Docker Compose, which
-uses `/data`):
-
-```sh
-mkdir -p /data/baseimages
-curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
-  https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img
-```
+Before the first run, [download a VM image](#downloading-vm-images) from this
+project's [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases),
+join its parts, verify its checksum, and copy the complete `.img` into the
+library. Both Ubuntu 26.04 XFCE and Rocky Linux 9 XFCE images are available.
 
 You can also [build an Ubuntu or Rocky Linux XFCE image from this checkout](#building-vm-images),
 including its matching SauronAgent package, and copy the resulting `.img` into
@@ -1167,10 +1217,12 @@ QCOW2 desktop disks and install SauronAgent from the same checkout, enabling its
 guest service.
 Image builds run separately from gateway and container builds.
 
-GitHub Releases publish both images alongside the gateway and SauronAgent
-packages under the same `vMAJOR.MINOR.PATCH` tag. Each image filename and its
+[GitHub Releases](https://github.com/define42/DevBox-Gateway/releases) publish
+both images alongside the gateway and SauronAgent packages under the same
+`vMAJOR.MINOR.PATCH` tag. Each image filename and its
 installed SauronAgent use that gateway release version. Publication waits for
-both images to build and pass their boot tests.
+both images to build and pass their boot tests. For prebuilt downloads, follow
+[Downloading VM images](#downloading-vm-images).
 
 On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
 `sha256sum`, Git, Make, and the Go version specified in `go.mod`, run:
@@ -1367,8 +1419,9 @@ Use certificate verification when probing a deployment with a trusted certificat
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, focused test commands,
-the shared Go module layout, and pull-request guidance. Release notes and
-packaged builds are published through [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases).
+the shared Go module layout, and pull-request guidance. Release notes,
+packages, and VM images are published through
+[GitHub Releases](https://github.com/define42/DevBox-Gateway/releases).
 The [documentation index](llms.txt) lists the main guides and source references
 for automated tooling.
 

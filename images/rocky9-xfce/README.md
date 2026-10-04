@@ -30,14 +30,16 @@ compressed image.
 `image-check` validates shell syntax and every file uploaded by the recipe.
 `image-test` additionally requires host `qemu-system-x86_64`, `qemu-img`,
 `xorriso`, and `timeout`. It boots a temporary QCOW2 overlay with a NoCloud seed
-to check cloud-init, D-Bus, NetworkManager, DHCP, firewalld, XRDP, XFCE, and
-SauronAgent configuration while leaving the base disk unchanged.
+to check cloud-init, D-Bus, NetworkManager, DHCP, firewalld, XRDP, XFCE, the
+IntelliJ IDEA installation and bundled Java runtime, and SauronAgent
+configuration while leaving the base disk unchanged.
 
 ## Image contents
 
 - XFCE, LightDM, XRDP with its Xorg backend, and clipboard redirection.
 - Cloud-init, Python 3, and NetworkManager for gateway provisioning.
 - Firefox, Visual Studio Code, Vim, Nmap, and network administration tools.
+- IntelliJ IDEA 2026.2.3 with its bundled Java runtime, matching the Ubuntu image.
 - SauronAgent built and packaged from the same checkout, with its guest service
   enabled. The gateway supplies the host collector.
 - Full glibc locale coverage and an XFCE configuration optimized for remote use.
@@ -124,6 +126,14 @@ NoCloud seed with account credentials or SSH keys. `make run` from this director
 boots a disposable snapshot with SSH forwarded to host port `2222` and RDP to
 `3390`; use `RUN_QEMU_ARGS` to attach a seed. Memory, CPU and port defaults can
 be overridden with `RUN_MEMORY`, `RUN_CPUS`, `RUN_SSH_PORT` and `RUN_RDP_PORT`.
+
+## IntelliJ IDEA
+
+IntelliJ IDEA is installed in `/opt/intellij-idea` from JetBrains' Linux x86_64
+archive, verified against the same pinned SHA-256 checksum as the Ubuntu image.
+Launch it from the XFCE application menu in the **Development/Programming**
+category, or run `idea` in a terminal. Settings and projects belong to each
+user; the installation is shared by all users.
 
 ## Guest defaults
 
