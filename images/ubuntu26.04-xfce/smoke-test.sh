@@ -50,14 +50,16 @@ instance-id: $(basename "$work_dir")
 local-hostname: devbox-image-smoke
 EOF
 cat >"$work_dir/seed/network-config" <<'EOF'
-version: 2
-ethernets:
-  ethernet:
-    match:
-      name: "en*"
-    dhcp4: true
-    dhcp6: false
-    accept-ra: false
+# Match the gateway's NoCloud network-config document.
+network:
+  version: 2
+  ethernets:
+    all:
+      match:
+        name: "en*"
+      dhcp4: true
+      dhcp6: false
+      accept-ra: false
 EOF
 cat >"$work_dir/seed/user-data" <<'EOF'
 #cloud-config
@@ -81,8 +83,10 @@ write_files:
         else
           echo DEVBOX_IMAGE_SMOKE_FAILED
           timeout 15s cloud-init status --long || true
-          systemctl status --no-pager xrdp.service sauronagent.service || true
-          journalctl --no-pager -n 100 -u cloud-final.service -u xrdp.service || true
+          ip -br address || true
+          netplan get || true
+          systemctl status --no-pager --full xrdp.service sauronagent.service systemd-networkd.service dbus.service || true
+          journalctl --no-pager -n 100 -u cloud-final.service -u xrdp.service -u systemd-networkd.service || true
         fi
         systemctl poweroff --no-block
         exit "$status"
@@ -92,6 +96,19 @@ write_files:
       # This unit already runs after cloud-final. Avoid --wait, which retries
       # systemd queries indefinitely on some cloud-init versions.
       timeout 30s cloud-init status --long
+      echo 'Checking machine identity and Ethernet DHCP'
+      grep -Eq '^[0-9a-f]{32}$' /etc/machine-id
+      systemctl is-active --quiet dbus.service
+      systemctl is-active --quiet systemd-networkd.service
+      # Only check the physical NIC matched by the seed. Docker's bridge has
+      # its own IPv4 address even when the VM cannot obtain a DHCP lease.
+      for device in /sys/class/net/en*; do
+        test -d "$device"
+        interface=${device##*/}
+        /usr/lib/systemd/systemd-networkd-wait-online --interface="$interface" --ipv4 --timeout=30
+        # Restricted QEMU networking supplies DHCP without a default route.
+        ip -4 -o address show dev "$interface" scope global | grep -q ' inet '
+      done
       echo 'Checking XRDP and XFCE'
       systemctl is-active --quiet xrdp.service
       command -v startxfce4
@@ -142,4 +159,4 @@ if ! grep -Eq $'^DEVBOX_IMAGE_SMOKE_OK\r?$' "$work_dir/serial.log"; then
     echo "The guest shut down without passing all image checks." >&2
     exit 1
 fi
-echo "Image smoke test passed: cloud-init, XRDP, XFCE and SauronAgent configuration."
+echo "Image smoke test passed: cloud-init, machine identity, Ethernet DHCP, XRDP, XFCE and SauronAgent configuration."

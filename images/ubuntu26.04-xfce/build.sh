@@ -16,6 +16,10 @@ check_recipe() {
     while read -r command arguments; do
         if [[ "$command" == upload ]]; then
             source=${arguments%%:*}
+            # Generated below and mounted at /build in the builder container.
+            if [[ "$source" == /build/sauronagent.deb ]]; then
+                continue
+            fi
             if [[ ! -f "$recipe_dir/$source" ]]; then
                 echo "Missing recipe upload: $source" >&2
                 return 1
@@ -26,7 +30,7 @@ check_recipe() {
 
 check_recipe
 if [[ "${1:-}" == --check ]]; then
-    echo "Image recipe syntax and upload sources verified."
+    echo "Image recipe syntax and static upload sources verified."
     exit 0
 fi
 version=${1:-0.0.0}

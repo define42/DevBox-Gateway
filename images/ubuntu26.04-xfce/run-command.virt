@@ -117,9 +117,18 @@ run-command DEBIAN_FRONTEND=noninteractive apt-get purge -y apparmor
 # Update GRUB so the kernel parameters apply at first boot.
 run-command update-grub
 
-# Remove provisioning state so every VM consumes its own NoCloud seed.
-run-command cloud-init clean --logs
+# Install the SauronAgent package built from this checkout and release version.
+upload /build/sauronagent.deb:/tmp/sauronagent.deb
+run-command dpkg -i /tmp/sauronagent.deb && rm /tmp/sauronagent.deb
+run-command systemd-sysusers /usr/lib/sysusers.d/sauronagent.conf
+run-command systemd-tmpfiles --create /usr/lib/tmpfiles.d/sauronagent.conf
+run-command systemctl enable sauronagent.service
+run-command sauronagent -check-config
+run-command command -v cloud-init && command -v python3 && command -v startxfce4 && getent group xrdp
+run-command systemctl is-enabled xrdp.service sauronagent.service
 
-# Reset machine identity for each new VM.
-run-command truncate -s 0 /etc/machine-id
-run-command truncate -s 0 /var/lib/dbus/machine-id
+# Offline cloud-init --machine-id deletes the file because systemd is not
+# running. Leave it empty so each VM establishes its own identity at first
+# boot and systemd-networkd can start its DHCP client.
+run-command cloud-init clean --logs
+run-command truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id

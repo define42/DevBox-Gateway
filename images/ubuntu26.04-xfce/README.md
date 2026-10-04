@@ -29,10 +29,12 @@ works without it but takes considerably longer. Allow room for the downloaded
 server image, a 16 GiB virtual build disk, the builder container, and the final
 compressed image.
 
-`image-check` validates shell syntax and every file uploaded by the recipe.
+`image-check` validates shell syntax and static files uploaded by the recipe.
+The SauronAgent deb is generated during the image build.
 `image-test` additionally requires host `qemu-system-x86_64`, `qemu-img`,
 `xorriso`, and `timeout`. It boots a temporary QCOW2 overlay with a NoCloud seed
-to check first-boot provisioning, leaving the base disk unchanged.
+to check first-boot provisioning, machine identity, and an IPv4 DHCP lease on
+the VM's Ethernet interface, leaving the base disk unchanged.
 
 ## Image contents
 
@@ -53,8 +55,10 @@ and compresses a standalone QCOW2 image with an `.img` extension.
 ## Files and output
 
 `build.sh` handles downloads, SauronAgent packaging, and the builder container.
-`customize.sh` runs inside the container. `run-command.virt` and the adjacent
-desktop configuration files define the guest. `smoke-test.sh` boots the result.
+`customize.sh` runs the disk tools inside the container. `run-command.virt`
+defines all guest customization, including SauronAgent installation, checks,
+and final cloud-init and machine-ID cleanup. The adjacent desktop files supply
+its configuration assets. `smoke-test.sh` boots the result.
 Keep source assets here; generated files are ignored by Git.
 
 For `IMAGE_VERSION=0.0.0`, the output directory is
