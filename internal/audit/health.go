@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -51,7 +52,21 @@ func (w observedAuditWriter) Write(p []byte) (int, error) {
 }
 
 // Readiness reports rejected audit records even though slog's logging API does
-// not return handler errors. The gateway uses it for its readiness probe.
+// not return handler errors, spool pressure, and HEC delivery that has stalled
+// for longer than the configured timeout. The gateway uses it for its probe.
 func (sink *configuredSink) Readiness() error {
-	return sink.health.status()
+	if sink.forwarder == nil {
+		return sink.health.status()
+	}
+	return errors.Join(sink.health.status(), sink.forwarder.readiness())
+}
+
+// Admission refuses new audit-producing work when persistence has failed or
+// the spool is under pressure. A remote outage alone can continue to buffer
+// events even when the independent delivery-stall check fails readiness.
+func (sink *configuredSink) Admission() error {
+	if sink.forwarder == nil {
+		return sink.health.status()
+	}
+	return errors.Join(sink.health.status(), sink.forwarder.capacityReadiness())
 }

@@ -20,19 +20,18 @@ import (
 var ErrVMAlreadyExists = errors.New("virt: vm with this name already exists")
 
 // vmNameLocks serializes create, remove, start, and restart per VDI name. BootNewVM
-// checks the name is free (ensureVMNameAvailable) and only defines the domain
-// much later (StartVM); between those two steps it destroys any
-// leftover artifacts and writes a fresh disk and cloud-init seed (guest user +
-// password hash). Without a per-name lock, two concurrent BootNewVM calls for
-// the same name could both pass the availability check and then race through
-// that region, each clobbering the other's disk and seed — so a domain could
-// end up booting one request's disk with another request's credentials. RemoveVM
+// checks the name is free, persists its pending domain, and only starts it
+// after writing the disk and cloud-init seed. Without a per-name lock, two
+// creates could pass the availability check before either intent exists.
+// Recovery, provisioning and cleanup share the same lock so a retry cannot
+// mistake another request's in-progress disk copy for an abandoned one. RemoveVM
 // takes the same lock so a delete cannot interleave with a create of the same
 // name. StartExistingVM and RestartVM also take it so a stopped domain cannot
 // be restarted between removal's destruction and volume deletion. It is held
 // as the outer lock: reserveUserVMSlot/releaseUserVMSlot take
-// vmCreationMu strictly inside this region, so the lock order is always
-// vmNameLocks then vmCreationMu. Network changes acquire the reserved NUL-prefixed
+// vmQuotaOwnerLocks and vmCreationMu inside this region, so the lock order is
+// vmNameLocks then vmQuotaOwnerLocks then vmCreationMu. Network changes acquire
+// the reserved NUL-prefixed
 // allocation key inside the VM-name lock; they never acquire another VM-name
 // key. No goroutine holds two VDI-name locks. This is process-wide because the
 // gateway is the single writer of libvirt state.
@@ -121,6 +120,7 @@ type vmProvisionSpec struct {
 	memoryMiB     int
 	network       NetworkIdentity
 	backend       backendidentity.Credentials
+	provisioning  *provisioningIntent
 }
 
 // startConfig returns the domain define-and-start step of the plan.
@@ -138,6 +138,7 @@ func (s vmProvisionSpec) startConfig() VMStartConfig {
 		Owner:              s.owner,
 		GuestUser:          s.guestUsername,
 		BaseImage:          s.baseImage,
+		provisioning:       s.provisioning,
 	}
 }
 
@@ -250,12 +251,15 @@ func BootNewVMWithContext(ctx context.Context, req VMCreateRequest, settings *co
 
 // provisionAndStartVM runs the locked phase of a VM creation: the caller must
 // hold vmNameLocks.Lock(spec.vmName) for the whole call. It checks the name is
-// free, reserves the owner's quota slot, clears leftover artifacts, provisions
+// free, reserves the owner's quota slot, persists a pending intent, provisions
 // the disk and seed volumes, and starts the domain. Failures roll back the
 // domain and storage before releasing the quota reservation or the name lock.
 func provisionAndStartVM(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if err := recoverPendingProvisioningLocked(conn, spec.vmName); err != nil {
+		return fmt.Errorf("recover previous provisioning: %w", err)
 	}
 	if err := ensureVMNameAvailable(conn, spec.vmName); err != nil {
 		return err
@@ -271,37 +275,24 @@ func provisionAndStartVM(ctx context.Context, conn *libvirt.Connect, settings *c
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := resetExistingVMArtifacts(conn, spec.poolName, spec.vmName, spec.seedISO); err != nil {
+	spec.provisioning, err = planProvisioningIntent(conn, spec)
+	if err != nil {
 		return err
 	}
-	// Only arm rollback after the name checks and initial cleanup succeed, so
-	// refusing an existing VM cannot remove its storage. Reset removes a partial
-	// domain before its volumes; if domain removal fails, its disks stay intact.
+	// Keep the persistent domain intent until every owned resource has been
+	// removed. Unlike deferred cleanup alone, it survives gateway process exit.
+	// Arm rollback before definition: an RPC error can have an ambiguous outcome.
 	defer func() {
 		if err != nil {
-			if cleanupErr := rollbackVMArtifacts(spec.poolName, spec.vmName, spec.seedISO); cleanupErr != nil {
+			if cleanupErr := rollbackProvisioningIntent(*spec.provisioning); cleanupErr != nil {
 				err = errors.Join(err, fmt.Errorf("rollback failed vm %s: %w", spec.vmName, cleanupErr))
 			}
 		}
 	}()
-	return provisionVMResources(ctx, conn, settings, spec, report)
-}
-
-// rollbackVMArtifacts removes a failed provision through a fresh libvirt
-// connection. Canceling a storage stream can invalidate the connection that
-// performed the upload, so reusing it can make cleanup fail. The caller still
-// holds the VM-name lock while this function runs, keeping rollback atomic with
-// another create or remove of the same VM.
-func rollbackVMArtifacts(poolName, vmName, seedISO string) error {
-	conn, err := connectLibvirt()
-	if err != nil {
-		return fmt.Errorf("connect to libvirt for rollback: %w", err)
+	if err := definePendingProvisioning(conn, *spec.provisioning); err != nil {
+		return err
 	}
-	defer func() {
-		_, _ = conn.Close()
-	}()
-
-	return resetExistingVMArtifacts(conn, poolName, vmName, seedISO)
+	return provisionVMResources(ctx, conn, settings, spec, report)
 }
 
 func provisionVMResources(ctx context.Context, conn *libvirt.Connect, settings *config.Settings, spec vmProvisionSpec, report DiskCopyProgressFunc) error {

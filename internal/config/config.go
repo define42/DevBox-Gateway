@@ -56,6 +56,10 @@ const (
 	// DefaultLDAPAuthTimeout bounds an entire LDAP authentication attempt. Used
 	// when LDAP_AUTH_TIMEOUT is unset or non-positive.
 	DefaultLDAPAuthTimeout = 10 * time.Second
+	// DefaultSplunkHECStallTimeout is how long application-audit HEC delivery
+	// may keep failing before readiness reports it. Override with
+	// SPLUNK_HEC_STALL_TIMEOUT; <=0 disables the check.
+	DefaultSplunkHECStallTimeout = time.Hour
 	// DefaultDataRootDir is the default root directory for gateway-managed data.
 	// It lives under /var/lib/libvirt so VM disk images and sockets sit in a tree
 	// libvirt/QEMU can use under SELinux (svirt) without relabeling a custom path
@@ -211,7 +215,8 @@ func (s *Settings) setAuditDefaults() {
 	s.SetString(SPLUNK_HEC_INDEX, "Splunk index for forwarded audit events; empty uses the HEC token's default index", "")
 	s.SetBool(SPLUNK_HEC_ACK_ENABLED, "Require Splunk indexer acknowledgement before advancing the application-audit spool; requires SPLUNK_HEC_ENDPOINT and an ACK-enabled HEC token. False accepts HEC code 0 without ACK polling", false)
 	s.SetBool(SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SPLUNK_HEC_ENDPOINT", false)
-	s.SetInt(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "Disk space in MiB the application-audit HEC spool under <DATA_ROOT_DIR>/audit-spool may use. When full, new audit writes wait for space instead of dropping pending events. Values <=0 fall back to the default", DefaultDevBoxGatewaySpoolMaxMiB)
+	s.SetDuration(SPLUNK_HEC_STALL_TIMEOUT, "Make /api/ready fail once application-audit HEC delivery has kept failing this long, for example after a revoked token or a long outage, while local capacity can still accept events. Readiness recovers when delivery resumes. <=0 disables the check", DefaultSplunkHECStallTimeout)
+	s.SetInt(DEVBOX_GATEWAY_SPOOL_MAX_MIB, "Disk space in MiB the application-audit HEC spool under <DATA_ROOT_DIR>/audit-spool may use. At 90% usage, readiness fails and new audited activity is refused. At capacity, new writes fail promptly without evicting pending events. Values <=0 fall back to the default", DefaultDevBoxGatewaySpoolMaxMiB)
 }
 
 func (s *Settings) setSauronDefaults() {
@@ -664,6 +669,7 @@ const (
 	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
 	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"
 	SPLUNK_HEC_SKIP_TLS_VERIFY        = "SPLUNK_HEC_SKIP_TLS_VERIFY"
+	SPLUNK_HEC_STALL_TIMEOUT          = "SPLUNK_HEC_STALL_TIMEOUT"
 	SPLUNK_HEC_TOKEN                  = "SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
 	VDI_AUTO_SHUTDOWN_HOURS           = "VDI_AUTO_SHUTDOWN_HOURS"
 	VIRT_STORAGE_POOL_NAME            = "VIRT_STORAGE_POOL_NAME"

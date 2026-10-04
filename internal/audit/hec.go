@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -26,22 +28,32 @@ const (
 	hecRetryInitial    = time.Second
 	hecRetryLimit      = 30 * time.Second
 	hecShutdownTimeout = 5 * time.Second
+	hecRejectedFile    = "rejected.jsonl"
 )
 
 // hecForwarder persists each audit record before delivering it in the
 // background. Diagnostics must use log, not slog, to avoid recursively writing
 // to the audit sink when storage or delivery fails.
 type hecForwarder struct {
-	client *splunkhec.Client
-	host   string
-	spool  *sauron.DeliverySpool
+	client   *splunkhec.Client
+	host     string
+	spool    *sauron.DeliverySpool
+	rejected rejectedRecords
 
 	retryInitial    time.Duration
 	retryLimit      time.Duration
 	shutdownTimeout time.Duration
+	// stallTimeout fails readiness once delivery has kept failing this long;
+	// <=0 leaves a remote outage out of readiness.
+	stallTimeout time.Duration
+	now          func() time.Time
+
+	healthMu     sync.Mutex
+	failingSince time.Time
+	pressured    bool
 
 	// appendRecord captures the writer-lifetime context: request cancellation
-	// must not discard an audit event, but shutdown must release capacity waits.
+	// must not discard an audit event. Full spools reject instead of waiting.
 	appendRecord func([]byte) error
 	cancelWrites context.CancelFunc
 	cancel       context.CancelFunc
@@ -80,7 +92,9 @@ func newHECForwarder(config HECConfig, spoolDir string, spoolMaxBytes int64) (*h
 		client:          client,
 		host:            host,
 		spool:           spool,
-		appendRecord:    func(record []byte) error { return spool.Append(ctx, record) },
+		rejected:        rejectedRecords{path: filepath.Join(spoolDir, hecRejectedFile)},
+		now:             time.Now,
+		appendRecord:    func(record []byte) error { return spool.TryAppend(ctx, record) },
 		cancelWrites:    cancelWrites,
 		retryInitial:    hecRetryInitial,
 		retryLimit:      hecRetryLimit,
@@ -99,8 +113,8 @@ func (f *hecForwarder) start() {
 }
 
 // Write returns success only after the complete HEC envelope is on stable
-// storage. A full spool blocks until delivered segments can be reclaimed or
-// shutdown interrupts the wait; it never evicts undelivered events.
+// storage. A full spool returns an error immediately; it never evicts
+// undelivered events. The observed writer latches rejected records unhealthy.
 func (f *hecForwarder) Write(record []byte) (int, error) {
 	f.mu.Lock()
 	if f.closing {
@@ -143,6 +157,7 @@ func (f *hecForwarder) run(ctx context.Context) {
 		batch, err := f.spool.ReadBatch(f.spool.Checkpoint(), hecBatchSize, hecBatchBytes)
 		if err != nil {
 			log.Printf("audit: read application audit spool; records retained for retry: %v", err)
+			f.failed()
 			if !waitHECRetry(ctx, f.retryLimit) {
 				return
 			}
@@ -164,6 +179,7 @@ func (f *hecForwarder) run(ctx context.Context) {
 		if !f.checkpoint(ctx, batch[len(batch)-1].End) {
 			return
 		}
+		f.progressed()
 	}
 }
 
@@ -176,14 +192,18 @@ func (f *hecForwarder) checkpoint(ctx context.Context, position sauron.DeliveryP
 			return true
 		}
 		log.Printf("audit: checkpoint application audit spool; records retained: %v", err)
+		f.failed()
 		if !waitHECRetry(ctx, f.retryInitial) {
 			return false
 		}
 	}
 }
 
-// deliver retries all errors, including rejected credentials or events. These
-// require operator intervention, not deleting security evidence from the spool.
+// deliver retries a batch until the collector accepts it. Credential, index,
+// outage and every other refusal keep the batch pending: they require operator
+// intervention, never permission to delete security evidence. Only the
+// collector's verdict that an event itself is invalid moves that event aside,
+// into the rejected-records file, so it cannot hold up the backlog for good.
 func (f *hecForwarder) deliver(ctx context.Context, batch []sauron.DeliveryRecord) bool {
 	var body bytes.Buffer
 	for _, record := range batch {
@@ -201,6 +221,10 @@ func (f *hecForwarder) deliver(ctx context.Context, batch []sauron.DeliveryRecor
 		if ctx.Err() != nil {
 			return false
 		}
+		if splunkhec.IsInvalidEvent(err) {
+			return f.settleInvalid(ctx, batch, err)
+		}
+		f.failed()
 		log.Printf("audit: splunk hec delivery of %d event(s) failed (attempt %d); retained on disk, retrying in %s: %v", len(batch), attempt, backoff, err)
 		if !waitHECRetry(ctx, backoff) {
 			return false
@@ -208,6 +232,127 @@ func (f *hecForwarder) deliver(ctx context.Context, batch []sauron.DeliveryRecor
 		backoff = min(2*backoff, f.retryLimit)
 	}
 	return false
+}
+
+// settleInvalid handles a batch the collector refused as invalid. A single
+// event already has the collector's verdict on it alone.
+func (f *hecForwarder) settleInvalid(ctx context.Context, batch []sauron.DeliveryRecord, verdict error) bool {
+	if len(batch) == 1 {
+		return f.reject(ctx, batch[0], verdict)
+	}
+	return f.isolate(ctx, batch)
+}
+
+// isolate resends the records of a batch the collector refused as invalid one
+// at a time. Each record is moved aside only on the collector's verdict on that
+// record alone, so an oversized batch of valid records, or a collector fixed
+// mid-way, never sets one aside.
+func (f *hecForwarder) isolate(ctx context.Context, batch []sauron.DeliveryRecord) bool {
+	for _, record := range batch {
+		if !f.deliverIsolated(ctx, record) {
+			return false
+		}
+	}
+	return true
+}
+
+// deliverIsolated retries one record of an isolated batch until the collector
+// accepts it or refuses it as invalid, without resending the records before it.
+func (f *hecForwarder) deliverIsolated(ctx context.Context, record sauron.DeliveryRecord) bool {
+	backoff := f.retryInitial
+	for {
+		err := f.client.Post(ctx, record.Data)
+		switch {
+		case err == nil:
+			return true
+		case ctx.Err() != nil:
+			return false
+		case splunkhec.IsInvalidEvent(err):
+			return f.reject(ctx, record, err)
+		}
+		f.failed()
+		log.Printf("audit: splunk hec delivery of an event isolated from a rejected batch failed; retained on disk, retrying in %s: %v", backoff, err)
+		if !waitHECRetry(ctx, backoff) {
+			return false
+		}
+		backoff = min(2*backoff, f.retryLimit)
+	}
+}
+
+// reject preserves a record the collector will never accept before delivery
+// moves past it. Until the record is on stable storage in the rejected-records
+// file, delivery pauses rather than lose it.
+func (f *hecForwarder) reject(ctx context.Context, record sauron.DeliveryRecord, verdict error) bool {
+	for {
+		err := f.rejected.append(record.Data)
+		if err == nil {
+			log.Printf("audit: splunk hec rejected the application audit event ending at spool position %s as invalid; moved it to %s for operator review: %v", record.End, f.rejected.path, verdict)
+			return true
+		}
+		f.failed()
+		log.Printf("audit: preserve application audit event rejected by splunk hec; delivery paused: %v", err)
+		if !waitHECRetry(ctx, f.retryLimit) {
+			return false
+		}
+	}
+}
+
+// failed starts the stall clock at the first failure since the last delivered
+// batch.
+func (f *hecForwarder) failed() {
+	f.healthMu.Lock()
+	defer f.healthMu.Unlock()
+	if f.failingSince.IsZero() {
+		f.failingSince = f.now()
+	}
+}
+
+// progressed clears the stall clock once a batch is delivered and checkpointed.
+func (f *hecForwarder) progressed() {
+	f.healthMu.Lock()
+	defer f.healthMu.Unlock()
+	f.failingSince = time.Time{}
+}
+
+// readiness reports capacity pressure and sustained delivery failure. Both
+// recover when delivery resumes; persistence failures are tracked separately.
+func (f *hecForwarder) readiness() error {
+	return errors.Join(f.capacityReadiness(), f.deliveryReadiness())
+}
+
+func (f *hecForwarder) deliveryReadiness() error {
+	if f.stallTimeout <= 0 {
+		return nil
+	}
+	f.healthMu.Lock()
+	since := f.failingSince
+	f.healthMu.Unlock()
+	if since.IsZero() {
+		return nil
+	}
+	if stalled := f.now().Sub(since); stalled >= f.stallTimeout {
+		return fmt.Errorf("splunk hec delivery has been failing for %s", stalled.Round(time.Second))
+	}
+	return nil
+}
+
+// capacityReadiness closes admission at 90% of capacity, reserving headroom
+// for already admitted operations, disconnects and logout records. Checking
+// pressure never waits for remote delivery, and recovery needs no new write.
+func (f *hecForwarder) capacityReadiness() error {
+	used, limit := f.spool.Capacity()
+	pressured := used >= limit-limit/10
+	f.healthMu.Lock()
+	changed := f.pressured != pressured
+	f.pressured = pressured
+	f.healthMu.Unlock()
+	if changed {
+		log.Printf("audit: application audit spool pressure=%t, retained=%d bytes, limit=%d bytes", pressured, used, limit)
+	}
+	if pressured {
+		return fmt.Errorf("application audit spool reached admission threshold: %d of %d bytes", used, limit)
+	}
+	return nil
 }
 
 func waitHECRetry(ctx context.Context, delay time.Duration) bool {
@@ -221,9 +366,9 @@ func waitHECRetry(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-// beginShutdown bounds capacity waits before the gateway waits for workers
-// that may themselves be logging. Ordinary shutdown auditing can continue
-// until this deadline; unpersisted writes interrupted by it report an error.
+// beginShutdown bounds the acceptance window for workers emitting final events.
+// Full spools reject immediately throughout this window. Writes attempted after
+// the deadline report an error; already persisted records remain for replay.
 func (f *hecForwarder) beginShutdown() {
 	f.shutdownOnce.Do(func() {
 		f.shutdownWait = time.AfterFunc(f.shutdownTimeout, f.cancelWrites)

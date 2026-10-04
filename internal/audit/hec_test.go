@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/define42/devbox-gateway/internal/sauron"
 	"github.com/define42/devbox-gateway/internal/splunkhec"
 )
 
@@ -728,7 +729,7 @@ func TestHECForwarderReplayPreservesOriginalEnvelope(t *testing.T) {
 	}
 }
 
-func TestHECForwarderFullSpoolBlocksUntilClose(t *testing.T) {
+func TestHECForwarderFullSpoolRejectsWithoutEviction(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w, `{"code":9}`)
@@ -739,131 +740,90 @@ func TestHECForwarderFullSpoolBlocksUntilClose(t *testing.T) {
 	forwarder.shutdownTimeout = 30 * time.Millisecond
 	record := `{"user":"` + strings.Repeat("a", 200) + `"}`
 	writeRecord(t, forwarder, record)
-	forwarder.start()
-
 	written := make(chan error, 1)
-	go func() {
-		_, err := forwarder.Write([]byte(record))
-		written <- err
-	}()
+	go func() { _, err := forwarder.Write([]byte(record)); written <- err }()
 	select {
 	case err := <-written:
-		t.Fatalf("full-spool Write returned before space became available or shutdown: %v", err)
-	case <-time.After(30 * time.Millisecond):
-	}
-	if err := forwarder.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-written:
-		if err == nil {
-			t.Fatal("blocked writer reported success without persisting its record")
+		if !errors.Is(err, sauron.ErrDeliverySpoolFull) {
+			t.Fatalf("full Write = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("Close did not unblock the full-spool writer")
+		t.Fatal("full-spool write waited for remote delivery")
 	}
-	if n, err := forwarder.Write([]byte(`{"user":"after-close"}`)); n != 0 || err == nil {
-		t.Fatalf("Write after Close = %d, %v; want 0 and an error", n, err)
-	}
-}
-
-func TestHECForwarderFullSpoolResumesAfterDelivery(t *testing.T) {
-	var reject atomic.Bool
-	reject.Store(true)
-	var acceptedMu sync.Mutex
-	var accepted []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		events := decodeEnvelopes(t, r.Body)
-		if reject.Load() {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = io.WriteString(w, `{"code":4}`)
-			return
-		}
-		acceptedMu.Lock()
-		accepted = append(accepted, eventUsers([]hecRequest{{events: events}})...)
-		acceptedMu.Unlock()
-		_, _ = io.WriteString(w, `{"code":0}`)
-	}))
-	t.Cleanup(server.Close)
-	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: server.URL, Token: "token"}, t.TempDir(), 512)
-	forwarder.host = "test-host"
-	firstUser, secondUser := strings.Repeat("a", 200), strings.Repeat("b", 200)
-	writeRecord(t, forwarder, `{"user":"`+firstUser+`"}`)
-	forwarder.start()
-
-	record := []byte(`{"user":"` + secondUser + `"}`)
-	written := make(chan error, 1)
-	go func() {
-		n, err := forwarder.Write(record)
-		if err == nil && n != len(record) {
-			t.Errorf("resumed Write persisted %d bytes, want %d", n, len(record))
-		}
-		written <- err
-	}()
-	select {
-	case err := <-written:
-		t.Fatalf("full-spool Write returned while HEC was still rejecting: %v", err)
-	case <-time.After(30 * time.Millisecond):
-	}
-	reject.Store(false)
-	select {
-	case err := <-written:
-		if err != nil {
-			t.Fatalf("writer failed after confirmed delivery released capacity: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("confirmed HEC delivery did not release the blocked writer")
+	pending, err := forwarder.spool.ReadBatch(forwarder.spool.Checkpoint(), 10, 1024)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending records = %v, %v", pending, err)
 	}
 	if err := forwarder.Close(); err != nil {
 		t.Fatal(err)
 	}
-	acceptedMu.Lock()
-	defer acceptedMu.Unlock()
-	if len(accepted) != 2 || accepted[0] != firstUser || accepted[1] != secondUser {
-		t.Fatalf("accepted events=%q, want both persisted records in order", accepted)
+	if n, err := forwarder.Write([]byte(`{"user":"after-close"}`)); n != 0 || err == nil {
+		t.Fatalf("Write after Close = %d, %v", n, err)
 	}
 }
 
-func TestConfigureBeginShutdownUnblocksFullSpoolWriter(t *testing.T) {
+func TestHECForwarderFullSpoolAcceptsRetryAfterDelivery(t *testing.T) {
+	collector := newReplayCollector(t)
+	forwarder := newTestForwarderWithSpool(t, HECConfig{Endpoint: collector.server.URL, Token: "token"}, t.TempDir(), 512)
+	forwarder.host = "test-host"
+	forwarder.shutdownTimeout = 100 * time.Millisecond
+	first := `{"user":"` + strings.Repeat("a", 200) + `"}`
+	second := `{"user":"` + strings.Repeat("b", 200) + `"}`
+	writeRecord(t, forwarder, first)
+	if _, err := forwarder.Write([]byte(second)); !errors.Is(err, sauron.ErrDeliverySpoolFull) {
+		t.Fatal(err)
+	}
+	collector.reject.Store(false)
+	forwarder.start()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		used, _ := forwarder.spool.Capacity()
+		if used == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delivery did not free capacity")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	writeRecord(t, forwarder, second)
+	if err := forwarder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := collector.snapshotFrom(0); len(got) != 2 || !strings.Contains(got[0], strings.Repeat("a", 200)) || !strings.Contains(got[1], strings.Repeat("b", 200)) {
+		t.Fatalf("delivered records = %q", got)
+	}
+}
+
+func TestConfigureFullSpoolLatchesRejectedRecordAndCloses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
 	closer, err := Configure(Options{
-		SpoolDir:      t.TempDir(),
-		SpoolMaxBytes: 512,
-		HEC:           HECConfig{Endpoint: server.URL, Token: "token"},
+		SpoolDir: t.TempDir(), SpoolMaxBytes: 512,
+		HEC: HECConfig{Endpoint: server.URL, Token: "token"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = closer.Close() })
 	sink := closer.(*configuredSink)
-	sink.forwarder.host = "test-host"
 	sink.forwarder.shutdownTimeout = 30 * time.Millisecond
-	record := `{"user":"` + strings.Repeat("a", 200) + `"}`
-	writeRecord(t, sink.forwarder, record)
-	written := make(chan error, 1)
-	go func() {
-		_, err := sink.forwarder.Write([]byte(record))
-		written <- err
-	}()
-	select {
-	case err := <-written:
-		t.Fatalf("full-spool writer returned before shutdown: %v", err)
-	case <-time.After(30 * time.Millisecond):
+	writer := observedAuditWriter{destination: sink.forwarder, health: sink.health}
+	record := []byte(`{"user":"` + strings.Repeat("a", 200) + `"}`)
+	if _, err := writer.Write(record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(record); !errors.Is(err, sauron.ErrDeliverySpoolFull) {
+		t.Fatalf("full Write = %v", err)
+	}
+	if sink.Readiness() == nil || sink.Admission() == nil {
+		t.Fatal("unpersisted record did not fail health/admission")
 	}
 	sink.BeginShutdown()
-	select {
-	case err := <-written:
-		if err == nil {
-			t.Fatal("unpersisted writer returned success during shutdown")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("BeginShutdown did not release the writer before Close")
-	}
-	if err := closer.Close(); err != nil {
-		t.Fatal(err)
+	if err := closer.Close(); err == nil {
+		t.Fatal("Close hid an unpersisted audit record")
 	}
 }
 

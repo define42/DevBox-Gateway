@@ -177,6 +177,14 @@ Generic collector write/flush failures may clear after a later successful write
 to every output. Background retries do not advance guest acknowledgements;
 normal guest acceptance still does that, and duplicate output is possible.
 
+Guest ACKs require every configured sink to accept the event. The embedded file
+sink fsyncs event data and file creation/rotation metadata before acceptance,
+including file-only collection; durability follows the filesystem's fsync
+guarantees. With guest HEC configured, acceptance also requires a durable local
+spool append, independently of Splunk delivery or indexer acknowledgement.
+This does not remove the guest source spool's capacity and periodic-fsync limits
+before delivery to the gateway.
+
 When fresh inventory can resolve a previously unknown or incomplete guest
 identity, its next valid event or heartbeat triggers a reconnect. The new
 connection is resolved by the collector and can satisfy that VM's stream check.
@@ -198,7 +206,17 @@ Application audit persistence failures also require investigation and restart. S
 An unexpected collector exit terminates the gateway with exit status 1.
 
 Readiness reports observed failures; it does not probe LDAP, free disk space or
-Splunk searchability, and a remote HEC outage alone does not fail it while local
-spooling succeeds. A `503` does not itself block other HTTP or RDP requests.
+Splunk searchability. A remote HEC outage does not fail it while local spooling
+succeeds, until application-audit delivery has kept failing for
+`SPLUNK_HEC_STALL_TIMEOUT` (one hour by default; `0` disables this check).
+Application-audit spool usage at or above 90% also fails readiness and refuses
+new HTTP mutations and WebSocket upgrades with `503`, `Retry-After: 5` and a
+JSON error. New RDP connections close before consuming a grant. Logout,
+ordinary reads and probes remain available. Capacity-based admission recovers
+when delivery frees space; a persistence failure requires investigation and
+restart. Other readiness failures, including the delivery timeout alone, do
+not reject otherwise admitted activity. Already-running operations can finish;
+if their audit write hits the hard limit it fails promptly and latches the
+persistence failure rather than waiting indefinitely.
 See [readiness handling](../internal/gateway/readiness.go) and
 [audit delivery boundaries](../compliance.md#delivery-and-compliance-boundaries).

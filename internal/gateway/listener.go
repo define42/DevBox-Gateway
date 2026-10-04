@@ -275,6 +275,10 @@ func serveListener(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager,
 }
 
 func serveListenerWithHTTPServers(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry) error {
+	return serveListenerWithAdmission(ln, mux, frontTLS, sessionManager, settings, httpServers, nil)
+}
+
+func serveListenerWithAdmission(ln net.Listener, mux http.Handler, frontTLS *cert.TLSManager, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry, admission func() error) error {
 	var retryDelay time.Duration
 	for {
 		c, err := ln.Accept()
@@ -294,7 +298,7 @@ func serveListenerWithHTTPServers(ln net.Listener, mux http.Handler, frontTLS *c
 			continue
 		}
 		retryDelay = 0
-		go handleSharedConnWithHTTPServers(c, frontTLS, mux, sessionManager, settings, httpServers)
+		go handleSharedConnWithAdmission(c, frontTLS, mux, sessionManager, settings, httpServers, admission)
 	}
 }
 
@@ -303,6 +307,10 @@ func handleSharedConn(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler,
 }
 
 func handleSharedConnWithHTTPServers(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry) {
+	handleSharedConnWithAdmission(raw, frontTLS, mux, sessionManager, settings, httpServers, nil)
+}
+
+func handleSharedConnWithAdmission(raw net.Conn, frontTLS *cert.TLSManager, mux http.Handler, sessionManager *session.Manager, settings *config.Settings, httpServers *httpServerRegistry, admission func() error) {
 	defer func() { _ = raw.Close() }()
 
 	// Defense in depth: this goroutine parses attacker-controlled bytes (the RDP
@@ -338,6 +346,11 @@ func handleSharedConnWithHTTPServers(raw net.Conn, frontTLS *cert.TLSManager, mu
 	}
 	if settings.Bool(config.DEBUG_CONNECTIONS) {
 		log.Printf("debug-conn: accepted RDP connection from %s", raw.RemoteAddr())
+	}
+	// Refuse new RDP streams before consuming a grant or opening a backend.
+	// HTTPS probes remain reachable so operators can observe and recover pressure.
+	if admission != nil && admission() != nil {
+		return
 	}
 	rdp.Handle(conn, frontTLS, sessionManager, settings)
 }

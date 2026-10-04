@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -274,5 +275,24 @@ func TestNewFileSinkWritesJSONLines(t *testing.T) {
 	}
 	if len(other.envs) != 1 || !other.closed {
 		t.Errorf("the second sink got %d envelopes (closed=%t), want 1 and closed", len(other.envs), other.closed)
+	}
+}
+
+func TestNewFileSinkRejectsStorageWithoutSync(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+	// Linux exposes a writable descriptor that accepts bytes but cannot fsync.
+	// The durable public constructor must reject it before accepting events.
+	path := fmt.Sprintf("/proc/self/fd/%d", writer.Fd())
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("descriptor paths are unavailable: %v", err)
+	}
+	if sink, err := NewFileSink(path); err == nil {
+		_ = sink.Close()
+		t.Fatal("NewFileSink accepted storage without fsync support")
 	}
 }

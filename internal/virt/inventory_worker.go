@@ -64,7 +64,7 @@ func NewInventory() *Inventory {
 
 // peekInventory returns the process-wide VM inventory only when NewInventory
 // has already started it, and nil otherwise. Callers with a correct non-cache
-// path (such as the VM creation quota check) use this so consulting the cache
+// path use this so consulting the cache
 // never starts the background worker as a side effect; in-package tests rely on
 // the worker staying unstarted so their libvirt fixtures remain the only
 // observer of domain state.
@@ -78,19 +78,16 @@ func (s *Inventory) Stop() {
 	s.ticker.Stop()
 }
 
-// vmQuotaSnapshotMaxAge bounds how old the worker's VM snapshot may be when it
-// substitutes for a live per-owner domain count in the creation quota check.
-// The worker sweeps every 2 seconds, so a healthy snapshot is well inside this
-// bound; a sweep stalled longer than this (for example on a slow or
-// unresponsive libvirtd) makes CountVMsOwnedBy report not-authoritative and
-// the quota check falls back to counting live libvirt state.
+// vmQuotaSnapshotMaxAge bounds the age considered fresh by CountVMsOwnedBy.
+// The worker normally sweeps every 2 seconds. Even a fresh snapshot can omit
+// recently created VMs; quota admission therefore always uses live ownership.
 const vmQuotaSnapshotMaxAge = 10 * time.Second
 
 // CountVMsOwnedBy returns the number of cached VMs owned by user, and whether
-// that count is authoritative enough for quota decisions: an inventory sweep
-// must have completed recently (vmQuotaSnapshotMaxAge) and not been invalidated
-// by a libvirt host change. Callers must treat a false result as "count
-// unavailable", never as zero.
+// the snapshot is fresh: an inventory sweep must have completed recently
+// (vmQuotaSnapshotMaxAge) and not been invalidated by a libvirt host change.
+// This informational count is eventually consistent and must not be used for
+// quota admission. A false result means "count unavailable", never zero.
 func (s *Inventory) CountVMsOwnedBy(user string) (int, bool) {
 	if strings.TrimSpace(user) == "" {
 		return 0, false
@@ -113,7 +110,7 @@ func (s *Inventory) CountVMsOwnedBy(user string) (int, bool) {
 }
 
 // markVMSnapshotSwept records that the visible VM snapshot was just produced by
-// a completed inventory sweep, making it eligible for quota decisions.
+// a completed inventory sweep.
 func (s *Inventory) markVMSnapshotSwept() {
 	s.mu.Lock()
 	s.snapshotSweptAt = time.Now()
@@ -121,7 +118,7 @@ func (s *Inventory) markVMSnapshotSwept() {
 }
 
 // invalidateVMSnapshot drops the visible VM snapshot and marks it unswept so
-// quota decisions stop trusting it until a sweep against the (possibly new)
+// cached counts remain unavailable until a sweep against the (possibly new)
 // libvirt host succeeds. The sweep timestamp is zeroed before the snapshot is
 // cleared so a concurrent CountVMsOwnedBy can never judge soon-to-be-dropped
 // data as fresh.
@@ -405,7 +402,7 @@ func (s *Inventory) applySweep(res sweepOutcome) {
 }
 
 // publishInventory installs a sweep's results: the UUID-keyed inventory
-// caches, the visible VM snapshot, and the quota freshness stamp.
+// caches, the visible VM snapshot, and its freshness stamp.
 func (s *Inventory) publishInventory(
 	vms []VMInfo,
 	metadata map[string]domainMetadataSnapshot,

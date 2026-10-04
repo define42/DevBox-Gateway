@@ -384,15 +384,21 @@ see [packaging/systemd/](packaging/systemd/).
 * Events reach `/var/lib/sauronagent/spool` before transmission. A host outage
   retains the backlog until acknowledgements or the spool size limit remove
   it. An abrupt agent exit can lose records still in memory; guest power loss
-  can also lose unsynced spool writes.
+  can also lose unsynced spool writes; guest spools use periodic fsync by default.
 * An acknowledgement checkpoint must be persisted before acknowledged records
   are discarded. Storage errors retain those records for retry and preserve
   sequence continuity after restart; cleanup failures can be retried with the
   same acknowledgement.
-* Acknowledgements are cumulative and follow sink acceptance. The default file
-  sink does not sync every write; stdout and syslog rely on the downstream
-  logger for durability. An ACK alone does not guarantee survival of host
-  power loss.
+* Acknowledgements are cumulative and follow sink acceptance. The standalone
+  collector's file sink keeps `sync_on_write` configurable (false by default);
+  stdout and syslog rely on the downstream logger for durability. Those defaults
+  do not guarantee that acknowledged records survive host power loss.
+* The embedded `collector.NewFileSink`, used by DevBox-Gateway, always fsyncs
+  event data and file creation/rotation metadata before acceptance, including
+  file-only deployments. Its ACKs follow the filesystem's fsync durability
+  guarantees. Per-event fsync adds storage latency and limits throughput;
+  configured rotation still limits retention. This does not change the guest
+  source spool's periodic-sync defaults or its limits before delivery.
 * Retained events are replayed after reconnect. The host deduplicates using
   `(CID, HELLO boot id, sequence)` while its in-memory state remains available.
   A collector restart or state eviction can produce duplicates.

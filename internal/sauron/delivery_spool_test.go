@@ -243,6 +243,126 @@ func TestDeliverySpoolFullWaitsWithoutEvictionAndResumesAfterAck(t *testing.T) {
 	})
 }
 
+func TestDeliverySpoolTryAppendRejectsFullWithoutEvictionAndRecovers(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		s := openTestDeliverySpool(t, dir, 8)
+		if err := s.TryAppend(t.Context(), []byte(`{"n":1}`)); err != nil {
+			t.Fatal(err)
+		}
+		want := readDelivery(t, s)
+		if len(want) != 1 || string(want[0].Data) != `{"n":1}` {
+			t.Fatalf("TryAppend accepted record without retaining it: %#v", want)
+		}
+		checkpoint := s.Checkpoint()
+		requirePromptFullDeliveryRejection(t, s)
+		if got := readDelivery(t, s); !reflect.DeepEqual(got, want) {
+			t.Fatalf("full TryAppend changed retained records: %#v, want %#v", got, want)
+		}
+		if got := s.Checkpoint(); got != checkpoint {
+			t.Fatalf("full TryAppend advanced checkpoint to %v, want %v", got, checkpoint)
+		}
+		if used, limit := s.Capacity(); used != 8 || limit != 8 {
+			t.Fatalf("full capacity = (%d, %d), want (8, 8)", used, limit)
+		}
+		requireDeliveryRecoveryAfterAck(t, s, dir, want[0].End)
+	})
+}
+
+func requirePromptFullDeliveryRejection(t *testing.T, s *DeliverySpool) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- s.TryAppend(t.Context(), []byte(`{"n":2}`)) }()
+	synctest.Wait()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrDeliverySpoolFull) {
+			t.Fatalf("full TryAppend = %v, want ErrDeliverySpoolFull", err)
+		}
+	default:
+		t.Fatal("TryAppend waited for capacity instead of rejecting the record")
+	}
+}
+
+func requireDeliveryRecoveryAfterAck(t *testing.T, s *DeliverySpool, dir string, checkpoint DeliveryPosition) {
+	t.Helper()
+	if err := s.Acknowledge(checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if used, limit := s.Capacity(); used != 0 || limit != 8 {
+		t.Fatalf("capacity after ACK = (%d, %d), want (0, 8)", used, limit)
+	}
+	if err := s.TryAppend(t.Context(), []byte(`{"n":2}`)); err != nil {
+		t.Fatalf("TryAppend after capacity recovery: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestDeliverySpool(t, dir, 8)
+	if got := readDelivery(t, reopened); len(got) != 1 || string(got[0].Data) != `{"n":2}` {
+		t.Fatalf("TryAppend lost accepted record across restart: %#v", got)
+	}
+}
+
+func TestDeliverySpoolTryAppendRejectsInvalidCancelledAndClosedWrites(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		record  string
+		cancel  bool
+		closed  bool
+		wantErr error
+	}{
+		{name: "oversized including newline", record: strings.Repeat("x", 8)},
+		{name: "multiple lines", record: "{}\n{}"},
+		{name: "cancelled", record: `{"n":2}`, cancel: true, wantErr: context.Canceled},
+		{name: "closed", record: `{"n":2}`, closed: true, wantErr: os.ErrClosed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			s := openTestDeliverySpool(t, dir, 8)
+			appendDelivery(t, s, `{"n":1}`)
+			want := readDelivery(t, s)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			if tc.closed {
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := s.TryAppend(ctx, []byte(tc.record))
+			requireDeliveryValidationError(t, err, tc.wantErr)
+			requireUnchangedDeliveryAfterReopen(t, s, dir, want)
+		})
+	}
+}
+
+func requireDeliveryValidationError(t *testing.T, err, want error) {
+	t.Helper()
+	if err == nil || errors.Is(err, ErrDeliverySpoolFull) {
+		t.Fatalf("TryAppend = %v, want validation or lifecycle error", err)
+	}
+	if want != nil && !errors.Is(err, want) {
+		t.Fatalf("TryAppend = %v, want %v", err, want)
+	}
+}
+
+func requireUnchangedDeliveryAfterReopen(t *testing.T, s *DeliverySpool, dir string, want []DeliveryRecord) {
+	t.Helper()
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestDeliverySpool(t, dir, 8)
+	if got := readDelivery(t, reopened); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rejected TryAppend changed retained records: %#v, want %#v", got, want)
+	}
+}
+
 func TestDeliverySpoolCancelledCapacityWait(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {

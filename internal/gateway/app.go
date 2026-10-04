@@ -80,9 +80,8 @@ func (g *gatewayRuntime) Close() error {
 
 func (g *gatewayRuntime) close() error {
 	// Tell a durable audit sink that shutdown has begun before stopping workers
-	// that may themselves emit a final audit event. The sink keeps ordinary
-	// capacity waits available for its grace period, then releases them so a full
-	// spool cannot deadlock the remainder of shutdown.
+	// that may themselves emit a final audit event. The sink allows final writes
+	// during its grace period; capacity exhaustion always fails promptly.
 	if sink, ok := g.auditSink.(interface{ BeginShutdown() }); ok {
 		sink.BeginShutdown()
 	}
@@ -328,9 +327,13 @@ func startGatewayRuntimeWithCollector(
 		sauron:         collector,
 		done:           done,
 	}
-	mux := newHandler(sessionManager, settings, runtime.readiness)
+	var admission func() error
+	if provider, ok := auditSink.(interface{ Admission() error }); ok {
+		admission = provider.Admission
+	}
+	mux := newHandlerWithAdmission(sessionManager, settings, runtime.readiness, admission)
 	go func() {
-		runtime.serveErr = serveListenerWithHTTPServers(ln, mux, frontTLS, sessionManager, settings, runtime.httpServers)
+		runtime.serveErr = serveListenerWithAdmission(ln, mux, frontTLS, sessionManager, settings, runtime.httpServers, admission)
 		close(done)
 	}()
 
@@ -350,9 +353,10 @@ func startGatewayRuntimeWithCollector(
 // ValidateSplunkHEC has already rejected partial HEC settings at boot.
 func auditOptions(settings *config.Settings) audit.Options {
 	return audit.Options{
-		FilePath:      settings.Get(config.AUDIT_LOG_FILE),
-		SpoolDir:      config.AuditSpoolDir(settings),
-		SpoolMaxBytes: config.AuditSpoolMaxBytes(settings),
+		FilePath:        settings.Get(config.AUDIT_LOG_FILE),
+		SpoolDir:        config.AuditSpoolDir(settings),
+		SpoolMaxBytes:   config.AuditSpoolMaxBytes(settings),
+		HECStallTimeout: settings.Duration(config.SPLUNK_HEC_STALL_TIMEOUT),
 		HEC: audit.HECConfig{
 			Endpoint:           settings.Get(config.SPLUNK_HEC_ENDPOINT),
 			Token:              settings.Get(config.SPLUNK_HEC_TOKEN),

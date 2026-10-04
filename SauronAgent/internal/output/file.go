@@ -35,10 +35,12 @@ type fileSink struct {
 	maxSize     int64
 	maxFiles    int
 	syncOnWrite bool
+	syncFile    func(*os.File) error
 
-	f      *os.File
-	size   int64
-	closed bool
+	f           *os.File
+	size        int64
+	dirsPending bool
+	closed      bool
 }
 
 // NewFile returns a sink writing newline-delimited JSON to cfg.Path.
@@ -46,6 +48,12 @@ type fileSink struct {
 // Parent directories are created as needed. A MaxSize of zero disables
 // rotation so that an external logrotate can own the file instead.
 func NewFile(cfg config.FileOutput) (Sink, error) {
+	return newFile(cfg, (*os.File).Sync)
+}
+
+// newFile permits storage synchronization failures to be exercised without
+// changing process-wide filesystem operations.
+func newFile(cfg config.FileOutput, syncFile func(*os.File) error) (Sink, error) {
 	if strings.TrimSpace(cfg.Path) == "" {
 		return nil, errors.New("output/file: path must be set")
 	}
@@ -61,6 +69,7 @@ func NewFile(cfg config.FileOutput) (Sink, error) {
 		maxSize:     cfg.MaxSize.Bytes(),
 		maxFiles:    maxFiles,
 		syncOnWrite: cfg.SyncOnWrite,
+		syncFile:    syncFile,
 	}
 	if err := s.openLocked(); err != nil {
 		return nil, err
@@ -71,10 +80,8 @@ func NewFile(cfg config.FileOutput) (Sink, error) {
 // openLocked opens or creates the current file and records its size. The
 // caller must hold mu, except in NewFile where the sink is not yet shared.
 func (s *fileSink) openLocked() error {
-	if dir := filepath.Dir(s.path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, dirMode); err != nil {
-			return fmt.Errorf("output/file: creating %s: %w", dir, err)
-		}
+	if err := s.prepareDirectory(); err != nil {
+		return err
 	}
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, fileMode)
 	if err != nil {
@@ -93,8 +100,77 @@ func (s *fileSink) openLocked() error {
 		_ = f.Close()
 		return fmt.Errorf("output/file: stat %s: %w", s.path, err)
 	}
+	if s.syncOnWrite {
+		if err := s.syncFile(f); err != nil {
+			return errors.Join(fmt.Errorf("output/file: syncing %s: %w", s.path, err), f.Close())
+		}
+		if err := s.syncDirectory(filepath.Dir(s.path)); err != nil {
+			return errors.Join(err, f.Close())
+		}
+	}
 	s.f = f
 	s.size = info.Size()
+	s.dirsPending = !s.syncOnWrite
+	return nil
+}
+
+func (s *fileSink) prepareDirectory() error {
+	if err := os.MkdirAll(filepath.Dir(s.path), dirMode); err != nil {
+		return fmt.Errorf("output/file: creating directory for %s: %w", s.path, err)
+	}
+	if s.syncOnWrite {
+		// A prior rotation may have renamed the live file but failed before
+		// syncing the rename. Commit that metadata before recreating its name,
+		// including when reopening after a collector process crash.
+		return s.syncParentDirs()
+	}
+	return nil
+}
+
+// syncParentDirs persists the log's directory entry and each ancestor entry.
+// Syncing only the immediate parent can still lose a newly created log
+// directory on power loss. Sync existing ancestors too: an earlier attempt
+// may have created them and failed before its synchronization completed.
+func (s *fileSink) syncParentDirs() error {
+	dir, err := filepath.Abs(filepath.Dir(s.path))
+	if err != nil {
+		return fmt.Errorf("output/file: resolving directory for %s: %w", s.path, err)
+	}
+	for {
+		if err := s.syncDirectory(dir); err != nil {
+			return err
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+		dir = parent
+	}
+}
+
+func (s *fileSink) syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("output/file: opening directory %s: %w", path, err)
+	}
+	if err := errors.Join(s.syncFile(dir), dir.Close()); err != nil {
+		return fmt.Errorf("output/file: syncing directory %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *fileSink) syncLocked() error {
+	if s.f != nil {
+		if err := s.syncFile(s.f); err != nil {
+			return fmt.Errorf("output/file: syncing %s: %w", s.path, err)
+		}
+	}
+	if s.dirsPending {
+		if err := s.syncParentDirs(); err != nil {
+			return err
+		}
+		s.dirsPending = false
+	}
 	return nil
 }
 
@@ -143,9 +219,7 @@ func (s *fileSink) Write(ctx context.Context, env *Envelope) error {
 	s.size += int64(n)
 
 	if s.syncOnWrite {
-		if err := s.f.Sync(); err != nil {
-			return fmt.Errorf("output/file: syncing %s: %w", s.path, err)
-		}
+		return s.syncLocked()
 	}
 	return nil
 }
@@ -167,7 +241,7 @@ func (s *fileSink) rotateLocked() error {
 	// Flush the outgoing generation before it is renamed: whatever is still
 	// only in the kernel's page cache belongs with the events it was written
 	// beside, not with the next file.
-	if err := s.f.Sync(); err != nil {
+	if err := s.syncLocked(); err != nil {
 		return fmt.Errorf("output/file: syncing %s before rotation: %w", s.path, err)
 	}
 	if err := s.f.Close(); err != nil {
@@ -175,19 +249,61 @@ func (s *fileSink) rotateLocked() error {
 		return fmt.Errorf("output/file: closing %s before rotation: %w", s.path, err)
 	}
 	s.f = nil
+	s.dirsPending = true
 
-	if err := removeIfExists(rotatedName(s.path, s.maxFiles)); err != nil {
+	slot, err := s.firstMissingGeneration()
+	if err != nil {
 		return err
 	}
-	for i := s.maxFiles - 1; i >= 1; i-- {
+	if slot == 0 {
+		slot = s.maxFiles
+		if err := removeIfExists(rotatedName(s.path, slot)); err != nil {
+			return err
+		}
+		if err := s.syncRotationDir(); err != nil {
+			return err
+		}
+	}
+	for i := slot - 1; i >= 1; i-- {
 		if err := renameIfExists(rotatedName(s.path, i), rotatedName(s.path, i+1)); err != nil {
+			return err
+		}
+		if err := s.syncRotationDir(); err != nil {
 			return err
 		}
 	}
 	if err := renameIfExists(s.path, rotatedName(s.path, 1)); err != nil {
 		return err
 	}
+	if err := s.syncRotationDir(); err != nil {
+		return err
+	}
 	return s.openLocked()
+}
+
+// A gap records how far an interrupted rotation got: generations above it
+// have already shifted. Reuse that gap, including after process restart,
+// instead of pruning and shifting the same retained generations again.
+// Zero means every generation exists and normal retention must prune one.
+func (s *fileSink) firstMissingGeneration() (int, error) {
+	for i := 1; i <= s.maxFiles; i++ {
+		path := rotatedName(s.path, i)
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			return i, nil
+		} else if err != nil {
+			return 0, fmt.Errorf("output/file: checking generation %s: %w", path, err)
+		}
+	}
+	return 0, nil
+}
+
+// Persist each rename before reusing its source name for another generation.
+// This preserves already acknowledged events if power fails mid-rotation.
+func (s *fileSink) syncRotationDir() error {
+	if s.syncOnWrite {
+		return s.syncDirectory(filepath.Dir(s.path))
+	}
+	return nil
 }
 
 func rotatedName(path string, n int) string { return fmt.Sprintf("%s.%d", path, n) }
@@ -208,8 +324,8 @@ func renameIfExists(from, to string) error {
 	return nil
 }
 
-// Flush fsyncs the file, which is what makes everything written so far survive
-// the machine losing power.
+// Flush fsyncs the file and any pending directory changes, which is what makes
+// everything written so far survive the machine losing power.
 func (s *fileSink) Flush(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -219,13 +335,7 @@ func (s *fileSink) Flush(ctx context.Context) error {
 	if s.closed {
 		return errSinkClosed
 	}
-	if s.f == nil {
-		return nil
-	}
-	if err := s.f.Sync(); err != nil {
-		return fmt.Errorf("output/file: syncing %s: %w", s.path, err)
-	}
-	return nil
+	return s.syncLocked()
 }
 
 // Close fsyncs and closes the file. It is safe to call more than once.
@@ -236,14 +346,15 @@ func (s *fileSink) Close() error {
 		return nil
 	}
 	s.closed = true
+	syncErr := s.syncLocked()
 	if s.f == nil {
-		return nil
+		return syncErr
 	}
 	f := s.f
 	s.f = nil
 	var errs []error
-	if err := f.Sync(); err != nil {
-		errs = append(errs, fmt.Errorf("output/file: syncing %s: %w", s.path, err))
+	if syncErr != nil {
+		errs = append(errs, syncErr)
 	}
 	if err := f.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("output/file: closing %s: %w", s.path, err))

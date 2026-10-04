@@ -19,6 +19,10 @@ type DeliveryRecord struct {
 	End  DeliveryPosition
 }
 
+// ErrDeliverySpoolFull means a record was not accepted because the spool has
+// insufficient capacity. Records already accepted remain intact.
+var ErrDeliverySpoolFull = errors.New("delivery spool is full")
+
 // DeliverySpool retains records until a forwarder acknowledges them. Appends
 // may run concurrently; one forwarder owns reading and acknowledgement.
 // The directory lock is held until Close has finished all storage operations.
@@ -84,6 +88,46 @@ func (s *DeliverySpool) Append(ctx context.Context, record []byte) error {
 		case <-changed:
 		}
 	}
+}
+
+// TryAppend persists a record without waiting for delivery to free capacity.
+// It still waits for the local write and fsync. Callers serving interactive
+// requests use this instead of accumulating blocked writers during an outage.
+func (s *DeliverySpool) TryAppend(ctx context.Context, record []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if int64(len(record)) >= s.store.maxBytes {
+		return fmt.Errorf("delivery spool record exceeds the %d-byte limit including its newline", s.store.maxBytes)
+	}
+	if bytes.IndexByte(record, '\n') >= 0 {
+		return errors.New("delivery spool record contains a newline")
+	}
+	if _, err := s.begin(); err != nil {
+		return err
+	}
+	defer s.inFlight.Done()
+	err := s.store.Append(record)
+	if errors.Is(err, errSpoolFull) {
+		return ErrDeliverySpoolFull
+	}
+	return err
+}
+
+// Capacity reports retained bytes and the configured limit. A fully delivered
+// active segment is excluded because the next append can reclaim it. This
+// makes admission recover even when no writer is waiting to rotate that segment.
+func (s *DeliverySpool) Capacity() (used, limit int64) {
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+	used, limit = s.store.total, s.store.maxBytes
+	if len(s.store.segments) > 0 {
+		last := s.store.segments[len(s.store.segments)-1]
+		if s.store.checkpoint == (spoolPosition{Segment: last.id, Offset: last.size}) {
+			used -= last.size
+		}
+	}
+	return used, limit
 }
 
 func (s *DeliverySpool) begin() (<-chan struct{}, error) {

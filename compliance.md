@@ -144,8 +144,9 @@ liveness probe. The separate public `GET /api/ready` returns `200` with
 `ready\n` or `503` with `not ready\n`, without backend details. It checks known
 application audit persistence failures, collector output health, expected
 agents, inventory freshness, pending stream alerts and unreported sequence
-gaps. Readiness does not
-itself block user actions. See [readiness and supervision](internal/gateway/readiness.go).
+gaps. Application-audit capacity pressure or persistence failure also blocks
+new mutations and upgraded streams, while logout, ordinary reads and probes
+remain available. Other readiness failures do not themselves block actions. See [readiness and supervision](internal/gateway/readiness.go).
 
 Running persistent VMs with gateway ownership metadata are expected to send
 guest telemetry. The inventory refreshes every 15 seconds; a failed lookup
@@ -204,16 +205,25 @@ its next valid event or heartbeat triggers reconnection and fresh attribution.
 Already-written records retain their original source. A resolved connection
 keeps its pinned identity through CID reuse.
 
-Remote HEC unavailability alone does not fail readiness while local spooling
-succeeds; readiness also does not probe free disk space or confirm Splunk
-searchability. Continue monitoring capacity and end-to-end event arrival.
+Remote HEC unavailability can be buffered while local capacity remains below
+the admission threshold. Sustained application-audit delivery failure also
+fails readiness after `SPLUNK_HEC_STALL_TIMEOUT`, independently of admission.
+Readiness does not probe free disk space or confirm Splunk searchability.
+Continue monitoring capacity and end-to-end event arrival.
 
 Both ACK switches default to `false`, preserving delivery confirmation by an HTTP `2xx` response with valid HEC JSON `code: 0`. Set a stream's switch to `true` only when its Splunk deployment supports HEC indexer acknowledgement and its token has the feature enabled. DevBox-Gateway sends the same generated GUID in `X-Splunk-Request-Channel` on event POSTs and `/services/collector/ack` polls, using the same token. Only an explicit `true` for the submitted payload's exact `ackId` permits successful-delivery checkpoint advancement. False or missing ACK status, malformed replies, transport/HTTP failures and shutdown leave unconfirmed payloads pending. Polling is bounded to five minutes per delivery attempt; the forwarder then retries the stored payload with backoff. Lost responses, timeout or restart can produce duplicates even after Splunk processes a payload.
 
 Event submission and ACK polling must reach the same HEC instance and channel; configure load-balancer affinity when applicable. The ACK URL preserves the event URL's scheme, host and any proxy prefix before `/services/collector`; unsupported custom event paths fail startup in ACK mode. Splunk defines a true ACK in terms of the desired replication factor and warns that parsing can still discard events. It is not proof that every event was indexed or is searchable. See [Splunk's indexer acknowledgement documentation](https://help.splunk.com/en/splunk-enterprise/get-data-in/collect-http-event-data/about-http-event-collector-indexer-acknowledgment) and the [shared HEC client](internal/splunkhec/splunkhec.go).
 
-- **Application audits:** HEC is the sole output when configured. Before the delivery sink accepts an event, it is appended and fsynced under `<DATA_ROOT_DIR>/audit-spool`; delivery resumes after a gateway restart, and pending records do not expire during an outage. Delivery is at-least-once, so a crash around acknowledgement can produce duplicates. An HTTP `2xx` response containing valid HEC JSON with `code: 0` is required, together with the exact ID's true ACK when `SPLUNK_HEC_ACK_ENABLED=true`; `400`, `403`, other HTTP failures, invalid responses and nonzero HEC codes remain pending rather than being dropped automatically. `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool at 10 GiB by default. At capacity, pending records are preserved and new audit writes wait for space, which can delay their user actions. A 48-hour objective must be sized from the measured encoded byte rate multiplied by 172800 seconds and operational headroom; 10 GiB alone is not a time guarantee. `AUDIT_LOG_FILE` remains unused in HEC mode, and acknowledged spool data is reclaimed rather than retained as a permanent local copy. Disk/oversize errors are diagnostic failures to persist. During shutdown, capacity waits receive a five-second grace period; after it, not-yet-persisted writes fail so shutdown can complete, while already-spooled records remain for restart replay. This is not an absolute lossless guarantee when storage cannot accept an event. See [application delivery](internal/audit/hec.go).
+- **Application audits:** HEC is the sole output when configured. Before the delivery sink accepts an event, it is appended and fsynced under `<DATA_ROOT_DIR>/audit-spool`; delivery resumes after a gateway restart, and pending records do not expire during an outage. Delivery is at-least-once, so a crash around acknowledgement can produce duplicates. An HTTP `2xx` response containing valid HEC JSON with `code: 0` is required, together with the exact ID's true ACK when `SPLUNK_HEC_ACK_ENABLED=true`; `400`, `403`, other HTTP failures, invalid responses and nonzero HEC codes remain pending rather than being dropped automatically. `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool at 10 GiB by default. At 90% usage, readiness fails and new HTTP mutations/WebSocket upgrades receive 503; new RDP connections close before consuming a grant. Logout, reads and probes remain available. Admission recovers when delivery frees capacity. At the hard limit, pending records are preserved and new writes fail immediately. Already-running actions are not rolled back; an unpersisted audit record is diagnosed and latches readiness and admission unhealthy until investigation and restart. A 48-hour objective must be sized from the measured encoded byte rate multiplied by 172800 seconds and operational headroom; 10 GiB alone is not a time guarantee. `AUDIT_LOG_FILE` remains unused in HEC mode, and acknowledged spool data is reclaimed rather than retained as a permanent local copy. Disk/oversize errors are diagnostic failures to persist. During shutdown, final worker events receive a five-second acceptance window, with full spools still rejecting promptly; already-spooled records remain for restart replay. This is not an absolute lossless guarantee when storage cannot accept an event. See [application delivery](internal/audit/hec.go).
 - **Guest events:** forwarding uses the persistent `SAURON_SPOOL_DIR` spool and resumes after DevBox-Gateway restarts. With HEC enabled, guest acknowledgement requires acceptance into this spool and any other configured sink, not receipt by Splunk; `SAURON_SPLUNK_HEC_ACK_ENABLED` does not change that guest-ingress contract. Delivery is at-least-once, so duplicates are possible. The spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default); a full spool stops new acknowledgements, leaving events in the guests' bounded spools. Permanently invalid or oversized event submissions can be dropped with diagnostics; ACK errors and unconfirmed ACKs cannot trigger that policy. This is not an unlimited or loss-free retention guarantee. See [guest spool and forwarding](internal/sauron/forward.go) and [guest spool limits](SauronAgent/internal/spool/spool.go).
+
+The embedded guest file sink fsyncs event data and file creation/rotation
+metadata before permitting an ACK, including file-only deployments. Durability
+follows the filesystem's fsync guarantees; per-event fsync adds storage latency,
+and size-based rotation still limits retention. The standalone collector's
+`sync_on_write` option remains configurable. Guest source spools still default
+to periodic fsync and can lose unsynced events on guest power loss before delivery.
 
 If the guest-event forwarder cannot save a delivered batch's checkpoint, it
 retries persistence before moving its delivery cursor or sending another batch.

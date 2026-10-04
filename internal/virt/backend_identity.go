@@ -88,6 +88,9 @@ func VMBackendIdentity(name string) (certificatePEM, serverName string, err erro
 }
 
 func validateDomainSecurity(conn *libvirt.Connect, dom *libvirt.Domain) error {
+	if err := ensureProvisioningComplete(dom); err != nil {
+		return err
+	}
 	if err := validateDomainNetwork(conn, dom); err != nil {
 		return fmt.Errorf("VM network protection unavailable (recreate VMs made before network isolation): %w", err)
 	}

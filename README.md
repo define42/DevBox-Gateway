@@ -519,7 +519,8 @@ inline comments; put comments on their own lines.
 | `SPLUNK_HEC_INDEX`        | _(empty)_                                                                                                        | Destination index for forwarded events. Empty → the token's default index.                       |
 | `SPLUNK_HEC_ACK_ENABLED`  | `false`                                                                                                          | Require indexer acknowledgement before advancing the application-audit spool. Requires its endpoint and an ACK-enabled HEC token; see [Forwarding to Splunk HEC](#forwarding-to-splunk-hec). |
 | `SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                       | When `true`, skip TLS certificate verification against the HEC endpoint.                          |
-| `DEVBOX_GATEWAY_SPOOL_MAX_MIB` | `10240`                                                                                                    | Maximum disk space for the application-audit HEC delivery spool at `<DATA_ROOT_DIR>/audit-spool`. `<=0` → the default. Pending events are preserved at capacity and new audit writes wait for space. |
+| `SPLUNK_HEC_STALL_TIMEOUT` | `1h`                                                                                                          | Make `/api/ready` return `503` once application-audit HEC delivery has kept failing this long. Recovers when delivery resumes. `<=0` disables the check. |
+| `DEVBOX_GATEWAY_SPOOL_MAX_MIB` | `10240`                                                                                                    | Maximum disk space for the application-audit HEC delivery spool at `<DATA_ROOT_DIR>/audit-spool`. `<=0` → the default. At 90% usage, readiness fails and new audited activity is refused; writes fail promptly at the hard limit without evicting pending events. |
 | `SAURON_EVENT_LOG_FILE`   | `/var/log/devbox-gateway/sauron.jsonl` | JSON Lines guest-event log, rotated at 256 MiB with eight rotated files plus the active file retained. Empty disables it, which then requires `SAURON_SPLUNK_HEC_ENDPOINT`. |
 | `SAURON_SPLUNK_HEC_ENDPOINT` | _(empty)_                                                                                                     | Splunk HTTP Event Collector URL that also receives every guest event, delivered from the gateway's spool. A URL without a path uses `/services/collector/event`. Empty disables HEC forwarding. |
 | `SAURON_SPLUNK_HEC_TOKEN` | _(empty)_                                                                                                        | HEC token for guest events. Required when `SAURON_SPLUNK_HEC_ENDPOINT` is set. Masked in the startup settings table. |
@@ -533,7 +534,7 @@ inline comments; put comments on their own lines.
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
-| `MAX_VDI_PER_USER`        | `10`                                                                                                             | Maximum number of VDIs (VMs) each user may own at once. Creating another VM is refused once the user owns this many. Set `<=0` to disable the per-user limit. |
+| `MAX_VDI_PER_USER`        | `10`                                                                                                             | Maximum number of VDIs (VMs) each user may own at once. Admission uses live libvirt ownership plus in-flight reservations, independent of dashboard cache freshness. Set `<=0` to disable the per-user limit. |
 | `VDI_AUTO_SHUTDOWN_HOURS` | `0`                                                                                                              | Shut down a running VDI after this many hours without use. Creation, start, and opening RDP, serial, or noVNC count as use. Open connections through the gateway prevent auto-shutdown, even without keyboard or mouse input; the full idle window starts when the last connection ends. Last use is persisted on connection changes and checkpointed each minute while connected so recent activity survives gateway restarts. Connections bypassing the gateway are not tracked. The guest is first asked to power off (ACPI power button) and is force-stopped if still running 5 minutes later. Set `<=0` to disable auto-shutdown (the default). |
 | `VM_VCPU_COUNT`           | `4`                                                                                                              | Number of virtual CPUs assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
 | `VM_MEMORY_MIB`           | `4096`                                                                                                           | Memory in MiB assigned to every VM. Users cannot choose or change this per VM. Set `<=0` to fall back to the default. |
@@ -649,6 +650,14 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
   Network failures, redirects, `400`, `403`, every other non-success status,
   invalid response bodies, and nonzero HEC codes retain the pending event and
   retry with backoff; no HEC rejection is treated as permission to drop it.
+- The one exception is Splunk refusing the events themselves (`413`, or `400`
+  with HEC code 6, 12, 13 or 15). The gateway then resends that batch one event
+  at a time, so a batch that was only too large is still delivered whole. An
+  event Splunk refuses on its own is appended and fsynced, as its complete HEC
+  envelope, to `<DATA_ROOT_DIR>/audit-spool/rejected.jsonl` before delivery
+  moves past it, and a process diagnostic names the file. Review that file and
+  resubmit its envelopes once the cause is fixed; it is never rotated or
+  truncated by the gateway. If it cannot be written, delivery pauses instead.
 - Set `SPLUNK_HEC_ACK_ENABLED=true` to require indexer acknowledgement for
   application audits. The Splunk deployment must support HEC indexer
   acknowledgement and the token must have it enabled. The gateway sends a GUID
@@ -678,11 +687,18 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
 - Each spool directory is exclusively locked while open. Application and guest
   HEC spools must use separate directories, and a second gateway cannot open
   the same spool, including through a directory symlink.
-- `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool (10 GiB by default). Existing
-  pending events remain intact at capacity; new application audit writes wait
-  for delivery to free space instead of being discarded. That backpressure can
-  delay the user action emitting the audit event during a sufficiently long
-  outage. Size a 48-hour objective from the measured encoded event rate:
+- `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool (10 GiB by default). At 90%
+  usage, `/api/ready` returns `503`; new HTTP mutations and WebSocket upgrades
+  receive `503` with `Retry-After: 5`, and new RDP connections close before
+  consuming a grant. Logout, ordinary reads and probes remain available.
+  Admission resumes automatically when delivery frees enough capacity. The
+  remaining 10% is headroom for work already admitted and disconnect events,
+  not a guarantee that every concurrent operation can finish auditing.
+  At the hard limit, new audit writes fail immediately without evicting pending
+  events. Already-running actions are not rolled back: any event that cannot
+  be persisted is reported in process diagnostics and latches readiness and
+  new audited activity unhealthy until investigation and restart.
+  Size a 48-hour objective from the measured encoded event rate:
   `bytes/second × 172800 × operational headroom`, converted to MiB. The default
   size is a byte limit, not a 48-hour guarantee.
 - HEC remains the sole application audit output: acknowledged spool records are
@@ -691,11 +707,15 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
 - Disk failures, a single event too large for the spool, or writes attempted
   while the sink is closing are surfaced in process diagnostics and latch
   application audit readiness as unhealthy until restart. Monitor these errors
-  and spool capacity through `journalctl` or Docker logs. A remote HEC outage
-  alone does not fail readiness while the local sink continues accepting events.
-- On shutdown, blocked capacity waits get a five-second grace period so final
-  worker events can use space freed by delivery. After that deadline,
-  not-yet-persisted writes return an operational error so shutdown can finish;
+  and spool capacity through `journalctl` or Docker logs.
+- Delivery that keeps failing for `SPLUNK_HEC_STALL_TIMEOUT` (one hour by
+  default), such as a revoked token, a wrong index or a long outage, makes
+  `/api/ready` return `503`. This delivery timeout alone does not reject new
+  activity while local capacity remains available. Readiness recovers once a
+  batch is delivered. Set it to `0` to disable this delivery-timeout check;
+  capacity and persistence checks remain enabled.
+- On shutdown, final worker events have a five-second acceptance window; full
+  spools still reject immediately. Delivery gets a bounded drain period, and
   records already in the spool remain available for replay after restart.
 - The gateway refuses to start when `SPLUNK_HEC_ENDPOINT` is set without
   `SPLUNK_HEC_TOKEN`, or when a token, index or enabled ACK setting lacks an
@@ -779,10 +799,12 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   sequence range, so a sufficiently long outage can lose guest events. Guest
   spool writes also use periodic fsync by default; a power loss can lose recent
   unsynced writes.
-- With file-only collection, the guest ACK follows a successful file write;
-  the embedded collector does not fsync that write before acknowledging it.
-  File acceptance therefore does not guarantee persistence across a host power
-  loss. With HEC enabled, the gateway spool is fsynced before acceptance.
+- The embedded file sink fsyncs each event and file creation/rotation metadata
+  before the guest ACK, including file-only collection. Acknowledged file
+  records follow the filesystem's fsync durability guarantees; size-based
+  rotation still limits retention. Per-event fsync adds storage latency and
+  limits throughput. With HEC enabled, its gateway spool is also fsynced before
+  acceptance.
 - Retries can produce duplicate deliveries. After a crash or restart, events that were
   delivered just before it can reach Splunk twice. An event Splunk rejects as
   invalid on its own (HEC codes 6, 12, 13, 15, or too large) is dropped with a
@@ -986,6 +1008,24 @@ VM definitions, dynamic address assignments, or unprovisioned RDP certificates.
 Recreation deletes a VM's disk through the normal dashboard removal flow, so
 copy any development files you want to keep before removing it. Existing
 unrelated libvirt networks are not adopted as the gateway network.
+
+VM creation first persists an incomplete libvirt domain carrying the operation's
+UUID, owner and storage-pool identity, before allocating its network reservation
+or disks. Startup and a same-name retry recover creations interrupted by a gateway
+process crash by removing only resources covered by a matching incomplete
+operation. A completed definition
+is committed before its first start, so recovery preserves completed, stopped VMs.
+Identity mismatches, disks used by another domain and cleanup failures stop
+recovery for operator investigation; the operation record remains for retry.
+Resources left by older versions without this record require manual inspection.
+This operation tracking does not add a host-power-loss durability guarantee for
+guest disk contents; volume I/O remains managed through libvirt.
+
+VM quota admission counts live libvirt ownership and in-flight creations rather
+than the dashboard's cached inventory. It fails closed if ownership cannot be
+read. An in-flight VM already visible to libvirt can temporarily count twice,
+so a request near the limit may need to be retried after the current creation
+finishes.
 
 Base images can be supplied by placing QCOW2 images in `BASE_IMAGE_DIR` or by
 uploading them from the administrator's **Base Images** modal. The filename may
@@ -1204,12 +1244,13 @@ Both probes are public and return plain text:
 | Probe | Response | Meaning |
 | --- | --- | --- |
 | `GET /api/health` | `200` with `ok\n` | HTTP listener liveness. |
-| `GET /api/ready` | `200` with `ready\n`, or `503` with `not ready\n` | Application audit persistence status and guest collector readiness, including expected agents, inventory freshness, pending stream alerts and unreported sequence gaps. |
+| `GET /api/ready` | `200` with `ready\n`, or `503` with `not ready\n` | Application audit persistence, capacity and delivery status, plus guest collector readiness including expected agents, inventory freshness, pending stream alerts and unreported sequence gaps. |
 
 Readiness responses contain no VM identities, storage paths or backend errors.
 The probe reports known failures; it does not test LDAP, free disk space or
-whether Splunk events are searchable. A remote HEC outage can leave readiness
-healthy while events queue durably. A rejected guest record keeps readiness
+whether Splunk events are searchable. A remote HEC outage leaves readiness
+healthy while events queue durably below 90% spool usage, until application-audit
+delivery has kept failing for `SPLUNK_HEC_STALL_TIMEOUT`. A rejected guest record keeps readiness
 unhealthy until the record is accepted by every configured output. The gateway
 retains copies of rejected records and retries them every second, preserving
 their original attribution even after a guest disconnects or its identity
@@ -1222,7 +1263,9 @@ are lost on restart, so investigate delivery before restarting. Application
 audit persistence errors also require investigation and
 restart to clear. See [output recovery](SauronAgent/docs/deployment.md#output-failure-recovery)
 for the matching and recovery rules.
-Readiness does not itself block dashboard or RDP access.
+Application-audit capacity pressure and persistence failures also refuse new
+mutations and streams; logout, ordinary reads and probes remain available.
+Other readiness failures do not themselves block dashboard or RDP access.
 
 For the local Compose setup with a self-signed certificate:
 

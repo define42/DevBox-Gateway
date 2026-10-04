@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -289,6 +290,290 @@ func TestFileSyncOnWrite(t *testing.T) {
 	}
 	if got, want := readSequences(t, path), []uint64{99}; !equalSeq(got, want) {
 		t.Errorf("sequences = %v, want %v", got, want)
+	}
+}
+
+func TestFileDurableCreationSyncsParentsAndRetriesFailures(t *testing.T) {
+	for _, failAt := range []string{"file", "directory", "ancestor", "file entry"} {
+		t.Run(failAt, func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			path := filepath.Join(base, "new", "nested", "events.json")
+			failPath := path
+			switch failAt {
+			case "directory", "file entry":
+				failPath = filepath.Dir(path)
+			case "ancestor":
+				failPath = base
+			}
+			failed := false
+			boom := errors.New("injected storage sync failure")
+			var synced []string
+			syncFile := func(f *os.File) error {
+				if f.Name() == failPath && !failed && (failAt != "file entry" || slices.Contains(synced, path)) {
+					failed = true
+					return boom
+				}
+				synced = append(synced, f.Name())
+				return f.Sync()
+			}
+			cfg := config.FileOutput{Path: path, SyncOnWrite: true}
+			if s, err := newFile(cfg, syncFile); !errors.Is(err, boom) {
+				if s != nil {
+					_ = s.Close()
+				}
+				t.Fatalf("NewFile with failed %s sync = %v, want storage failure", failAt, err)
+			}
+			// A failed attempt has left the directories behind. Their entries
+			// must still be synced on retry, even though MkdirAll now does nothing.
+			synced = nil
+			s, err := newFile(cfg, syncFile)
+			if err != nil {
+				t.Fatalf("NewFile retry: %v", err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			want := []string{filepath.Dir(path), filepath.Join(base, "new"), base}
+			if len(synced) < len(want) || !slices.Equal(synced[:len(want)], want) {
+				t.Errorf("synced paths = %v, want new directory ancestors %v first", synced, want)
+			}
+			if len(synced) < 2 || !slices.Equal(synced[len(synced)-2:], []string{path, filepath.Dir(path)}) {
+				t.Errorf("synced paths = %v, want file contents then its directory entry last", synced)
+			}
+		})
+	}
+}
+
+func TestFileDurableWriteWaitsForSyncAndReturnsSyncFailure(t *testing.T) {
+	for _, name := range []string{"success", "failure"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "events.json")
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			defer unblock()
+			block := false
+			boom := errors.New("injected write sync failure")
+			s, err := newFile(config.FileOutput{Path: path, SyncOnWrite: true}, func(f *os.File) error {
+				if block && f.Name() == path {
+					block = false
+					close(entered)
+					<-release
+					if name == "failure" {
+						return boom
+					}
+				}
+				return f.Sync()
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			block = true
+			done := make(chan error, 1)
+			go func() { done <- s.Write(t.Context(), execEnvelope(1)) }()
+			select {
+			case <-entered:
+			case err := <-done:
+				t.Fatalf("Write returned without synchronizing storage: %v", err)
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("Write returned before storage sync completed: %v", err)
+			default:
+			}
+			unblock()
+			err = <-done
+			if name == "failure" && !errors.Is(err, boom) {
+				t.Fatalf("Write error = %v, want storage sync failure", err)
+			}
+			if name == "success" && err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+		})
+	}
+}
+
+func TestFileDurableRotationSyncsBeforeReusingNames(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "events.json")
+	tracking := false
+	shiftSynced, renameSynced, createSynced := false, false, false
+	s, err := newFile(config.FileOutput{
+		Path: path, SyncOnWrite: true, MaxSize: config.Size(lineSize(t, execEnvelope(1))), MaxFiles: 2,
+	}, func(f *os.File) error {
+		if tracking && f.Name() == filepath.Dir(path) {
+			_, liveErr := os.Stat(path)
+			_, recentErr := os.Stat(path + ".1")
+			switch {
+			case errors.Is(recentErr, fs.ErrNotExist):
+				// Archive .1 has moved to .2; its name is about to be reused.
+				if !equalSeq(readSequences(t, path+".2"), []uint64{1}) {
+					t.Fatal("archive move lost the first event")
+				}
+				shiftSynced = true
+			case errors.Is(liveErr, fs.ErrNotExist):
+				if !shiftSynced {
+					t.Fatal("rotation replaced .1 before its move to .2 was synced")
+				}
+				renameSynced = true
+			case len(readSequences(t, path)) == 0:
+				if !renameSynced {
+					t.Fatal("rotation recreated the live file before its archive rename was synced")
+				}
+				createSynced = true
+			}
+		}
+		return f.Sync()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	for seq := uint64(1); seq <= 3; seq++ {
+		tracking = seq == 3
+		if err := s.Write(t.Context(), execEnvelope(seq)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !shiftSynced || !renameSynced || !createSynced {
+		t.Fatalf("missing durable rotation step: shift=%t rename=%t creation=%t", shiftSynced, renameSynced, createSynced)
+	}
+	if got := readSequences(t, path); !equalSeq(got, []uint64{3}) {
+		t.Fatalf("current file = %v, want event 3", got)
+	}
+}
+
+func TestFileDurableRotationRejectsUnsyncedRenameAndRecovers(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "events.json")
+	boom := errors.New("injected directory sync failure")
+	injectFailure := false
+	cfg := config.FileOutput{
+		Path: path, SyncOnWrite: true, MaxSize: config.Size(lineSize(t, execEnvelope(1))), MaxFiles: 2,
+	}
+	syncFile := func(f *os.File) error {
+		_, err := os.Stat(path)
+		if f.Name() == filepath.Dir(path) && errors.Is(err, fs.ErrNotExist) && injectFailure {
+			return boom
+		}
+		return f.Sync()
+	}
+	s, err := newFile(cfg, syncFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Write(t.Context(), execEnvelope(1)); err != nil {
+		t.Fatal(err)
+	}
+	injectFailure = true
+	if err := s.Write(t.Context(), execEnvelope(2)); !errors.Is(err, boom) {
+		t.Fatalf("Write after failed rename sync = %v, want storage failure", err)
+	}
+	if got := readSequences(t, path+".1"); !equalSeq(got, []uint64{1}) {
+		t.Fatalf("acknowledged event lost from archive: %v", got)
+	}
+	if err := s.Write(t.Context(), execEnvelope(2)); !errors.Is(err, boom) {
+		t.Fatalf("Write retry with failed rename sync = %v, want storage failure", err)
+	}
+	// A fresh collector has no memory of the failed rotation. It must still
+	// commit the pending rename before creating another live file.
+	if reopened, err := newFile(cfg, syncFile); !errors.Is(err, boom) {
+		if reopened != nil {
+			_ = reopened.Close()
+		}
+		t.Fatalf("NewFile after failed rename sync = %v, want storage failure", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("live file recreated before its archive rename could be synced: %v", err)
+	}
+	injectFailure = false
+	if err := s.Write(t.Context(), execEnvelope(2)); err != nil {
+		t.Fatalf("Write retry: %v", err)
+	}
+	if got := readSequences(t, path); !equalSeq(got, []uint64{2}) {
+		t.Fatalf("current file = %v, want retried event 2", got)
+	}
+}
+
+func TestFileDurableRotationResumesWithoutPruningRetainedEvents(t *testing.T) {
+	for _, name := range []string{"same sink", "reopened sink"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "events.json")
+			boom := errors.New("injected archive rename sync failure")
+			failed := false
+			syncFile := func(f *os.File) error {
+				_, recentErr := os.Stat(path + ".1")
+				_, oldestErr := os.Stat(path + ".2")
+				if f.Name() == filepath.Dir(path) && errors.Is(recentErr, fs.ErrNotExist) && oldestErr == nil && !failed {
+					failed = true
+					return boom
+				}
+				return f.Sync()
+			}
+			cfg := config.FileOutput{
+				Path: path, SyncOnWrite: true, MaxSize: config.Size(lineSize(t, execEnvelope(1))), MaxFiles: 2,
+			}
+			s, err := newFile(cfg, syncFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			for seq := uint64(1); seq <= 2; seq++ {
+				if err := s.Write(t.Context(), execEnvelope(seq)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.Write(t.Context(), execEnvelope(3)); !errors.Is(err, boom) {
+				t.Fatalf("Write after archive rename sync failure = %v, want storage failure", err)
+			}
+			retry := s
+			if name == "reopened sink" {
+				// No Close: a killed collector cannot sync its pending metadata.
+				retry, err = newFile(cfg, syncFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = retry.Close() })
+			}
+			if err := retry.Write(t.Context(), execEnvelope(3)); err != nil {
+				t.Fatalf("Write retry: %v", err)
+			}
+			for suffix, seq := range map[string]uint64{"": 3, ".1": 2, ".2": 1} {
+				if got := readSequences(t, path+suffix); !equalSeq(got, []uint64{seq}) {
+					t.Errorf("%s holds %v, want retained event %d", path+suffix, got, seq)
+				}
+			}
+		})
+	}
+}
+
+func TestFileAsyncModeDefersDurabilityUntilFlush(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "new", "events.json")
+	var synced []string
+	s, err := newFile(config.FileOutput{Path: path}, func(f *os.File) error {
+		synced = append(synced, f.Name())
+		return f.Sync()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.Write(t.Context(), execEnvelope(1)); err != nil {
+		t.Fatal(err)
+	}
+	if len(synced) != 0 {
+		t.Fatalf("SyncOnWrite=false synced paths %v before Flush", synced)
+	}
+	if err := s.Flush(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(synced) < 2 || synced[0] != path || synced[1] != filepath.Dir(path) {
+		t.Fatalf("Flush synced %v, want file contents and directory entry", synced)
 	}
 }
 

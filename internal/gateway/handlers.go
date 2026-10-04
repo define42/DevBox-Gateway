@@ -519,13 +519,18 @@ func NewHandler(sessionManager *session.Manager, settings *config.Settings) http
 }
 
 func newHandler(sessionManager *session.Manager, settings *config.Settings, readiness func() error) http.Handler {
+	return newHandlerWithAdmission(sessionManager, settings, readiness, nil)
+}
+
+func newHandlerWithAdmission(sessionManager *session.Manager, settings *config.Settings, readiness, admission func() error) http.Handler {
 	router := chi.NewRouter()
 	loginLimiter := newLoginRateLimiter(settings)
 	if settings.Bool(config.DEBUG_CONNECTIONS) {
 		router.Use(debugConnectionLogger)
 	}
-	router.Use(auditLoginOutcome)
 	router.Use(securityHeaders)
+	router.Use(auditAdmissionMiddleware(admission))
+	router.Use(auditLoginOutcome)
 	router.Use(sessionManager.LoadAndSave)
 	router.Use(sessionManager.EnforceClientIP)
 

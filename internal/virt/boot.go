@@ -44,6 +44,10 @@ func Init(settings *config.Settings) error {
 		_ = pool.Free()
 	}()
 
+	if err := recoverPendingProvisioning(conn); err != nil {
+		return fmt.Errorf("recover incomplete VM provisioning: %w", err)
+	}
+
 	if err := ensureDefaultNetwork(conn); err != nil {
 		return fmt.Errorf("failed to ensure network %s: %w", defaultNetworkName, err)
 	}
@@ -72,6 +76,9 @@ type VMStartConfig struct {
 	Owner     string // owning gateway user
 	GuestUser string // login account provisioned inside the guest
 	BaseImage string // image library file name the disk was cloned from
+	// provisioning binds a gateway create to its durable pending domain.
+	// Direct StartVM callers retain their existing define-and-start behavior.
+	provisioning *provisioningIntent
 }
 
 // StartVM defines and starts a VM, attaching the configured gateway metadata.
@@ -95,7 +102,14 @@ func StartVM(cfg VMStartConfig) (err error) {
 	if err := ensureExistingVMNotDeleting(conn, cfg.Name); err != nil {
 		return err
 	}
-	dom, err := conn.DomainDefineXML(DomainXML(cfg.Name, cfg.SeedISO, cfg.StoragePoolName, cfg.VCPU, cfg.MemoryMiB, cfg.VSock, cfg.Network))
+	if err := verifyProvisioningStart(conn, cfg); err != nil {
+		return err
+	}
+	doc, err := provisioningStartXML(cfg)
+	if err != nil {
+		return err
+	}
+	dom, err := conn.DomainDefineXML(doc)
 	if err != nil {
 		return err
 	}
@@ -115,7 +129,7 @@ func StartVM(cfg VMStartConfig) (err error) {
 	// after the Free above so it runs first (defers are LIFO), while dom is still
 	// valid.
 	defer func() {
-		if err != nil {
+		if err != nil && cfg.provisioning == nil {
 			undefinePartialDomain(dom, cfg.Name)
 		}
 	}()
@@ -128,6 +142,9 @@ func StartVM(cfg VMStartConfig) (err error) {
 
 	if err = validateDomainNetwork(conn, dom); err != nil {
 		return fmt.Errorf("validate VM network: %w", err)
+	}
+	if err = markProvisioningReady(dom, cfg.provisioning); err != nil {
+		return err
 	}
 	if err = dom.Create(); err != nil {
 		return err

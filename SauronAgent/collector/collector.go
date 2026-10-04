@@ -117,12 +117,13 @@ func New(opts Options) (*Server, error) {
 // NewFileSink returns a Sink that appends newline-delimited JSON envelopes to
 // path with the collector's default size-based rotation (256 MiB per file,
 // eight rotated files kept). Parent directories are created as needed.
-// Writes are acknowledged without an fsync; Flush and Close sync the file.
-// Use a custom Sink when every acknowledgement must follow durable storage.
+// Every successful Write has synced the event to disk, and file creation and
+// rotation sync their directory entries before events can be acknowledged.
 func NewFileSink(path string) (Sink, error) {
 	cfg := config.DefaultHost().Output.File
 	cfg.Enabled = true
 	cfg.Path = path
+	cfg.SyncOnWrite = true
 	return output.NewFile(cfg)
 }
 

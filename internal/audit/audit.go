@@ -113,6 +113,9 @@ type Options struct {
 	// mode ignores both fields.
 	SpoolDir      string
 	SpoolMaxBytes int64
+	// HECStallTimeout fails Readiness once HEC delivery has kept failing this
+	// long; <=0 leaves a remote outage out of readiness.
+	HECStallTimeout time.Duration
 }
 
 // configuredSink owns the audit destinations and the process logging state
@@ -132,7 +135,9 @@ type configuredSink struct {
 //
 // HEC-only mode never opens or modifies FilePath and does not fall back to it
 // during delivery failures. HEC delivery happens in the background from a
-// bounded disk spool. Writes wait for space instead of evicting pending events.
+// bounded disk spool. Capacity failures return without waiting for delivery or
+// evicting pending events. Admission fails at 90% usage to leave headroom for
+// in-flight actions; a record rejected at the hard limit latches Readiness.
 // File-only mode requires FilePath, opens it in append mode with mode 0640 when
 // absent, and creates missing parent directories with mode 0750. Ordinary log
 // package output keeps its existing destination. Keep the returned closer open
@@ -152,6 +157,7 @@ func Configure(options Options) (io.Closer, error) {
 		if forwarder, err = newHECForwarder(options.HEC, options.SpoolDir, options.SpoolMaxBytes); err != nil {
 			return nil, fmt.Errorf("configure splunk hec forwarding: %w", err)
 		}
+		forwarder.stallTimeout = options.HECStallTimeout
 		forwarder.start()
 		destination = forwarder
 	} else {
@@ -213,8 +219,8 @@ func openAuditFile(path string) (*os.File, error) {
 	return file, nil
 }
 
-// BeginShutdown bounds capacity waits before the gateway drains workers that
-// may be blocked logging. Already persisted events remain safe for replay.
+// BeginShutdown bounds acceptance of final events before the gateway drains
+// workers. Full spools fail promptly; persisted events remain safe for replay.
 func (sink *configuredSink) BeginShutdown() {
 	if sink.forwarder != nil {
 		sink.forwarder.beginShutdown()
@@ -235,7 +241,7 @@ func (sink *configuredSink) Close() error {
 		if sink.file != nil {
 			fileErr = sink.file.Close()
 		}
-		sink.closeErr = errors.Join(forwarderErr, fileErr, sink.Readiness())
+		sink.closeErr = errors.Join(forwarderErr, fileErr, sink.health.status())
 	})
 	return sink.closeErr
 }

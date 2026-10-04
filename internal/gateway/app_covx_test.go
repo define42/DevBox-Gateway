@@ -358,11 +358,13 @@ func TestMcovAuditOptionsMapsSettings(t *testing.T) {
 	t.Setenv(config.SPLUNK_HEC_INDEX, "devbox_audit")
 	t.Setenv(config.SPLUNK_HEC_ACK_ENABLED, "true")
 	t.Setenv(config.SPLUNK_HEC_SKIP_TLS_VERIFY, "true")
+	t.Setenv(config.SPLUNK_HEC_STALL_TIMEOUT, "15m")
 
 	want := audit.Options{
-		FilePath:      "/srv/audit/devbox.jsonl",
-		SpoolDir:      "/srv/devbox/audit-spool",
-		SpoolMaxBytes: 512 << 20,
+		FilePath:        "/srv/audit/devbox.jsonl",
+		SpoolDir:        "/srv/devbox/audit-spool",
+		SpoolMaxBytes:   512 << 20,
+		HECStallTimeout: 15 * time.Minute,
 		HEC: audit.HECConfig{
 			Endpoint:           "https://splunk.example.test:8088",
 			Token:              "hec-token",
