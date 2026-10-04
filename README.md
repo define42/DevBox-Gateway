@@ -1046,7 +1046,7 @@ curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
   https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img
 ```
 
-You can also [build the Ubuntu XFCE image from this checkout](#building-vm-images),
+You can also [build an Ubuntu or Rocky Linux XFCE image from this checkout](#building-vm-images),
 including its matching SauronAgent package, and copy the resulting `.img` into
 `BASE_IMAGE_DIR` or upload it through the administrator's **Base Images** modal.
 
@@ -1162,13 +1162,15 @@ and default filenames (for example, `-format deb -arch x86_64` produces `amd64`)
 ### Building VM images
 
 VM image recipes live under [`images/`](images), with one directory per image
-variant. The Ubuntu Resolute XFCE recipe builds a standalone QCOW2 desktop disk
-and installs SauronAgent from the same checkout, enabling its guest service.
+variant. The Ubuntu Resolute XFCE and Rocky Linux 9 XFCE recipes build standalone
+QCOW2 desktop disks and install SauronAgent from the same checkout, enabling its
+guest service.
 Image builds run separately from gateway and container builds.
 
-GitHub Releases publish the Ubuntu image alongside the gateway and SauronAgent
-packages under the same `vMAJOR.MINOR.PATCH` tag. The image filename and its
-installed SauronAgent use that gateway release version.
+GitHub Releases publish both images alongside the gateway and SauronAgent
+packages under the same `vMAJOR.MINOR.PATCH` tag. Each image filename and its
+installed SauronAgent use that gateway release version. Publication waits for
+both images to build and pass their boot tests.
 
 On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
 `sha256sum`, Git, Make, and the Go version specified in `go.mod`, run:
@@ -1177,20 +1179,25 @@ On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
 make image-check IMAGE=ubuntu-resolute-xfce
 make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
 make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+
+make image-check IMAGE=rocky9-xfce
+make image IMAGE=rocky9-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=rocky9-xfce IMAGE_VERSION=0.0.0
 ```
 
-The build downloads the Ubuntu source image and a container with the image
-customization tools. KVM speeds up customization; software emulation works when
-`/dev/kvm` is absent but is considerably slower. The smoke test additionally
-requires host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`; it boots
-a temporary overlay and leaves the base image unchanged.
+The build downloads the selected distribution's source image and a container
+with the image customization tools. KVM speeds up customization; software
+emulation works when `/dev/kvm` is absent but is considerably slower. The smoke
+test additionally requires host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and
+`timeout`; it boots a temporary overlay and leaves the base image unchanged.
 
-Output goes to `dist/images/ubuntu-resolute-xfce/` as
-`ubuntu-resolute-xfce-v0.0.0.img`, with `.img.sha256` and
+Output goes to `dist/images/<variant>/` as
+`<variant>-v0.0.0.img`, with `.img.sha256` and
 `.img.manifest.json` sidecars. The manifest records the build commit, source
 checksum, builder container, and SauronAgent version. Downloads are cached under
 `.cache/images/`. Both directories are ignored by Git. See the
-[image README](images/ubuntu-resolute-xfce/README.md) for contents, release
+[Ubuntu image README](images/ubuntu-resolute-xfce/README.md) and
+[Rocky image README](images/rocky9-xfce/README.md) for contents, release
 downloads, and gateway installation.
 
 ### UI (TypeScript)
@@ -1264,6 +1271,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │                    the gateway embeds its collector package.
 ├── images/
 │   ├── Makefile     Image build, recipe validation, and boot smoke-test targets.
+│   ├── rocky9-xfce/  Rocky Linux 9 XFCE image recipe and desktop assets.
 │   └── ubuntu-resolute-xfce/  Build scripts, guest customization recipe, and desktop assets.
 ├── dist/images/     Generated QCOW2 images, checksums, and manifests (ignored).
 ├── .cache/images/   Downloaded base images and build workspaces (ignored).

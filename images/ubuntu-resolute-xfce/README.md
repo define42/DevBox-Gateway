@@ -74,9 +74,9 @@ The [gateway release workflow](../../.github/workflows/go.yml) calls the
 [image workflow](../../.github/workflows/ubuntu-resolute-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
-After the gateway builds and image boot test succeed, the gateway workflow
-publishes the image assets alongside the gateway and SauronAgent packages in
-the same `vMAJOR.MINOR.PATCH` GitHub Release.
+After the gateway build and both Ubuntu and Rocky image boot tests succeed,
+the gateway workflow publishes the image assets alongside the gateway and
+SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
 
 The image workflow also runs independently for relevant image, build, and
 SauronAgent changes on pull requests, using version `0.0.0`. Manual runs accept

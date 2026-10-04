@@ -1,0 +1,31 @@
+{
+  "policies": {
+    "HardwareAcceleration": false,
+    "Preferences": {
+      "browser.fullscreen.animate": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "browser.tabs.animate": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "browser.translations.automaticallyPopup": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "general.smoothScroll": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "media.hardware-video-decoding.enabled": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "toolkit.cosmeticAnimations.enabled": {
+        "Value": false,
+        "Status": "locked"
+      }
+    }
+  }
+}

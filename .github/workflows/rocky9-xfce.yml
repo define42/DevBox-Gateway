@@ -1,0 +1,120 @@
+name: Rocky Linux 9 XFCE image
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Gateway release version without the leading v
+        required: true
+        type: string
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/go.yml
+      - .github/workflows/rocky9-xfce.yml
+      - Makefile
+      - go.mod
+      - go.sum
+      - images/Makefile
+      - images/scripts/**
+      - images/rocky9-xfce/**
+      - SauronAgent/**
+      - cmd/mksauronagent/**
+      - internal/sauronpkg/**
+      - internal/deb/**
+      - internal/rpm/**
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Numeric image version for an artifact-only test build
+        required: true
+        default: '0.0.0'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Include the caller workflow so manual builds do not queue release builds.
+  group: rocky9-xfce-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 180
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go for SauronAgent packaging
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set image version
+        id: version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || '0.0.0' }}
+        run: |
+          # Release calls use the gateway version; PR builds use 0.0.0.
+          if [[ ! "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Image version must be MAJOR.MINOR.PATCH without a leading v." >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+          printf 'IMAGE_VERSION=%s\n' "$REQUESTED_VERSION" >> "$GITHUB_ENV"
+
+      - name: Make room for image build disks
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Install image smoke test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso
+
+      - name: Check image recipe
+        run: make image-check IMAGE=rocky9-xfce
+
+      - name: Build image and SauronAgent from this checkout
+        run: make image IMAGE=rocky9-xfce IMAGE_VERSION="$IMAGE_VERSION"
+
+      - name: Boot image and check guest services
+        run: make image-test IMAGE=rocky9-xfce IMAGE_VERSION="$IMAGE_VERSION"
+
+      - name: Verify and split image into release assets
+        working-directory: dist/images/rocky9-xfce
+        run: |
+          image="rocky9-xfce-v${IMAGE_VERSION}.img"
+          sha256sum --check "$image.sha256"
+          test -s "$image.manifest.json"
+          # Each GitHub release asset must be smaller than 2 GiB.
+          split --bytes=1900M --numeric-suffixes=1 --suffix-length=2 \
+            "$image" "$image.part-"
+          rm -- "$image"
+          ls -lh "$image".part-* "$image.sha256" "$image.manifest.json"
+
+      - name: Upload image build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rocky9-xfce-v${{ steps.version.outputs.version }}
+          path: |
+            dist/images/rocky9-xfce/*.img.part-*
+            dist/images/rocky9-xfce/*.img.sha256
+            dist/images/rocky9-xfce/*.img.manifest.json
+          if-no-files-found: error
+          overwrite: true
+          compression-level: 0
+          retention-days: 7

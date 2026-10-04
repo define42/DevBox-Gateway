@@ -22,7 +22,7 @@ SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,
 
 # VM image builds are explicit and independent of gateway/container builds.
 image image-check image-test:
-	@test "$(IMAGE)" = ubuntu-resolute-xfce || { echo "Unsupported IMAGE: $(IMAGE)" >&2; exit 1; }
+	@case "$(IMAGE)" in ubuntu-resolute-xfce|rocky9-xfce) ;; *) echo "Unsupported IMAGE: $(IMAGE)" >&2; exit 1;; esac
 	$(MAKE) -C images "$@" IMAGE="$(IMAGE)" IMAGE_VERSION="$(IMAGE_VERSION)"
 
 # build compiles the UI and a native (CGO/libvirt-linked) binary into dist/.

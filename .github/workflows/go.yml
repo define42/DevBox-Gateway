@@ -202,7 +202,7 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/devbox-gateway:${{ steps.tag.outputs.new_tag }}
             ghcr.io/${{ github.repository_owner }}/devbox-gateway:${{ github.sha }}
 
-  image:
+  ubuntu-image:
     needs: build
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
     permissions:
@@ -211,8 +211,17 @@ jobs:
     with:
       version: ${{ needs.build.outputs.version }}
 
+  rocky-image:
+    needs: build
+    if: github.event_name == 'push' && needs.build.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rocky9-xfce.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+
   release:
-    needs: [build, image]
+    needs: [build, ubuntu-image, rocky-image]
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -230,6 +239,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ubuntu-resolute-xfce-v${{ needs.build.outputs.version }}
+          path: release/images
+
+      - name: Download Rocky Linux 9 image assets
+        uses: actions/download-artifact@v8
+        with:
+          name: rocky9-xfce-v${{ needs.build.outputs.version }}
           path: release/images
 
       - name: Assemble the shared GitHub release
@@ -265,7 +280,17 @@ jobs:
             sha256sum --check ubuntu-resolute-xfce-${{ needs.build.outputs.tag }}.img.sha256
             ```
 
-            The `.img.manifest.json` asset records the source image and build provenance.
+            ### Rocky Linux 9 XFCE image
+
+            The image and its embedded SauronAgent use version ${{ needs.build.outputs.version }}.
+            Download all image parts and the checksum file into one directory, then reconstruct and verify:
+
+            ```sh
+            cat rocky9-xfce-${{ needs.build.outputs.tag }}.img.part-* > rocky9-xfce-${{ needs.build.outputs.tag }}.img
+            sha256sum --check rocky9-xfce-${{ needs.build.outputs.tag }}.img.sha256
+            ```
+
+            Each `.img.manifest.json` asset records its source image and build provenance.
 
       - name: Publish the complete release
         # A previously published release is skipped by the assembly action.

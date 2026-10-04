@@ -1,0 +1,77 @@
+# Complete the root partition expansion before installing desktop packages.
+run-command xfs_growfs /
+
+# Kernel RPM scripts run inside libguestfs. Without an explicit guest command
+# line, kernel-install copies the appliance's /proc/cmdline and wrong root UUID
+# into the new boot entry. Preserve the known-good cloud image options first.
+run-command sh -c 'mkdir -p /etc/kernel; options=$(sed -n "s/^options //p" /boot/loader/entries/*.conf | head -n 1); printf "%s\n" "$options" | grep -Eq "(^| )root=UUID=" && printf "%s ipv6.disable=1\n" "$options" > /etc/kernel/cmdline'
+upload 99-devbox-generic.conf:/etc/dracut.conf.d/99-devbox-generic.conf
+run-command chown root:root /etc/dracut.conf.d/99-devbox-generic.conf
+run-command chmod 0644 /etc/dracut.conf.d/99-devbox-generic.conf
+
+# EPEL's XFCE and XRDP dependencies require Rocky's CodeReady Builder repo.
+run-command dnf -y install dnf-plugins-core
+run-command dnf config-manager --set-enabled crb
+run-command dnf -y install epel-release
+run-command dnf -y upgrade
+run-command rpm --import https://packages.microsoft.com/keys/microsoft.asc
+upload vscode.repo:/etc/yum.repos.d/vscode.repo
+run-command chown root:root /etc/yum.repos.d/vscode.repo
+run-command chmod 0644 /etc/yum.repos.d/vscode.repo
+run-command dnf -y --setopt=tsflags=nodocs install code
+
+# Install an XFCE desktop from EPEL without pulling in GNOME or gdm.
+run-command dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install Thunar xfce4-panel xfce4-session xfce4-settings xfconf xfdesktop xfwm4 network-manager-applet openssh-askpass thunar-archive-plugin thunar-volman tumbler xfce-polkit xfce4-appfinder xfce4-power-manager xfce4-pulseaudio-plugin xfce4-screensaver xfce4-terminal lightdm lightdm-gtk --exclude=*-firmware --exclude=linux-firmware
+
+run-command dnf -y --setopt=install_weak_deps=False --setopt=tsflags=nodocs install firefox xrdp xorgxrdp xorg-x11-server-Xorg xorg-x11-xinit xorg-x11-drv-libinput xorg-x11-xauth dbus-x11 dejavu-sans-fonts net-tools vim nmap cloud-init python3 NetworkManager firewalld audit
+run-command systemctl enable xrdp lightdm NetworkManager firewalld
+run-command systemctl disable gdm || true
+run-command systemctl set-default graphical.target
+
+# Set XFCE as the default desktop/session selection.
+run-command sh -c 'printf "DESKTOP=XFCE\nDISPLAYMANAGER=LIGHTDM\n" > /etc/sysconfig/desktop'
+
+run-command mkdir -p /etc/firefox/policies
+upload firefox-policies.json:/etc/firefox/policies/policies.json
+run-command chown root:root /etc/firefox/policies/policies.json
+run-command chmod 0644 /etc/firefox/policies/policies.json
+
+# Disable XFCE compositor for XRDP performance
+upload xfwm4.xml:/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+run-command chown root:root /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+run-command chmod 0644 /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+
+run-command mkdir -p /etc/firewalld/zones
+upload xrdp.xml:/etc/firewalld/zones/xrdp.xml
+upload xrdp.ini:/etc/xrdp/xrdp.ini
+upload xrdp-xfce-session.sh:/etc/xrdp/startwm.sh
+upload 99-xrdp-buffers.conf:/etc/sysctl.d/99-xrdp-buffers.conf
+upload 99-disable-ipv6.conf:/etc/sysctl.d/99-disable-ipv6.conf
+run-command sed -i 's|^DefaultWindowManager=.*|DefaultWindowManager=/etc/xrdp/startwm.sh|' /etc/xrdp/sesman.ini
+run-command chown root:root /etc/firewalld/zones/xrdp.xml /etc/xrdp/xrdp.ini /etc/xrdp/startwm.sh /etc/sysctl.d/99-xrdp-buffers.conf /etc/sysctl.d/99-disable-ipv6.conf
+run-command chmod 0644 /etc/firewalld/zones/xrdp.xml /etc/xrdp/xrdp.ini /etc/sysctl.d/99-xrdp-buffers.conf /etc/sysctl.d/99-disable-ipv6.conf
+run-command chmod 0755 /etc/xrdp/startwm.sh
+# Assign the shipped SSH/RDP zone to interfaces without an explicit zone.
+run-command firewall-offline-cmd --set-default-zone=xrdp
+run-command grubby --update-kernel=ALL --args="ipv6.disable=1"
+# Reject accidental appliance boot arguments before exporting an unbootable VM.
+run-command sh -c '! grep -q guestfs_network /boot/loader/entries/*.conf'
+
+# customize.sh installs the SauronAgent RPM built from this checkout using the
+# same version as the image and the gateway release.
+
+# Keep full locale coverage so the image supports all languages.
+run-command dnf -y install glibc-all-langpacks
+
+# Cleanup
+run-command dnf clean all
+run-command rm -rf /var/cache/dnf/* /var/tmp/* /tmp/*
+run-command rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/*
+run-command journalctl --vacuum-time=1s || true
+
+# Preserve the recipe's permissive SELinux policy. customize.sh relabels the
+# completed disk offline so first boot does not need a relabel/reboot cycle.
+run-command sed -i 's/^SELINUX=.*/SELINUX=permissive/' /etc/selinux/config
+
+# customize.sh resets cloud-init and leaves empty machine-id files after
+# package installation. Rocky needs the files to exist during early boot.

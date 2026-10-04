@@ -82,13 +82,17 @@ make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
 make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
 ```
 
+Use `IMAGE=rocky9-xfce` with the same targets to build and test Rocky Linux 9 XFCE.
+
 The syntax and upload-source check is quick. The full build requires Linux
 x86_64, Docker access, Bash, curl, Python 3, `flock`, `sha256sum`, Git, Make, and
-the root module's Go toolchain. It builds the SauronAgent deb from this checkout
-and installs it into the desktop image. KVM is optional but speeds up the build.
+the root module's Go toolchain. It builds the SauronAgent deb or RPM from this
+checkout and installs it into the selected desktop image. KVM is optional but
+speeds up the build.
 The smoke test needs host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`
 and boots a temporary overlay without modifying the base image. See the
-[image README](images/ubuntu-resolute-xfce/README.md) for artifact paths and
+[Ubuntu](images/ubuntu-resolute-xfce/README.md) and
+[Rocky](images/rocky9-xfce/README.md) image READMEs for artifact paths and
 guest configuration.
 
 ## Checks before a pull request
@@ -153,14 +157,15 @@ screenshots when the dashboard or login flow changes.
 The [release workflow](.github/workflows/go.yml) creates version tags and GitHub
 Releases with generated release notes, builds gateway and SauronAgent packages,
 and publishes gateway container images after pushes to `main`. It calls the
-[image workflow](.github/workflows/ubuntu-resolute-xfce.yml) with the same version
-to build and boot-test the Ubuntu image. Release publication waits for both
-the gateway and image jobs to succeed, then attaches the packages, split image
-parts, image checksum, and build manifest to one `vMAJOR.MINOR.PATCH` release.
-The SauronAgent installed in the image also uses that release version. Describe
+[Ubuntu image workflow](.github/workflows/ubuntu-resolute-xfce.yml) and
+[Rocky image workflow](.github/workflows/rocky9-xfce.yml) with the same version
+to build and boot-test both images. Release publication waits for the gateway
+and both image jobs to succeed, then attaches the packages, split image
+parts, image checksums, and build manifests to one `vMAJOR.MINOR.PATCH` release.
+The SauronAgent installed in each image also uses that release version. Describe
 changes in commit and pull-request text so the release notes are useful.
 
-The image workflow also runs for relevant image, build, and SauronAgent changes
+Each image workflow also runs for relevant image, build, and SauronAgent changes
 on pull requests, using version `0.0.0`, and supports manual runs with a numeric
 `MAJOR.MINOR.PATCH` version input that defaults to `0.0.0`. These standalone runs
 publish workflow artifacts only; they do not create tags or GitHub Releases.
