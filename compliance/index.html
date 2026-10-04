@@ -1,0 +1,2449 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="HTTPS and RDP gateway for libvirt-managed Linux desktops with LDAP authentication and guest audit collection.">
+      
+      
+      
+        <link rel="canonical" href="https://define42.github.io/DevBox-Gateway/compliance/">
+      
+      
+        <link rel="prev" href="../operations/audit-logs/">
+      
+      
+        <link rel="next" href="../operations/guest-events/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Audit coverage comparison - DevBox Gateway</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="green" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#nato-ac35-d2003-rev5-2631-compliance-comparison" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="DevBox Gateway" class="md-header__button md-logo" aria-label="DevBox Gateway" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DevBox Gateway
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Audit coverage comparison
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="green" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/define42/DevBox-Gateway" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    define42/DevBox-Gateway
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="DevBox Gateway" class="md-nav__button md-logo" aria-label="DevBox Gateway" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DevBox Gateway
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/define42/DevBox-Gateway" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    define42/DevBox-Gateway
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Installation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/production/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production walkthrough
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/rpm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RPM package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/deb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debian package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/sauronagent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SauronAgent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../vm-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using the gateway
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Using the gateway
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/rdp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RDP connections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/ldap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LDAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/tls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TLS certificates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Libvirt and storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/audit-logs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit logs and Splunk
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit coverage comparison
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit coverage comparison
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sauronagent-built-in-audit-rule-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SauronAgent built-in audit rule inventory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SauronAgent built-in audit rule inventory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rule-coverage-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rule coverage conditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#devbox-gateway-structured-audit-event-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway structured audit event inventory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DevBox-Gateway structured audit event inventory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#devbox-gateway-event-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway event boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#splunk-forwarding-and-index-separation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Splunk forwarding and index separation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Splunk forwarding and index separation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwarding-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwarding configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delivery-and-compliance-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery and compliance boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-event-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON event examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JSON event examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#devbox-gateway-application-events-devbox_audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway application events: devbox_audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sauronagent-guest-events-devbox_sauron" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SauronAgent guest events: devbox_sauron
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-work-before-claiming-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining work before claiming compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-requirements-outside-this-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related requirements outside this comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/guest-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SauronAgent guest events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/health-checks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Health checks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/http-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/repository-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repository layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sauronagent-built-in-audit-rule-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SauronAgent built-in audit rule inventory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SauronAgent built-in audit rule inventory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rule-coverage-conditions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rule coverage conditions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#devbox-gateway-structured-audit-event-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway structured audit event inventory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DevBox-Gateway structured audit event inventory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#devbox-gateway-event-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway event boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#splunk-forwarding-and-index-separation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Splunk forwarding and index separation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Splunk forwarding and index separation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwarding-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwarding configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delivery-and-compliance-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery and compliance boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-event-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON event examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="JSON event examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#devbox-gateway-application-events-devbox_audit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DevBox-Gateway application events: devbox_audit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sauronagent-guest-events-devbox_sauron" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SauronAgent guest events: devbox_sauron
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-work-before-claiming-compliance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining work before claiming compliance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-requirements-outside-this-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related requirements outside this comparison
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="nato-ac35-d2003-rev5-2631-compliance-comparison">NATO AC/35-D/2003-REV5 §26.3.1 compliance comparison<a class="headerlink" href="#nato-ac35-d2003-rev5-2631-compliance-comparison" title="Permanent link">&para;</a></h1>
+<p>This comparison describes the audit coverage implemented in DevBox-Gateway, SauronAgent on Linux guests, and the collector, together with the checks still required in a deployment. It is an implementation assessment, not an accreditation or certification.</p>
+<p>The requirements below paraphrase Annex 1, Appendix 4, §26.3.1, printed page 1-44. <a href="https://www.jftc.nato.int/wp-content/uploads/2025/01/AC-35-D-2003-REV5_-_DIRECTIVE_ON_CLASSIFIED_PROJECT_AND_INDUSTRIAL_SECURITY.pdf#page=45">NATO directive</a></p>
+<h2 id="coverage-comparison">Coverage comparison<a class="headerlink" href="#coverage-comparison" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>§26.3.1 requirement</th>
+<th>Implemented coverage</th>
+<th>Assessment / remaining requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Generate and maintain an audit log</td>
+<td>DevBox-Gateway fsyncs each application audit record to its selected local file or HEC spool. The HEC spool replays pending events after restart. The mandatory AF_VSOCK collector receives guest-agent events and monitors agents expected on running managed VMs. Persistence failures and stream health affect <code>/api/ready</code>; unexpected collector exit stops the gateway. <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/file.go">Application file</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/hec.go">application delivery</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/sauron/sauron.go">guest storage</a></td>
+<td><strong>Conditional; operational verification needed.</strong> Storage failures can still prevent retention; a failed application write is reported and latches readiness unhealthy until restart. Verify spool capacity, filesystem durability, rotation, disk-full handling, outage recovery and external monitoring. Guest agents must be installed and running. New VMs receive a vsock device; existing VMs without one are not automatically migrated and make the expected-agent inventory fail.</td>
+</tr>
+<tr>
+<td>Include system, application and user events selected through the Security Authority's risk assessment</td>
+<td>System-security rules cover execution, permissions, credentials, persistence, kernel, network, time and mounts. DevBox-Gateway logs authentication and selected VM/admin operations. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/security_paths.go#L32">Built-in policy</a></td>
+<td><strong>Partial.</strong> The approved event inventory must be mapped against coverage. Not every application action or access denial is currently audited.</td>
+</tr>
+<tr>
+<td>Record every successful and unsuccessful login attempt</td>
+<td>DevBox-Gateway logs successful authentication and failures, including malformed requests, missing credentials, invalid usernames and rate limits. SauronAgent consumes guest authentication records. <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L378">DevBox-Gateway logging</a></td>
+<td><strong>Implemented for DevBox-Gateway login; conditional for guests.</strong> SSH, PAM, desktop login and other authentication services must actually emit audit records. Execution auditing alone does not prove login coverage.</td>
+</tr>
+<tr>
+<td>Record logout, including applicable timeouts</td>
+<td>DevBox-Gateway records explicit logout, 30-minute browser-session expiry and IP-mismatch invalidation. SauronAgent consumes guest logout/session-end records. <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/session/session_expiry.go#L170">Expiry auditing</a></td>
+<td><strong>Implemented for browser sessions; conditional for guest sessions.</strong> Browser-session expiry does not terminate existing RDP, noVNC or serial-console streams; dashboard-control WebSockets enforce expiry separately.</td>
+</tr>
+<tr>
+<td>Record creation, removal and modification of access rights and privileges</td>
+<td>Audits permission, ownership, extended-attribute and credential-ID changes; watches account/group files, sudo/polkit configuration and discovered SSH directories. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/security_syscalls.go#L13">Syscall rules</a></td>
+<td><strong>Implemented for covered local Linux mechanisms.</strong> LDAP/AD group changes and application-specific roles require auditing in their owning systems.</td>
+</tr>
+<tr>
+<td>Record password creation, removal and modification</td>
+<td>Watches <code>/etc/shadow</code>, <code>/etc/gshadow</code> and <code>/etc/security/opasswd</code>; consumes password-change audit records when emitted. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/rules.go#L274">Credential watches</a></td>
+<td><strong>Partial overall.</strong> Local store changes are detected, but file watches alone do not identify every logical per-account change. LDAP/AD and application password stores need their own audit records. Password values should not be logged.</td>
+</tr>
+<tr>
+<td>Include event date, time and event type</td>
+<td>DevBox-Gateway records timestamps and actions; SauronAgent preserves event timestamps, categories, audit keys and raw records. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/event.go#L22">Event schema</a></td>
+<td><strong>Implemented.</strong> Clock accuracy and synchronization still need operational verification.</td>
+</tr>
+<tr>
+<td>Associate events with an individual user</td>
+<td>DevBox-Gateway records usernames and source IPs. SauronAgent preserves UID, login UID (<code>auid</code>) and account information supplied by audit records. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/normalize.go#L516">Identity extraction</a></td>
+<td><strong>Conditional.</strong> Login UID must be populated and traceable to individuals, including after privilege elevation. Shared accounts or an unset login UID weaken attribution.</td>
+</tr>
+<tr>
+<td>Include success or failure</td>
+<td>DevBox-Gateway supplies an explicit result. SauronAgent extracts the source record's <code>success</code> or <code>res</code> value. <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/normalize.go#L755">Result extraction</a></td>
+<td><strong>Partial.</strong> SauronAgent leaves the result absent when the source supplies neither value. Verify outcome coverage for every required event class.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sauronagent-built-in-audit-rule-inventory">SauronAgent built-in audit rule inventory<a class="headerlink" href="#sauronagent-built-in-audit-rule-inventory" title="Permanent link">&para;</a></h2>
+<p>This table describes the policy compiled into SauronAgent, not proof that every rule is active on a deployed guest. The agent enables kernel auditing and installs/verifies the baseline through <code>NETLINK_AUDIT</code> at startup; no guest YAML, audit rules file, <code>auditd</code>, or audit command-line tools are required. Sources: <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/rules.go">rule installation and required watches</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/security_syscalls.go">syscall masks</a>, and <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/audit/security_paths.go">path discovery</a>.</p>
+<p>Syscall rows use <code>always,exit</code>, an ABI-specific <code>arch</code> filter and the listed key. There is <strong>no UID, login-UID or success filter</strong>: root, other users, and successful/failed attempts are included. Path permission matching is architecture-independent. <code>wa</code> means writes and attribute changes, not reads; <code>x</code> means execution. Directory paths below have a trailing <code>/</code> and use recursive <code>AUDIT_DIR</code> matching, subject to Linux Audit mount boundaries. Grouped paths describe individual watches; compatible rules already installed by another controller can satisfy the required coverage.</p>
+<table>
+<thead>
+<tr>
+<th>Audit key</th>
+<th>Rule type / permissions</th>
+<th>Syscalls or watched paths</th>
+<th>What it records / scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>exec</code></td>
+<td>Syscall</td>
+<td><code>execve</code>, <code>execveat</code></td>
+<td>Program execution attempts; executable and arguments, not terminal output.</td>
+</tr>
+<tr>
+<td><code>permission_change</code></td>
+<td>Syscall</td>
+<td><code>chmod</code>, <code>fchmod</code>, <code>fchmodat</code>, <code>fchmodat2</code></td>
+<td>File permission changes, including executable and set-ID mode bits.</td>
+</tr>
+<tr>
+<td><code>ownership_change</code></td>
+<td>Syscall</td>
+<td><code>chown</code>, <code>fchown</code>, <code>lchown</code>, <code>fchownat</code>; also <code>chown32</code>, <code>fchown32</code>, <code>lchown32</code> on i386/ARM</td>
+<td>File owner/group changes.</td>
+</tr>
+<tr>
+<td><code>attribute_change</code></td>
+<td>Syscall</td>
+<td><code>setxattr</code>, <code>lsetxattr</code>, <code>fsetxattr</code>, <code>removexattr</code>, <code>lremovexattr</code>, <code>fremovexattr</code>, <code>setxattrat</code>, <code>removexattrat</code></td>
+<td>Extended-attribute changes, including ACLs and file capabilities when changed through these calls.</td>
+</tr>
+<tr>
+<td><code>privilege_change</code></td>
+<td>Syscall</td>
+<td><code>setuid</code>, <code>setreuid</code>, <code>setresuid</code>, <code>setgid</code>, <code>setregid</code>, <code>setresgid</code>, <code>capset</code>; also <code>setuid32</code>, <code>setreuid32</code>, <code>setresuid32</code>, <code>setgid32</code>, <code>setregid32</code>, <code>setresgid32</code> on i386/ARM</td>
+<td>Process user/group identity and capability changes.</td>
+</tr>
+<tr>
+<td><code>kernel_module</code></td>
+<td>Syscall</td>
+<td><code>init_module</code>, <code>finit_module</code>, <code>delete_module</code></td>
+<td>Kernel module loading and unloading.</td>
+</tr>
+<tr>
+<td><code>kernel_replacement</code></td>
+<td>Syscall</td>
+<td><code>kexec_load</code>, <code>kexec_file_load</code> where defined by the ABI</td>
+<td>Loading a replacement kernel through kexec.</td>
+</tr>
+<tr>
+<td><code>network_config</code></td>
+<td>Syscall</td>
+<td><code>sethostname</code>, <code>setdomainname</code></td>
+<td>Hostname and domain-name changes; not a rule for every network operation.</td>
+</tr>
+<tr>
+<td><code>time_change</code></td>
+<td>Syscall</td>
+<td><code>adjtimex</code>, <code>settimeofday</code>, <code>clock_settime</code>, <code>clock_adjtime</code>; also <code>clock_settime64</code>, <code>clock_adjtime64</code> on i386/ARM</td>
+<td>System clock and time-adjustment operations.</td>
+</tr>
+<tr>
+<td><code>filesystem_mount</code></td>
+<td>Syscall</td>
+<td><code>mount</code>, <code>umount2</code>, <code>mount_setattr</code></td>
+<td>Mount, unmount and mount-attribute changes through these calls.</td>
+</tr>
+<tr>
+<td><code>sauron_identity</code></td>
+<td>Required file watch, <code>wa</code></td>
+<td><code>/etc/passwd</code></td>
+<td>Local account database changes.</td>
+</tr>
+<tr>
+<td><code>sauron_identity</code></td>
+<td>Required file watch, <code>wa</code></td>
+<td><code>/etc/group</code></td>
+<td>Local group database changes.</td>
+</tr>
+<tr>
+<td><code>sauron_credentials</code></td>
+<td>Required file watch, <code>wa</code></td>
+<td><code>/etc/shadow</code></td>
+<td>Local password-store changes.</td>
+</tr>
+<tr>
+<td><code>sauron_credentials</code></td>
+<td>Required file watch, <code>wa</code></td>
+<td><code>/etc/gshadow</code></td>
+<td>Protected group credential/membership store changes.</td>
+</tr>
+<tr>
+<td><code>sauron_credentials</code></td>
+<td>Required file watch, <code>wa</code></td>
+<td><code>/etc/security/opasswd</code></td>
+<td>Local password-history store changes.</td>
+</tr>
+<tr>
+<td><code>privilege_config</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/sudoers</code>, <code>/etc/sudoers.d/</code>, <code>/etc/polkit-1/</code></td>
+<td>Sudo and polkit authorization policy changes.</td>
+</tr>
+<tr>
+<td><code>authentication_config</code></td>
+<td>Discovered directories, <code>wa</code></td>
+<td><code>/etc/pam.d/</code>, <code>/etc/security/</code></td>
+<td>PAM and local authentication/security configuration changes.</td>
+</tr>
+<tr>
+<td><code>ssh_config</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/ssh/sshd_config</code>, <code>/etc/ssh/sshd_config.d/</code></td>
+<td>SSH server configuration changes.</td>
+</tr>
+<tr>
+<td><code>privilege_use</code></td>
+<td>Discovered executable watches, <code>x</code></td>
+<td><code>/usr/bin/sudo</code>, <code>/usr/bin/su</code>, <code>/usr/bin/pkexec</code>, <code>/usr/bin/systemd-run</code></td>
+<td>Execution of these privilege/service tools; execution is not proof that an elevation request succeeded.</td>
+</tr>
+<tr>
+<td><code>persistence</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/systemd/system/</code>, <code>/usr/lib/systemd/system/</code>, <code>/etc/cron.d/</code>, <code>/var/spool/cron/</code>, <code>/etc/crontab</code>, <code>/etc/rc.local</code>, <code>/etc/ld.so.preload</code>, <code>/etc/profile.d/</code></td>
+<td>Changes to the listed service, scheduled-job, startup, preload and shell-profile locations.</td>
+</tr>
+<tr>
+<td><code>ssh_keys</code></td>
+<td>Discovered directories, <code>wa</code></td>
+<td>Existing <code>&lt;home&gt;/.ssh/</code> for homes in local <code>/etc/passwd</code>, plus <code>/root/.ssh/</code></td>
+<td>Changes below discovered SSH directories, including authorized keys and SSH configuration; not key contents.</td>
+</tr>
+<tr>
+<td><code>kernel_config</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/modprobe.d/</code>, <code>/etc/modules-load.d/</code>, <code>/etc/sysctl.d/</code>, <code>/etc/sysctl.conf</code></td>
+<td>Module and sysctl configuration changes.</td>
+</tr>
+<tr>
+<td><code>boot_config</code></td>
+<td>Discovered directories, <code>wa</code></td>
+<td><code>/etc/default/</code>, <code>/etc/grub.d/</code></td>
+<td>Changes below the listed default/boot configuration directories.</td>
+</tr>
+<tr>
+<td><code>mac_policy</code></td>
+<td>Discovered directories, <code>wa</code></td>
+<td><code>/etc/selinux/</code>, <code>/etc/apparmor.d/</code></td>
+<td>SELinux and AppArmor policy-file changes.</td>
+</tr>
+<tr>
+<td><code>crypto_policy</code></td>
+<td>Discovered directory, <code>wa</code></td>
+<td><code>/etc/crypto-policies/</code></td>
+<td>System cryptographic policy-file changes.</td>
+</tr>
+<tr>
+<td><code>firewall</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/firewalld/</code>, <code>/etc/nftables.conf</code></td>
+<td>Firewall configuration-file changes.</td>
+</tr>
+<tr>
+<td><code>network_config</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/hosts</code>, <code>/etc/resolv.conf</code>, <code>/etc/NetworkManager/</code>, <code>/etc/systemd/network/</code></td>
+<td>Host resolution, DNS and listed network configuration changes.</td>
+</tr>
+<tr>
+<td><code>time_change</code></td>
+<td>Discovered file, <code>wa</code></td>
+<td><code>/etc/localtime</code></td>
+<td>Local timezone-file changes.</td>
+</tr>
+<tr>
+<td><code>time_config</code></td>
+<td>Discovered paths, <code>wa</code></td>
+<td><code>/etc/chrony.conf</code>, <code>/etc/chrony.d/</code></td>
+<td>Chrony time-synchronization configuration changes.</td>
+</tr>
+<tr>
+<td><code>filesystem_config</code></td>
+<td>Discovered file, <code>wa</code></td>
+<td><code>/etc/fstab</code></td>
+<td>Persistent filesystem mount configuration changes.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rule-coverage-conditions">Rule coverage conditions<a class="headerlink" href="#rule-coverage-conditions" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Architectures:</strong> supported builds are <code>amd64</code>, <code>386</code>, <code>arm</code>, <code>arm64</code>, <code>riscv64</code>, <code>ppc64</code>, <code>ppc64le</code>, <code>s390x</code> and <code>loong64</code>. <code>amd64</code> installs both native x86-64 and i386 compatibility syscall rules; the other builds cover their native ABI. <code>arm64</code>, <code>riscv64</code> and <code>loong64</code> omit the nonexistent legacy <code>chmod</code>, <code>chown</code> and <code>lchown</code> calls. i386 omits <code>kexec_file_load</code>. A syscall mask can include newer calls that an older running kernel does not implement; installation does not probe by executing them.</li>
+<li><strong>Required versus discovered paths:</strong> the five identity/credential watches are mandatory. A watched file may be absent if its parent exists. For the additional discovered paths, absent directories or absent file parents are skipped and reported; missing files with existing parents are watched for later creation. Discovery errors such as inaccessible paths or unexpected file types fail startup.</li>
+<li><strong>Discovery is startup-only:</strong> SSH homes come from local <code>/etc/passwd</code> plus <code>/root</code>, not LDAP/NSS or a <code>/home/*</code> wildcard. Restart after adding users, creating previously absent directories/parents, or changing symlink targets. Existing file symlinks are watched at both their declared name and resolved target; directory symlinks are watched at the resolved target. Check the <code>audit managed paths discovered</code> journal entry for skipped paths, pending files and SSH-directory counts.</li>
+<li><strong>Overlapping rules:</strong> Linux Audit normally selects the first matching rule/key, not one event per matching table row. Specific file/executable watches take precedence over directory and broad syscall rules: <code>/etc/security/opasswd</code> retains <code>sauron_credentials</code>, and <code>/usr/bin/sudo</code> execution uses <code>privilege_use</code>. Compatible pre-existing execution coverage can be accepted with a different key from <code>exec</code>. Interpret the key together with syscall and path fields.</li>
+<li><strong>Installation and persistence:</strong> the agent needs <code>CAP_AUDIT_CONTROL</code>, <code>CAP_AUDIT_READ</code> and access for private-directory discovery (<code>CAP_DAC_READ_SEARCH</code>). It preserves unrelated rules, does not claim the audit daemon PID or lock policy, and leaves rules active when it exits. Incomplete immutable policy or conflicting suppressing rules prevent startup. This is not continuous enforcement against another controller clearing the rules; restart to re-establish the baseline.</li>
+<li><strong>Event limits:</strong> file watches record operation metadata, not file contents or before/after diffs. Execution arguments can themselves contain sensitive values. Guest authentication/password-change records, SELinux AVC, SECCOMP and audit-subsystem records are also consumed when their sources emit them; these are not additional syscall rules installed by this table. Normalizer support for an event category does not establish universal coverage of that category. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/normalize.go">normalization</a> and the <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/event.go">event schema</a>.</li>
+</ul>
+<h2 id="devbox-gateway-structured-audit-event-inventory">DevBox-Gateway structured audit event inventory<a class="headerlink" href="#devbox-gateway-structured-audit-event-inventory" title="Permanent link">&para;</a></h2>
+<p>These are DevBox-Gateway's application audit events, separate from SauronAgent guest events and ordinary diagnostic logs. When <code>SPLUNK_HEC_ENDPOINT</code> is nonblank, HEC is their sole output, <code>AUDIT_LOG_FILE</code> is ignored, and pending delivery is persisted under <code>&lt;DATA_ROOT_DIR&gt;/audit-spool</code>. Otherwise events are written as JSON Lines to the required <code>AUDIT_LOG_FILE</code> (default <code>/var/log/devbox-gateway/audit.jsonl</code>). The delivery spool is not a permanent audit-file copy. Guest events use the separate <code>SAURON_EVENT_LOG_FILE</code> / <code>SAURON_SPLUNK_HEC_*</code> outputs. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/audit.go">audit definitions and writer</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/config/config.go">output settings</a>, and <a href="#splunk-forwarding-and-index-separation">Splunk forwarding and examples</a>.</p>
+<p>Every application audit record has <code>time</code>, <code>level</code>, <code>msg="audit"</code>, <code>action</code>, <code>user</code> and <code>result</code>. <code>result</code> is <code>success</code> or <code>failure</code>; omitted results at call sites default to <code>success</code>. Optional fields are <code>source_ip</code>, <code>vm</code>, <code>resource_type</code>, <code>resource</code>, <code>protocol</code>, <code>operation</code>, <code>administrator</code> and <code>duration_ms</code>. Empty optional strings are omitted; <code>administrator</code> appears only when true and duration only when positive. Passwords, password hashes and session tokens are not part of this audit schema. Invalid or unavailable login identities can produce an empty <code>user</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Event / action</th>
+<th>When DevBox-Gateway records it</th>
+<th>Result and distinguishing fields</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Login: <code>user.login</code></td>
+<td>Outcome of each <code>POST /login</code> reaching the login audit middleware, including successful authentication and rejected attempts.</td>
+<td><code>success</code> only after authenticated session setup produces the successful redirect. Failures use <code>operation=origin_rejected</code>, <code>malformed_request</code>, <code>missing_credentials</code>, <code>invalid_username</code>, <code>rate_limited</code>, <code>authentication_failed</code> or <code>session_failed</code>. Includes source IP and a validated/authenticated username when available.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L378">Login outcome middleware</a></td>
+</tr>
+<tr>
+<td>Explicit logout: <code>user.logout</code></td>
+<td>An authenticated, same-origin logout request destroys the user's sessions and requests closure of their live connections.</td>
+<td><code>operation=explicit</code>; <code>success</code> or <code>failure</code> according to session destruction. Includes requesting source IP and administrator flag when applicable. No authenticated identity means no explicit-logout audit event.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L278">Logout handler</a></td>
+</tr>
+<tr>
+<td>Session expiry: <code>user.logout</code></td>
+<td>A tracked authenticated browser session reaches its 30-minute absolute expiry; a timer records it without requiring another browser request.</td>
+<td><code>operation=timeout</code>; result reflects expired-session deletion. Uses the user and source IP retained at session commit. This is browser-session expiry, not a record that an existing RDP/noVNC/serial stream has ended.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/session/session_expiry.go#L170">Expiry audit</a></td>
+</tr>
+<tr>
+<td>IP-mismatch invalidation: <code>user.logout</code></td>
+<td>A request no longer matches the authenticated session's bound IP; the session invalidation is claimed and audited once.</td>
+<td><code>operation=client_ip_changed</code>; <code>success</code> or <code>failure</code> according to invalidation. <code>source_ip</code> is the new request's canonical address when valid, not the previous bound address.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/session/session.go#L681">IP enforcement</a></td>
+</tr>
+<tr>
+<td>VM creation: <code>vm.create</code></td>
+<td>Authenticated dashboard create validation failures, and the outcome of VM provisioning/initial startup. Includes malformed form, invalid name/base-image selection, missing provisioning credential, duplicate-name/limit and provisioning failures when reached.</td>
+<td><code>success</code> or <code>failure</code>; actor, source IP, administrator flag and VM name when safely available. Success is provisioning/startup success, not proof that the guest OS is ready.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L734">Create validation and operation</a></td>
+</tr>
+<tr>
+<td>VM start: <code>vm.start</code></td>
+<td>Dashboard start request: target validation/authorization and start-operation outcomes after authentication.</td>
+<td><code>success</code> or <code>failure</code>; actor, source IP and VM. Administrator lifecycle actions carry <code>administrator=true</code>.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L574">Lifecycle routes</a></td>
+</tr>
+<tr>
+<td>VM shutdown: <code>vm.stop</code></td>
+<td>Dashboard shutdown request: target validation/authorization and ACPI shutdown request outcomes after authentication.</td>
+<td><code>operation=shutdown</code>; <code>success</code> or <code>failure</code>; actor, source IP, VM and administrator flag when applicable. Success means the request was accepted, not that the guest completed shutdown.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go">Lifecycle audit emission</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/virt/power.go">power operations</a></td>
+</tr>
+<tr>
+<td>VM force power off: <code>vm.stop</code></td>
+<td>Dashboard force power-off request: target validation/authorization and libvirt destroy outcomes after authentication. The dashboard asks for confirmation before sending this request.</td>
+<td><code>operation=force_power_off</code>; <code>success</code> or <code>failure</code>; actor, source IP, VM and administrator flag when applicable.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go">Lifecycle audit emission</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/virt/power.go">power operations</a></td>
+</tr>
+<tr>
+<td>VM restart: <code>vm.reboot</code></td>
+<td>Dashboard restart request: target validation/authorization and restart-operation outcomes after authentication.</td>
+<td><code>operation=restart</code>; <code>success</code> or <code>failure</code>; actor, source IP, VM and administrator flag when applicable.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L922">Lifecycle audit emission</a></td>
+</tr>
+<tr>
+<td>VM removal: <code>vm.remove</code></td>
+<td>Dashboard removal request: target validation/authorization and removal-operation outcomes after authentication.</td>
+<td><code>success</code> or <code>failure</code>; actor, source IP, VM and administrator flag when applicable.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go#L922">Lifecycle audit emission</a></td>
+</tr>
+<tr>
+<td>Connection established: <code>connection.connect</code></td>
+<td>An authorized RDP proxy or noVNC/serial bridge is established and accepted into live-connection tracking.</td>
+<td><code>result=success</code>; <code>protocol=rdp</code>, <code>novnc</code> or <code>serial</code>, actor, source IP and VM. Console/noVNC includes administrator status when applicable; the RDP emitter does not set it.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/rdp/rdp.go#L158">RDP</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/console/console.go#L58">console/noVNC</a></td>
+</tr>
+<tr>
+<td>Connection ended: <code>connection.disconnect</code></td>
+<td>The established RDP/noVNC/serial proxy or bridge returns, including normal closure and connection teardown.</td>
+<td><code>result=success</code> by default, same connection identity/protocol fields and <code>duration_ms</code>. There is no structured close-reason or transport-error field; success does not mean an error-free session.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/rdp/rdp.go#L158">RDP</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/console/console.go#L58">console/noVNC</a></td>
+</tr>
+<tr>
+<td>Base-image upload: <code>admin.base_image.upload</code></td>
+<td>After administrator authorization: malformed upload, validation/storage failures, or successful image storage.</td>
+<td><code>success</code> or <code>failure</code>; <code>administrator=true</code>, <code>resource_type=base_image</code>, <code>resource</code> when a name is known, actor and source IP. Uploaded byte count is diagnostic-only.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers_base_images.go#L67">Upload handler</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers_base_images.go#L196">failure audit</a></td>
+</tr>
+<tr>
+<td>Base-image deletion: <code>admin.base_image.delete</code></td>
+<td>After administrator authorization: malformed deletion request, invalid/missing image, deletion failure, or successful deletion.</td>
+<td><code>success</code> or <code>failure</code>; <code>administrator=true</code>, <code>resource_type=base_image</code>, <code>resource</code> when known, actor and source IP.</td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers_base_images.go#L111">Deletion handler</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers_base_images.go#L196">failure audit</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="devbox-gateway-event-boundaries">DevBox-Gateway event boundaries<a class="headerlink" href="#devbox-gateway-event-boundaries" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The table covers all 11 currently defined application audit action names; logout has separate rows for its three operations. Ordinary <code>log.Printf</code> messages are diagnostic output, not interchangeable with these structured audit records.</li>
+<li>Failed connection authorization, connection limits and backend/TLS/WebSocket setup failures before a connection is established do not emit <code>connection.connect</code> with <code>result=failure</code>. Clicking <strong>Connect</strong>, granting RDP access and downloading an <code>.rdp</code> file do not themselves emit connection audit events.</li>
+<li>VM validation/ownership failures inside the authenticated lifecycle handlers are audited. However, API requests rejected earlier by session or same-origin middleware, and failed administrator checks before base-image operations, do not have dedicated structured denial events. The login middleware's explicit rejection coverage is separate.</li>
+<li>Browser-session expiry and IP-mismatch invalidation do not themselves close established RDP/noVNC/serial streams; explicit logout requests closure of the user's tracked connections. Dashboard/admin control WebSockets independently close at the session deadline, but do not emit the connection events above. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/console/dashboard_socket.go#L138">dashboard socket lifetime</a>.</li>
+<li>Dashboard/page views, VM/base-image listings, health checks, static-file requests, dashboard-control WebSockets, DevBox-Gateway process startup/shutdown and background VM auto-shutdown have no dedicated application audit action. VM resource/configuration changes and external LDAP/AD account, group or password changes are not represented by a dedicated action in this inventory.</li>
+<li>A successful VM lifecycle event reports the operation's return status, not continuous verification of the guest state. Structured VM/admin failures do not include a general error-reason field; details may only be in diagnostic logs. Connection payloads, terminal output and desktop contents are not captured by these audit events.</li>
+</ul>
+<h2 id="splunk-forwarding-and-index-separation">Splunk forwarding and index separation<a class="headerlink" href="#splunk-forwarding-and-index-separation" title="Permanent link">&para;</a></h2>
+<p>DevBox-Gateway supports direct forwarding to Splunk's HTTP Event Collector (HEC). The supplied <a href="https://github.com/define42/DevBox-Gateway/blob/main/docker-compose.yml">Docker Compose deployment</a> routes application audit events and SauronAgent guest events into <strong>two separate indexes</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Event stream</th>
+<th>Index in the supplied deployment</th>
+<th>Index setting</th>
+<th>HEC <code>source</code> / <code>sourcetype</code></th>
+<th>HEC <code>host</code> and <code>time</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DevBox-Gateway application audits: login/logout, VM lifecycle, connections and base-image administration</td>
+<td><code>devbox_audit</code></td>
+<td><code>SPLUNK_HEC_INDEX</code></td>
+<td><code>devbox-gateway</code> / <code>devbox-gateway:audit</code></td>
+<td>DevBox-Gateway host's hostname; application forwarding timestamp</td>
+</tr>
+<tr>
+<td>SauronAgent guest events and collector-generated <code>sauron.*</code> events</td>
+<td><code>devbox_sauron</code></td>
+<td><code>SAURON_SPLUNK_HEC_INDEX</code></td>
+<td><code>sauronagent</code> / <code>devbox-gateway:sauron</code></td>
+<td>Source VM name when available; collector receive timestamp (<code>received_at</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The index names are configurable, not hard-coded or enforced to be different. Both index settings default to empty, which omits the HEC <code>index</code> field and uses the token's default index. Set both explicitly to preserve the separation above. The two streams can use the same Splunk endpoint, with independently configured tokens and indexes. Sources: <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/hec.go">application forwarding</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/sauron/forward.go">guest forwarding</a>, and <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/splunkhec/splunkhec.go">HEC envelope</a>.</p>
+<h3 id="forwarding-configuration">Forwarding configuration<a class="headerlink" href="#forwarding-configuration" title="Permanent link">&para;</a></h3>
+<p>Set these environment-backed settings on <strong>DevBox-Gateway</strong>, not inside a SauronAgent YAML file. Replace the example endpoint and token placeholders with deployment values; do not commit real tokens.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="na">SPLUNK_HEC_ENDPOINT</span><span class="o">=</span><span class="s">https://splunk.example.com:8088</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="na">SPLUNK_HEC_TOKEN</span><span class="o">=</span><span class="s">&lt;application-hec-token&gt;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="na">SPLUNK_HEC_INDEX</span><span class="o">=</span><span class="s">devbox_audit</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Enable only with an ACK-enabled HEC token and supported Splunk deployment.</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="na">SPLUNK_HEC_ACK_ENABLED</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="na">SPLUNK_HEC_SKIP_TLS_VERIFY</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="na">DEVBOX_GATEWAY_SPOOL_MAX_MIB</span><span class="o">=</span><span class="s">10240</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="na">SAURON_SPLUNK_HEC_ENDPOINT</span><span class="o">=</span><span class="s">https://splunk.example.com:8088</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="na">SAURON_SPLUNK_HEC_TOKEN</span><span class="o">=</span><span class="s">&lt;guest-hec-token&gt;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="na">SAURON_SPLUNK_HEC_INDEX</span><span class="o">=</span><span class="s">devbox_sauron</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Independent of application-audit ACK mode; guest ACK remains local acceptance.</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="na">SAURON_SPLUNK_HEC_ACK_ENABLED</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="na">SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY</span><span class="o">=</span><span class="s">false</span>
+</code></pre></div>
+<p>A URL without a path uses <code>/services/collector/event</code>. Provision the indexes and allow the corresponding HEC tokens to write to them; DevBox-Gateway does not create Splunk indexes. The bundled development Splunk instance provisions both through <a href="https://github.com/define42/DevBox-Gateway/blob/main/testsplunk/create_index.yml">post-setup tasks</a>. Use HTTPS with a trusted certificate. For token setup and optional indexer acknowledgement, see the <a href="../operations/audit-logs/#forwarding-to-splunk-hec">HEC setup instructions</a>.</p>
+<p>HEC forwarding is optional and disabled when its endpoint is unset; remove the associated token/index settings and leave its ACK setting false when disabling it. An enabled ACK setting without that stream's endpoint fails startup. Application audits then use <code>AUDIT_LOG_FILE</code>. With application HEC configured, that file setting is entirely ignored: DevBox-Gateway does not create, open or append to the application audit file, and existing files are not deleted. Invalid HEC configuration fails startup without switching to file logging.</p>
+<p>SauronAgent collection remains mandatory: DevBox-Gateway always starts the collector on AF_VSOCK port 9000. The guest JSON Lines output is independently controlled by <code>SAURON_EVENT_LOG_FILE</code> and can run alongside guest HEC forwarding; at least one of those guest outputs must be configured.</p>
+<h3 id="delivery-and-compliance-boundaries">Delivery and compliance boundaries<a class="headerlink" href="#delivery-and-compliance-boundaries" title="Permanent link">&para;</a></h3>
+<p>The gateway requires the guest collector to start successfully and exits with
+status 1 if it later stops unexpectedly. <code>/api/health</code> remains an HTTP listener
+liveness probe. The separate public <code>GET /api/ready</code> returns <code>200</code> with
+<code>ready\n</code> or <code>503</code> with <code>not ready\n</code>, without backend details. It checks known
+application audit persistence failures, collector output health, expected
+agents, inventory freshness, pending stream alerts and unreported sequence
+gaps. Application-audit capacity pressure or persistence failure also blocks
+new mutations and upgraded streams, while logout, ordinary reads and probes
+remain available. Other readiness failures do not themselves block actions. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/readiness.go">readiness and supervision</a>.</p>
+<p>Running persistent VMs with gateway ownership metadata are expected to send
+guest telemetry. The inventory refreshes every 15 seconds; a failed lookup
+retains prior expectations and fails readiness, and a snapshot older than 45
+seconds is stale. The gateway allows <code>SAURON_AGENT_STARTUP_GRACE</code> (default <code>5m</code>)
+before first contact and <code>SAURON_AGENT_TIMEOUT</code> (default <code>90s</code>) after contact.
+Missing streams produce loss/resumption events and readiness recovers when the
+current trusted VM identity resumes contact. Heartbeats can establish presence
+without proving audit completeness. Alert output failures are retried; the
+in-memory queue is bounded at 4096 alerts, and overflow keeps readiness unhealthy
+until operator recovery and restart. Verify external alerts consume these
+signals and account for duplicates or alerts lost during a process failure.</p>
+<p>In application file mode, every record is appended and fsynced before the
+writer returns. External rename-and-create rotation is detected on the next
+write; retention remains external and <code>copytruncate</code> is unsupported. A write
+racing rotation may land in the renamed file. Application persistence errors
+are logged and keep readiness unhealthy until restart even if storage recovers,
+because the failed record cannot be reconstructed automatically. User actions
+are not rolled back after an audit failure. Investigate the audit gap and
+restore storage before restarting. See the <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/file.go">file writer</a>
+and <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/health.go">persistence health</a>.</p>
+<p>Rejected guest records keep readiness unhealthy until retries of retained
+copies or matching VM, event boot ID and sequence replays are accepted by every output.
+Unrelated events, heartbeats and successful flushes cannot clear these failures.
+The gateway retries retained copies every second, preserving their original
+attribution after disconnect or identity recovery. Retention is bounded at 4096
+records and 64 MiB of encoded data. Capacity or encoding failures keep readiness
+unhealthy until operator recovery and restart. Restart discards pending copies
+and health state, so investigate delivery before restarting. Background retry
+success does not advance guest acknowledgements; later guest replay can produce
+duplicates. Generic collector write/flush errors can clear after a later
+successful write to every output. See the
+<a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/docs/deployment.md#output-failure-recovery">matching and recovery rules</a>.</p>
+<p>Event acceptance is serialized across sessions sharing a peer or trusted VM
+UUID, preventing concurrent duplicate writes from racing deduplication commit.
+Decoded originals are reserved before blocking work and excluded from
+concurrent HELLO loss claims and gap-report completion until output accepts
+them. Failure or timeout leaves them replayable. Arrival protection is bounded
+by the effective deduplication window; overflow requires investigation and
+restart.
+A pending sequence-gap report independently fails readiness until its loss
+evidence is accepted or missing arrivals remove the gap. A worker retries gap
+reports every second even without new guest traffic or a completed inventory
+query. Accepted loss evidence never establishes delivery of the missing
+records. This pending evidence is held in memory and is lost on restart.
+Each stream also retains at most 64 disjoint accepted loss ranges. Reports
+without accounting capacity wait before another output attempt. Replaying an
+earlier unwritten event or accepting its HELLO-established loss can free that
+capacity while other streams continue reporting.</p>
+<p>Once fresh inventory supplies a complete identity for an unresolved session,
+its next valid event or heartbeat triggers reconnection and fresh attribution.
+Already-written records retain their original source. A resolved connection
+keeps its pinned identity through CID reuse.</p>
+<p>Remote HEC unavailability can be buffered while local capacity remains below
+the admission threshold. Sustained application-audit delivery failure also
+fails readiness after <code>SPLUNK_HEC_STALL_TIMEOUT</code>, independently of admission.
+Readiness does not probe free disk space or confirm Splunk searchability.
+Continue monitoring capacity and end-to-end event arrival.</p>
+<p>Both ACK switches default to <code>false</code>, preserving delivery confirmation by an HTTP <code>2xx</code> response with valid HEC JSON <code>code: 0</code>. Set a stream's switch to <code>true</code> only when its Splunk deployment supports HEC indexer acknowledgement and its token has the feature enabled. DevBox-Gateway sends the same generated GUID in <code>X-Splunk-Request-Channel</code> on event POSTs and <code>/services/collector/ack</code> polls, using the same token. Only an explicit <code>true</code> for the submitted payload's exact <code>ackId</code> permits successful-delivery checkpoint advancement. False or missing ACK status, malformed replies, transport/HTTP failures and shutdown leave unconfirmed payloads pending. Polling is bounded to five minutes per delivery attempt; the forwarder then retries the stored payload with backoff. Lost responses, timeout or restart can produce duplicates even after Splunk processes a payload.</p>
+<p>Event submission and ACK polling must reach the same HEC instance and channel; configure load-balancer affinity when applicable. The ACK URL preserves the event URL's scheme, host and any proxy prefix before <code>/services/collector</code>; unsupported custom event paths fail startup in ACK mode. Splunk defines a true ACK in terms of the desired replication factor and warns that parsing can still discard events. It is not proof that every event was indexed or is searchable. See <a href="https://help.splunk.com/en/splunk-enterprise/get-data-in/collect-http-event-data/about-http-event-collector-indexer-acknowledgment">Splunk's indexer acknowledgement documentation</a> and the <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/splunkhec/splunkhec.go">shared HEC client</a>.</p>
+<ul>
+<li><strong>Application audits:</strong> HEC is the sole output when configured. Before the delivery sink accepts an event, it is appended and fsynced under <code>&lt;DATA_ROOT_DIR&gt;/audit-spool</code>; delivery resumes after a gateway restart, and pending records do not expire during an outage. Delivery is at-least-once, so a crash around acknowledgement can produce duplicates. An HTTP <code>2xx</code> response containing valid HEC JSON with <code>code: 0</code> is required, together with the exact ID's true ACK when <code>SPLUNK_HEC_ACK_ENABLED=true</code>; <code>400</code>, <code>403</code>, other HTTP failures, invalid responses and nonzero HEC codes remain pending rather than being dropped automatically. <code>DEVBOX_GATEWAY_SPOOL_MAX_MIB</code> bounds the spool at 10 GiB by default. At 90% usage, readiness fails and new HTTP mutations/WebSocket upgrades receive 503; new RDP connections close before consuming a grant. Logout, reads and probes remain available. Admission recovers when delivery frees capacity. At the hard limit, pending records are preserved and new writes fail immediately. Already-running actions are not rolled back; an unpersisted audit record is diagnosed and latches readiness and admission unhealthy until investigation and restart. A 48-hour objective must be sized from the measured encoded byte rate multiplied by 172800 seconds and operational headroom; 10 GiB alone is not a time guarantee. <code>AUDIT_LOG_FILE</code> remains unused in HEC mode, and acknowledged spool data is reclaimed rather than retained as a permanent local copy. Disk/oversize errors are diagnostic failures to persist. During shutdown, final worker events receive a five-second acceptance window, with full spools still rejecting promptly; already-spooled records remain for restart replay. This is not an absolute lossless guarantee when storage cannot accept an event. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/audit/hec.go">application delivery</a>.</li>
+<li><strong>Guest events:</strong> forwarding uses the persistent <code>SAURON_SPOOL_DIR</code> spool and resumes after DevBox-Gateway restarts. With HEC enabled, guest acknowledgement requires acceptance into this spool and any other configured sink, not receipt by Splunk; <code>SAURON_SPLUNK_HEC_ACK_ENABLED</code> does not change that guest-ingress contract. Delivery is at-least-once, so duplicates are possible. The spool is bounded by <code>SAURON_SPOOL_MAX_MIB</code> (10 GiB by default); a full spool stops new acknowledgements, leaving events in the guests' bounded spools. Permanently invalid or oversized event submissions can be dropped with diagnostics; ACK errors and unconfirmed ACKs cannot trigger that policy. This is not an unlimited or loss-free retention guarantee. See <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/sauron/forward.go">guest spool and forwarding</a> and <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/spool/spool.go">guest spool limits</a>.</li>
+</ul>
+<p>The embedded guest file sink fsyncs event data and file creation/rotation
+metadata before permitting an ACK, including file-only deployments. Durability
+follows the filesystem's fsync guarantees; per-event fsync adds storage latency,
+and size-based rotation still limits retention. The standalone collector's
+<code>sync_on_write</code> option remains configurable. Guest source spools still default
+to periodic fsync and can lose unsynced events on guest power loss before delivery.</p>
+<p>If the guest-event forwarder cannot save a delivered batch's checkpoint, it
+retries persistence before moving its delivery cursor or sending another batch.
+This resumes after storage recovery even when the spool is full and no new
+append can wake it. A restart before persistence succeeds may replay the batch.
+Guest-agent acknowledgement checkpoints likewise retain records and sequence
+state on persistence failure, so a restart cannot reuse acknowledged sequence
+numbers because their checkpoint write failed. Application and guest HEC spool
+directories are exclusively locked; they must be separate, and concurrent
+gateway processes cannot share one, including through directory aliases.</p>
+<p>Separate indexes permit different access and retention policies, but forwarding alone does not establish those policies, tamper protection, review procedures or full NATO compliance. Verify both streams end to end in the deployed Splunk instance, including failure/recovery behaviour and the controls identified under <a href="#related-requirements-outside-this-comparison">related requirements</a>.</p>
+<h3 id="json-event-examples">JSON event examples<a class="headerlink" href="#json-event-examples" title="Permanent link">&para;</a></h3>
+<p>The following values are <strong>synthetic examples</strong>, not captured production events or evidence of successful delivery. Timestamps, usernames, IP addresses, VM identifiers and sequence numbers are illustrative. The HEC wrapper's <code>index</code>, <code>source</code>, <code>sourcetype</code>, <code>host</code> and numeric Unix-seconds <code>time</code> are routing metadata; its <code>event</code> value is the JSON payload sent for indexing.</p>
+<h4 id="devbox-gateway-application-events-devbox_audit">DevBox-Gateway application events: <code>devbox_audit</code><a class="headerlink" href="#devbox-gateway-application-events-devbox_audit" title="Permanent link">&para;</a></h4>
+<p>A successful login, shown as a complete HEC event object:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="mi">1789898400</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hypervisor-01"</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox-gateway"</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">"sourcetype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox-gateway:audit"</span><span class="p">,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">"index"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox_audit"</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user.login"</span><span class="p">,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="p">}</span>
+</code></pre></div>
+<p>Additional application payload examples show a failed login, VM creation, an RDP connection and disconnection, browser-session expiry, and administrator image upload. With HEC configured, each object below is placed in its own wrapper like the one above with <code>index=devbox_audit</code>. With HEC disabled, each object is written as one local JSON Lines record instead. The array groups examples for documentation only: actual HEC batches concatenate wrapped event objects, not a JSON array.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">[</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T09:59:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user.login"</span><span class="p">,</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"failure"</span><span class="p">,</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span><span class="p">,</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="nt">"operation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"authentication_failed"</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:01:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vm.create"</span><span class="p">,</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span><span class="p">,</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="w">    </span><span class="nt">"vm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:01:30Z"</span><span class="p">,</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"connection.connect"</span><span class="p">,</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span><span class="p">,</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="w">    </span><span class="nt">"vm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="w">    </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rdp"</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:16:30Z"</span><span class="p">,</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"connection.disconnect"</span><span class="p">,</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span><span class="p">,</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="w">    </span><span class="nt">"vm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a><span class="w">    </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rdp"</span><span class="p">,</span>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a><span class="w">    </span><span class="nt">"duration_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">900000</span>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:30:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"user.logout"</span><span class="p">,</span>
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="p">,</span>
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.10"</span><span class="p">,</span>
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a><span class="w">    </span><span class="nt">"operation"</span><span class="p">:</span><span class="w"> </span><span class="s2">"timeout"</span>
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a><span class="w">  </span><span class="p">{</span>
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a><span class="w">    </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T11:00:00Z"</span><span class="p">,</span>
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a><span class="w">    </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a><span class="w">    </span><span class="nt">"msg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"audit"</span><span class="p">,</span>
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a><span class="w">    </span><span class="nt">"action"</span><span class="p">:</span><span class="w"> </span><span class="s2">"admin.base_image.upload"</span><span class="p">,</span>
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a><span class="w">    </span><span class="nt">"user"</span><span class="p">:</span><span class="w"> </span><span class="s2">"operator"</span><span class="p">,</span>
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a><span class="w">    </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a><span class="w">    </span><span class="nt">"source_ip"</span><span class="p">:</span><span class="w"> </span><span class="s2">"192.0.2.20"</span><span class="p">,</span>
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a><span class="w">    </span><span class="nt">"resource_type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"base_image"</span><span class="p">,</span>
+<a id="__codelineno-2-64" name="__codelineno-2-64" href="#__codelineno-2-64"></a><span class="w">    </span><span class="nt">"resource"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ubuntu.qcow2"</span><span class="p">,</span>
+<a id="__codelineno-2-65" name="__codelineno-2-65" href="#__codelineno-2-65"></a><span class="w">    </span><span class="nt">"administrator"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-2-66" name="__codelineno-2-66" href="#__codelineno-2-66"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-2-67" name="__codelineno-2-67" href="#__codelineno-2-67"></a><span class="p">]</span>
+</code></pre></div>
+<h4 id="sauronagent-guest-events-devbox_sauron">SauronAgent guest events: <code>devbox_sauron</code><a class="headerlink" href="#sauronagent-guest-events-devbox_sauron" title="Permanent link">&para;</a></h4>
+<p>Guest HEC payloads retain an additional collector envelope: <code>received_at</code>, trusted <code>source</code> identity and the normalized guest <code>event</code>. The examples below are shortened native x86-64 audit events. Raw records, record-type lists, additional syscall/path details and some process and guest-reported identity fields are omitted for readability; production output preserves raw records by default. The VM owner in <code>source.labels.owner</code> identifies the DevBox-Gateway owner, whereas <code>uid</code> and <code>auid</code> identify guest accounts and must be resolved against guest identity records. Guest-supplied identity under <code>source.reported</code> is not authoritative VM attribution.</p>
+<p>Program execution (<code>process.exec</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="mf">1789898520.318</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sauronagent"</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="nt">"sourcetype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox-gateway:sauron"</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">  </span><span class="nt">"index"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox_sauron"</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="nt">"received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:02:00.318Z"</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">      </span><span class="nt">"cid"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">      </span><span class="nt">"vm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">      </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hypervisor-01"</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">      </span><span class="nt">"uuid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"287548af-9df6-4829-8890-0d8678481827"</span><span class="p">,</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="w">      </span><span class="nt">"labels"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"owner"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="w">      </span><span class="nt">"known"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="w">      </span><span class="nt">"reported"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"hostname"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dev"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="w">    </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="w">      </span><span class="nt">"sequence"</span><span class="p">:</span><span class="w"> </span><span class="mi">1201</span><span class="p">,</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="w">      </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:02:00.312Z"</span><span class="p">,</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"process.exec"</span><span class="p">,</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="w">      </span><span class="nt">"severity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"info"</span><span class="p">,</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="w">      </span><span class="nt">"audit_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1789898520.312:8421"</span><span class="p">,</span>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="w">      </span><span class="nt">"boot_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"8f1d0c1e-2b4a-4a7e-9f31-0d5c6b2a7e10"</span><span class="p">,</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="w">      </span><span class="nt">"pid"</span><span class="p">:</span><span class="w"> </span><span class="mi">4821</span><span class="p">,</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="w">      </span><span class="nt">"uid"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span>
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a><span class="w">      </span><span class="nt">"gid"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span>
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="w">      </span><span class="nt">"auid"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span>
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a><span class="w">      </span><span class="nt">"exe"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/usr/bin/id"</span><span class="p">,</span>
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"id"</span><span class="p">,</span>
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a><span class="w">      </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a><span class="w">      </span><span class="nt">"fields"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a><span class="w">        </span><span class="nt">"arch"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c000003e"</span><span class="p">,</span>
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a><span class="w">        </span><span class="nt">"syscall"</span><span class="p">:</span><span class="w"> </span><span class="s2">"59"</span><span class="p">,</span>
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a><span class="w">        </span><span class="nt">"syscall_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"execve"</span><span class="p">,</span>
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a><span class="w">        </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"exec"</span><span class="p">,</span>
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a><span class="w">        </span><span class="nt">"argv"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"id"</span><span class="p">],</span>
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a><span class="w">        </span><span class="nt">"exit"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a><span class="w">      </span><span class="p">}</span>
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a><span class="p">}</span>
+</code></pre></div>
+<p>Credential-store replacement (<code>file.modify</code>): this example represents a successful <code>rename</code> replacing <code>/etc/shadow</code>, selected by the <code>sauron_credentials</code> watch. It records the operation and paths, not a password, hash, file-content diff or proof of a particular account's password change. <code>uid=0</code> with <code>auid=1000</code> illustrates an elevated process retaining its original login identity.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"time"</span><span class="p">:</span><span class="w"> </span><span class="mf">1789898580.418</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sauronagent"</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">"sourcetype"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox-gateway:sauron"</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">"index"</span><span class="p">:</span><span class="w"> </span><span class="s2">"devbox_sauron"</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">"received_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:03:00.418Z"</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">    </span><span class="nt">"source"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">      </span><span class="nt">"cid"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">      </span><span class="nt">"vm"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice.dev"</span><span class="p">,</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">"host"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hypervisor-01"</span><span class="p">,</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="nt">"uuid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"287548af-9df6-4829-8890-0d8678481827"</span><span class="p">,</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">      </span><span class="nt">"labels"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"owner"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alice"</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">      </span><span class="nt">"known"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">      </span><span class="nt">"reported"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"hostname"</span><span class="p">:</span><span class="w"> </span><span class="s2">"dev"</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="w">    </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="w">      </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="w">      </span><span class="nt">"sequence"</span><span class="p">:</span><span class="w"> </span><span class="mi">1242</span><span class="p">,</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="w">      </span><span class="nt">"timestamp"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-20T10:03:00.412Z"</span><span class="p">,</span>
+<a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="w">      </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"file.modify"</span><span class="p">,</span>
+<a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="w">      </span><span class="nt">"severity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"info"</span><span class="p">,</span>
+<a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="w">      </span><span class="nt">"audit_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1789898580.412:8490"</span><span class="p">,</span>
+<a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="w">      </span><span class="nt">"boot_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"8f1d0c1e-2b4a-4a7e-9f31-0d5c6b2a7e10"</span><span class="p">,</span>
+<a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="w">      </span><span class="nt">"pid"</span><span class="p">:</span><span class="w"> </span><span class="mi">4890</span><span class="p">,</span>
+<a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="w">      </span><span class="nt">"uid"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="w">      </span><span class="nt">"gid"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="w">      </span><span class="nt">"auid"</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span>
+<a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="w">      </span><span class="nt">"exe"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/usr/bin/passwd"</span><span class="p">,</span>
+<a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a><span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"passwd alice"</span><span class="p">,</span>
+<a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a><span class="w">      </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="s2">"success"</span><span class="p">,</span>
+<a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a><span class="w">      </span><span class="nt">"fields"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a><span class="w">        </span><span class="nt">"arch"</span><span class="p">:</span><span class="w"> </span><span class="s2">"c000003e"</span><span class="p">,</span>
+<a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a><span class="w">        </span><span class="nt">"syscall"</span><span class="p">:</span><span class="w"> </span><span class="s2">"82"</span><span class="p">,</span>
+<a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a><span class="w">        </span><span class="nt">"syscall_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rename"</span><span class="p">,</span>
+<a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a><span class="w">        </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sauron_credentials"</span><span class="p">,</span>
+<a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a><span class="w">        </span><span class="nt">"exit"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
+<a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a><span class="w">      </span><span class="p">},</span>
+<a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a><span class="w">      </span><span class="nt">"paths"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"/etc/shadow+"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/etc/shadow"</span><span class="p">]</span>
+<a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a><span class="p">}</span>
+</code></pre></div>
+<p>For both guest examples, HEC <code>time</code> matches the collector's <code>received_at</code>, not the guest-controlled <code>event.timestamp</code>. Inside the indexed JSON payload, the normalized type is <code>event.type</code> and the audit key is <code>event.fields.key</code>; the extra outer <code>event</code> in the examples belongs to the HEC wrapper. <code>result=success</code> describes the audited syscall, not the eventual exit status of the launched program. See the <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/output/sink.go">collector envelope</a>, <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/event.go">event schema</a>, and <a href="https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/internal/event/normalize.go">normalizer</a>.</p>
+<h2 id="remaining-work-before-claiming-compliance">Remaining work before claiming compliance<a class="headerlink" href="#remaining-work-before-claiming-compliance" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Validate deployed end-to-end coverage on the target systems, including event fields, authentication sources, timeouts, storage failures and outages. Live-kernel verification remains outstanding.</li>
+<li>Validate application-spool sizing, filesystem durability, capacity backpressure,
+  disk-error alerting, restart replay and duplicate handling before claiming every
+  required event is retained. HEC mode has no permanent local audit-file copy.</li>
+<li>In application file mode, verify fsync durability, external rotation and
+  retention, failure reporting and the recovery procedure for a rejected audit
+  record. Verify readiness alerts and service-manager recovery on the deployed
+  host, including missing agents, stale inventory, collector exit and pending
+  stream alerts. Listener liveness alone does not establish collection health.</li>
+<li>Integrate external identity and application audit sources for changes outside the covered local Linux mechanisms.</li>
+<li>Obtain Security Authority acceptance of the risk-assessed event inventory and its mapping to the deployed logging coverage.</li>
+</ul>
+<h2 id="related-requirements-outside-this-comparison">Related requirements outside this comparison<a class="headerlink" href="#related-requirements-outside-this-comparison" title="Permanent link">&para;</a></h2>
+<p>Audit protection, restricted log access, retention and review are separate requirements in <strong>§§26.3.2–26.3.5</strong>; adding audit rules does not establish those controls. <a href="https://www.jftc.nato.int/wp-content/uploads/2025/01/AC-35-D-2003-REV5_-_DIRECTIVE_ON_CLASSIFIED_PROJECT_AND_INDUSTRIAL_SECURITY.pdf#page=46">Related clauses</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.top", "navigation.tracking", "navigation.sections", "toc.follow", "content.code.copy", "content.code.annotate", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
