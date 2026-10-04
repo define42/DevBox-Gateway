@@ -1,0 +1,94 @@
+site_name: DevBox Gateway
+site_description: HTTPS and RDP gateway for libvirt-managed Linux desktops with LDAP authentication and guest audit collection.
+site_url: https://define42.github.io/DevBox-Gateway/
+repo_url: https://github.com/define42/DevBox-Gateway
+repo_name: define42/DevBox-Gateway
+edit_uri: edit/main/page/docs/
+
+docs_dir: docs
+
+# Treat incomplete navigation and broken local links as strict-build failures.
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+theme:
+  name: material
+  palette:
+    # Dark mode is the default on first load; the toggle switches to light.
+    - scheme: slate
+      primary: green
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: green
+      accent: green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.top
+    - navigation.tracking
+    - navigation.sections
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Installation:
+      - Overview: installation/index.md
+      - Production walkthrough: installation/production.md
+      - Docker Compose: installation/docker-compose.md
+      - RPM package: installation/rpm.md
+      - Debian package: installation/deb.md
+      - SauronAgent: installation/sauronagent.md
+  - VM images: vm-images.md
+  - Using the gateway:
+      - Dashboard: usage/dashboard.md
+      - RDP connections: usage/rdp.md
+  - Configuration:
+      - Settings reference: configuration/index.md
+      - LDAP: configuration/ldap.md
+      - TLS certificates: configuration/tls.md
+      - Libvirt and storage: configuration/storage.md
+  - Operations:
+      - Audit logs and Splunk: operations/audit-logs.md
+      - SauronAgent guest events: operations/guest-events.md
+      - Health checks: operations/health-checks.md
+  - Security: security.md
+  - HTTP API reference: reference/http-api.md
+  - Development:
+      - Building from source: development/building.md
+      - Testing and linting: development/testing.md
+      - Repository layout: development/repository-layout.md
+      - Documentation: development/documentation.md

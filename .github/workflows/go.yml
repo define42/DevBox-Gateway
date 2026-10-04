@@ -308,15 +308,15 @@ jobs:
             ```
 
             Before starting the gateway, configure libvirt/KVM, a storage pool, and a base image, then edit
-            `/etc/devbox-gateway/devbox-gateway.conf`. Follow the [RPM setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-the-rpm)
-            or [DEB setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-the-deb) for the complete host setup.
+            `/etc/devbox-gateway/devbox-gateway.conf`. Follow the [RPM setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/rpm.md)
+            or [DEB setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/deb.md) for the complete host setup.
             Once configured, enable and start the service:
 
             ```sh
             sudo systemctl enable --now devbox-gateway
             ```
 
-            Separate SauronAgent RPM and DEB packages are described in the [SauronAgent installation guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/README.md#installing-sauronagent).
+            Separate SauronAgent RPM and DEB packages are described in the [SauronAgent installation guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/sauronagent.md).
             The Ubuntu and Rocky Linux images below are guest desktop images and already include the matching SauronAgent.
 
             ### Ubuntu 26.04 XFCE image

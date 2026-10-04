@@ -25,8 +25,8 @@ disables Huma's OpenAPI, documentation and schema endpoints.
 - Ordinary form requests use `application/x-www-form-urlencoded` and have a
   1 MiB body limit. Base-image uploads use the separate multipart limit below.
 
-See [session handling](../internal/session/session.go) and
-[HTTP handlers](../internal/gateway/handlers.go).
+See [session handling](https://github.com/define42/DevBox-Gateway/blob/main/internal/session/session.go) and
+[HTTP handlers](https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers.go).
 
 ## HTTP routes
 
@@ -73,8 +73,8 @@ Dashboard actions normally return `{"ok":true,"message":"..."}` or
 `{"ok":false,"error":"..."}`. Validation failures use `400`, denied actions
 use `403`, creation conflicts use `409`, and operation failures generally use
 `500`. Middleware and WebSocket errors can be redirects or plain text instead.
-See [response types](../internal/dashboard/dashboard.go) and
-[base-image handlers](../internal/gateway/handlers_base_images.go).
+See [response types](https://github.com/define42/DevBox-Gateway/blob/main/internal/dashboard/dashboard.go) and
+[base-image handlers](https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/handlers_base_images.go).
 
 ### VM creation fields
 
@@ -106,7 +106,7 @@ These are illustrative values. Progress describes disk copying. The terminal
 Failures before streaming starts use the ordinary JSON response and status.
 Even when NDJSON was requested, check `Content-Type` before selecting a parser.
 If the connection ends without a result, inspect the inventory before retrying.
-Implementation: [creation stream](../internal/dashboard/creation_stream.go).
+Implementation: [creation stream](https://github.com/define42/DevBox-Gateway/blob/main/internal/dashboard/creation_stream.go).
 
 ### Base-image uploads
 
@@ -114,7 +114,7 @@ Use `.img`, `.qcow2` or `.raw` filenames with QCOW2 content. The upload limit is
 the configured VM disk capacity (`VM_DISK_SIZE_GB`); the HTTP request has an
 additional 1 MiB allowance for multipart overhead. Read `maxUploadBytes` from
 the listing response. Existing filenames are rejected rather than overwritten.
-See [base-image storage](../internal/virt/internal/storage/images.go).
+See [base-image storage](https://github.com/define42/DevBox-Gateway/blob/main/internal/virt/internal/storage/images.go).
 
 ## WebSocket routes
 
@@ -136,9 +136,9 @@ referrer.
 Dashboard control sockets close at the session deadline. Existing serial/VNC
 streams do not close solely because that deadline passes; explicit logout
 requests closure of tracked connections. For message formats and connection
-limits, see [dashboard sockets](../internal/console/dashboard_socket.go),
-[serial](../internal/console/serial.go), [VNC](../internal/console/vnc.go) and
-[shared WebSocket handling](../internal/console/console.go).
+limits, see [dashboard sockets](https://github.com/define42/DevBox-Gateway/blob/main/internal/console/dashboard_socket.go),
+[serial](https://github.com/define42/DevBox-Gateway/blob/main/internal/console/serial.go), [VNC](https://github.com/define42/DevBox-Gateway/blob/main/internal/console/vnc.go) and
+[shared WebSocket handling](https://github.com/define42/DevBox-Gateway/blob/main/internal/console/console.go).
 
 ## Health and readiness checks
 
@@ -202,7 +202,7 @@ also bounded by the effective deduplication window; its overflow requires the
 same recovery. Investigate delivery before restarting: restart discards pending
 copies and health state without establishing that the records arrived.
 Application audit persistence failures also require investigation and restart. See
-[output recovery](../SauronAgent/docs/deployment.md#output-failure-recovery).
+[output recovery](https://github.com/define42/DevBox-Gateway/blob/main/SauronAgent/docs/deployment.md#output-failure-recovery).
 An unexpected collector exit terminates the gateway with exit status 1.
 
 Readiness reports observed failures; it does not probe LDAP, free disk space or
@@ -218,5 +218,5 @@ restart. Other readiness failures, including the delivery timeout alone, do
 not reject otherwise admitted activity. Already-running operations can finish;
 if their audit write hits the hard limit it fails promptly and latches the
 persistence failure rather than waiting indefinitely.
-See [readiness handling](../internal/gateway/readiness.go) and
-[audit delivery boundaries](../compliance.md#delivery-and-compliance-boundaries).
+See [readiness handling](https://github.com/define42/DevBox-Gateway/blob/main/internal/gateway/readiness.go) and
+[audit delivery boundaries](https://github.com/define42/DevBox-Gateway/blob/main/compliance.md#delivery-and-compliance-boundaries).

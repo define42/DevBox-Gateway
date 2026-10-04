@@ -130,7 +130,7 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
 SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY=false
 ```
 
-A URL without a path uses `/services/collector/event`. Provision the indexes and allow the corresponding HEC tokens to write to them; DevBox-Gateway does not create Splunk indexes. The bundled development Splunk instance provisions both through [post-setup tasks](testsplunk/create_index.yml). Use HTTPS with a trusted certificate. For token setup and optional indexer acknowledgement, see the [HEC setup instructions](README.md#forwarding-to-splunk-hec).
+A URL without a path uses `/services/collector/event`. Provision the indexes and allow the corresponding HEC tokens to write to them; DevBox-Gateway does not create Splunk indexes. The bundled development Splunk instance provisions both through [post-setup tasks](testsplunk/create_index.yml). Use HTTPS with a trusted certificate. For token setup and optional indexer acknowledgement, see the [HEC setup instructions](page/docs/operations/audit-logs.md#forwarding-to-splunk-hec).
 
 HEC forwarding is optional and disabled when its endpoint is unset; remove the associated token/index settings and leave its ACK setting false when disabling it. An enabled ACK setting without that stream's endpoint fails startup. Application audits then use `AUDIT_LOG_FILE`. With application HEC configured, that file setting is entirely ignored: DevBox-Gateway does not create, open or append to the application audit file, and existing files are not deleted. Invalid HEC configuration fails startup without switching to file logging.
 

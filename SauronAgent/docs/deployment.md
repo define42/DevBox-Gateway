@@ -43,7 +43,7 @@ DevBox Gateway always runs its own collector on AF_VSOCK port 9000. On a
 gateway host, skip the standalone collector setup below and leave `sauronhost`
 disabled to avoid a port conflict. The gateway resolves guest CIDs through
 libvirt, so no static `vms:` map is needed. Configure output using the
-[gateway guest-event settings](../../README.md#sauronagent-guest-events).
+[gateway guest-event settings](../../page/docs/operations/guest-events.md).
 
 For a hypervisor without DevBox Gateway:
 
@@ -458,7 +458,7 @@ described below. Missing agents do not restart the gateway. An unexpected
 collector exit makes the gateway exit with status 1 for service-manager
 recovery. `/api/health` checks
 only HTTP listener liveness. See the gateway's
-[complete probe contract](../../docs/http-api.md#health-and-readiness-checks)
+[complete probe contract](../../page/docs/reference/http-api.md#health-and-readiness-checks)
 for application audit persistence failures, which have different recovery rules.
 
 Loss and resumption alerts remain queued until all outputs accept them. Failed

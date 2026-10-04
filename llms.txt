@@ -9,10 +9,25 @@ source before changing documentation.
 
 ## Guides
 
-- [README](README.md): Installation, configuration, VM storage, RDP access, audit delivery, and operational limits.
+- [README](README.md): Project overview and links to documentation.
+- [Documentation index](page/docs/index.md): Installation, usage, configuration, operations, development, and reference guides.
+- [Installation](page/docs/installation/index.md): Deployment choices and links to Docker Compose, RPM, DEB, and SauronAgent setup.
+- [Production walkthrough](page/docs/installation/production.md): Native RPM setup, LDAP/TLS configuration, first image, startup, administrator login, and image uploads.
+- [VM images](page/docs/vm-images.md): Image variants, release downloads, reconstruction, and checksums.
+- [Dashboard](page/docs/usage/dashboard.md): Login, VM creation, lifecycle controls, and browser consoles.
+- [RDP access](page/docs/usage/rdp.md): Client setup, routing tokens, connection authorization, and TLS requirements.
+- [Configuration](page/docs/configuration/index.md): Config file and environment precedence, settings, and defaults.
+- [VM storage](page/docs/configuration/storage.md): Libvirt, network isolation, base images, quotas, and persistent state.
+- [Application audit logs](page/docs/operations/audit-logs.md): Local logging, Splunk HEC, acknowledgements, and delivery recovery.
+- [Guest events](page/docs/operations/guest-events.md): Embedded SauronAgent collection, identity, delivery, and readiness.
+- [Health checks](page/docs/operations/health-checks.md): Liveness, readiness, and operational limits.
+- [Building](page/docs/development/building.md): Gateway, packages, VM images, and dashboard builds.
+- [Testing](page/docs/development/testing.md): Tests, linting, prerequisites, and focused checks.
+- [Architecture](page/docs/architecture.md): Gateway components, protocol dispatch, and shutdown.
+- [Security](page/docs/security.md): Trust boundaries, connection authorization, and credential handling.
 - [Contributing](CONTRIBUTING.md): Development prerequisites, build commands, serialized integration tests, and review expectations.
 - [Repository instructions](AGENTS.md): Coding and configuration rules for changes in this repository.
-- [HTTP endpoints](docs/http-api.md): Browser routes, sessions, form fields, WebSockets, and health-check scope.
+- [HTTP endpoints](page/docs/reference/http-api.md): Browser routes, sessions, form fields, WebSockets, and health-check scope.
 - [SauronAgent](SauronAgent/README.md): Guest agent and standalone collector setup and build commands.
 - [SauronAgent deployment](SauronAgent/docs/deployment.md): Configuration, sizing, monitoring, and recovery.
 - [SauronAgent protocol](SauronAgent/docs/protocol.md): Framing, sequencing, acknowledgements, and replay.

@@ -21,7 +21,7 @@ Run the commands below from the repository root unless a command uses
   is unavailable.
 
 Use a development hypervisor: integration tests create and remove real libvirt
-resources. See [libvirt and VM storage](README.md#libvirt-and-vm-storage) for the
+resources. See [libvirt and VM storage](page/docs/configuration/storage.md) for the
 runtime requirements. The [CI workflow](.github/workflows/go.yml) shows the test
 host setup; its relaxed libvirt permissions are for an isolated CI runner.
 Initial tests may download a large VM image and container images.
@@ -45,7 +45,7 @@ tsc -p tsconfig.json
 ```
 
 To run the local stack, first prepare the host and base image described in
-[Quick start](README.md#quick-start-docker-compose), then run:
+[Quick start](page/docs/installation/docker-compose.md), then run:
 
 ```sh
 make run
@@ -135,14 +135,17 @@ go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 `go vet` for SauronAgent. `make gosec` scans the gateway packages; the root vet
 and vulnerability commands cover the full module. Pull-request CI also builds
 and validates gateway deb and RPM packages with `make deb rpm VERSION=0.0.0`.
-See [building from source](README.md#building-from-source) for packaging details.
+See [building from source](page/docs/development/building.md) for packaging details.
 
 ## Code and documentation
 
 - Use `gofmt`, idiomatic Go names, focused handlers and helpers, and co-located
   `*_test.go` files. Prefer table-driven tests for branching behavior.
 - Explain constraints and failure behavior in exported API comments. Update the
-  README and relevant SauronAgent docs when configuration or behavior changes.
+  relevant guides in [page/docs/](page/docs/index.md) and SauronAgent docs when
+  configuration or behavior changes. Keep the README focused on the project
+  overview and getting started. Follow the [documentation development guide](page/docs/development/documentation.md)
+  to preview the site and run its strict build before submitting documentation changes.
 - Define environment-backed parameters in `internal/config/config.go` using
   its settings pattern. Do not read environment variables directly in feature
   code or add global configuration parameters.
