@@ -1,4 +1,4 @@
-name: Ubuntu Resolute XFCE image
+name: Ubuntu 26.04 XFCE image
 
 on:
   workflow_call:
@@ -11,13 +11,13 @@ on:
     branches: [main]
     paths:
       - .github/workflows/go.yml
-      - .github/workflows/ubuntu-resolute-xfce.yml
+      - .github/workflows/ubuntu26.04-xfce.yml
       - Makefile
       - go.mod
       - go.sum
       - images/Makefile
       - images/scripts/**
-      - images/ubuntu-resolute-xfce/**
+      - images/ubuntu26.04-xfce/**
       - SauronAgent/**
       - cmd/mksauronagent/**
       - internal/sauronpkg/**
@@ -36,7 +36,7 @@ permissions:
 
 concurrency:
   # Include the caller workflow so manual builds do not queue release builds.
-  group: ubuntu-resolute-xfce-${{ github.workflow }}-${{ github.ref }}
+  group: ubuntu26.04-xfce-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
@@ -86,18 +86,18 @@ jobs:
           sudo apt-get install -y qemu-system-x86 qemu-utils xorriso
 
       - name: Check image recipe
-        run: make image-check IMAGE=ubuntu-resolute-xfce
+        run: make image-check IMAGE=ubuntu26.04-xfce
 
       - name: Build image and SauronAgent from this checkout
-        run: make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION="$IMAGE_VERSION"
+        run: make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION="$IMAGE_VERSION"
 
       - name: Boot image and check guest services
-        run: make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION="$IMAGE_VERSION"
+        run: make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION="$IMAGE_VERSION"
 
       - name: Verify and split image into release assets
-        working-directory: dist/images/ubuntu-resolute-xfce
+        working-directory: dist/images/ubuntu26.04-xfce
         run: |
-          image="ubuntu-resolute-xfce-v${IMAGE_VERSION}.img"
+          image="ubuntu26.04-xfce-v${IMAGE_VERSION}.img"
           sha256sum --check "$image.sha256"
           test -s "$image.manifest.json"
           # Each GitHub release asset must be smaller than 2 GiB.
@@ -109,11 +109,11 @@ jobs:
       - name: Upload image build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ubuntu-resolute-xfce-v${{ steps.version.outputs.version }}
+          name: ubuntu26.04-xfce-v${{ steps.version.outputs.version }}
           path: |
-            dist/images/ubuntu-resolute-xfce/*.img.part-*
-            dist/images/ubuntu-resolute-xfce/*.img.sha256
-            dist/images/ubuntu-resolute-xfce/*.img.manifest.json
+            dist/images/ubuntu26.04-xfce/*.img.part-*
+            dist/images/ubuntu26.04-xfce/*.img.sha256
+            dist/images/ubuntu26.04-xfce/*.img.manifest.json
           if-no-files-found: error
           overwrite: true
           compression-level: 0

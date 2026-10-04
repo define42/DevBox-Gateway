@@ -1,6 +1,6 @@
-# Ubuntu Resolute XFCE image
+# Ubuntu 26.04 XFCE image
 
-Builds an Ubuntu Resolute (26.04) amd64 desktop image for DevBox Gateway from
+Builds an Ubuntu 26.04 LTS amd64 desktop image for DevBox Gateway from
 Ubuntu's official server cloud image. The recipe, desktop assets, and guest
 agent are built together from this repository.
 
@@ -9,14 +9,17 @@ agent are built together from this repository.
 Run from the repository root:
 
 ```sh
-make image-check IMAGE=ubuntu-resolute-xfce
-make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
-make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+make image-check IMAGE=ubuntu26.04-xfce
+make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 ```
 
 `IMAGE_VERSION` must be a numeric `MAJOR.MINOR.PATCH` version. It also becomes
 the version of the SauronAgent deb installed in the image. It defaults to the
 root `VERSION` setting, or `0.0.0` when neither is specified.
+
+The `26.04` in `ubuntu26.04-xfce` identifies the Ubuntu release. The `v0.0.0`
+suffix in an image filename identifies the gateway and SauronAgent release.
 
 The build requires Linux x86_64, access to Docker, Bash, curl, Python 3, `flock`,
 `sha256sum`, Git, Make, and the Go toolchain specified in the root `go.mod`.
@@ -55,23 +58,23 @@ desktop configuration files define the guest. `smoke-test.sh` boots the result.
 Keep source assets here; generated files are ignored by Git.
 
 For `IMAGE_VERSION=0.0.0`, the output directory is
-`dist/images/ubuntu-resolute-xfce/`:
+`dist/images/ubuntu26.04-xfce/`:
 
 ```text
-ubuntu-resolute-xfce-v0.0.0.img
-ubuntu-resolute-xfce-v0.0.0.img.sha256
-ubuntu-resolute-xfce-v0.0.0.img.manifest.json
+ubuntu26.04-xfce-v0.0.0.img
+ubuntu26.04-xfce-v0.0.0.img.sha256
+ubuntu26.04-xfce-v0.0.0.img.manifest.json
 ```
 
 The manifest records the source image URL and checksum, Git commit and dirty
 state, builder container digest, image version, and SauronAgent version.
-Source downloads are cached by checksum in `.cache/images/ubuntu-resolute-xfce/`;
+Source downloads are cached by checksum in `.cache/images/ubuntu26.04-xfce/`;
 temporary build workspaces are removed when the build exits.
 
 ## GitHub Actions and releases
 
 The [gateway release workflow](../../.github/workflows/go.yml) calls the
-[image workflow](../../.github/workflows/ubuntu-resolute-xfce.yml) on pushes to
+[image workflow](../../.github/workflows/ubuntu26.04-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
 After the gateway build and both Ubuntu and Rocky image boot tests succeed,
@@ -90,7 +93,7 @@ and both sidecars into one directory. Substitute the release's version, then
 reconstruct and verify:
 
 ```sh
-image="ubuntu-resolute-xfce-v1.2.3.img"
+image="ubuntu26.04-xfce-v1.2.3.img"
 cat "$image".part-* > "$image"
 sha256sum --check "$image.sha256"
 ```
@@ -106,7 +109,7 @@ Docker Compose setup, after a local build:
 ```sh
 sudo install -d /data/baseimages
 sudo install -m 0644 \
-  dist/images/ubuntu-resolute-xfce/ubuntu-resolute-xfce-v0.0.0.img \
+  dist/images/ubuntu26.04-xfce/ubuntu26.04-xfce-v0.0.0.img \
   /data/baseimages/
 ```
 

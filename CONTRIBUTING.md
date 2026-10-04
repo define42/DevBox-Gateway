@@ -74,12 +74,12 @@ need the gateway's libvirt headers. Deployment and protocol details are in
 
 Image sources live in `images/<variant>/`; generated disks belong in
 `dist/images/`, and downloads are cached in `.cache/images/`. For the Ubuntu
-Resolute XFCE image, run:
+26.04 XFCE image, run:
 
 ```sh
-make image-check IMAGE=ubuntu-resolute-xfce
-make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
-make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+make image-check IMAGE=ubuntu26.04-xfce
+make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 ```
 
 Use `IMAGE=rocky9-xfce` with the same targets to build and test Rocky Linux 9 XFCE.
@@ -91,7 +91,7 @@ checkout and installs it into the selected desktop image. KVM is optional but
 speeds up the build.
 The smoke test needs host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`
 and boots a temporary overlay without modifying the base image. See the
-[Ubuntu](images/ubuntu-resolute-xfce/README.md) and
+[Ubuntu](images/ubuntu26.04-xfce/README.md) and
 [Rocky](images/rocky9-xfce/README.md) image READMEs for artifact paths and
 guest configuration.
 
@@ -157,7 +157,7 @@ screenshots when the dashboard or login flow changes.
 The [release workflow](.github/workflows/go.yml) creates version tags and GitHub
 Releases with generated release notes, builds gateway and SauronAgent packages,
 and publishes gateway container images after pushes to `main`. It calls the
-[Ubuntu image workflow](.github/workflows/ubuntu-resolute-xfce.yml) and
+[Ubuntu image workflow](.github/workflows/ubuntu26.04-xfce.yml) and
 [Rocky image workflow](.github/workflows/rocky9-xfce.yml) with the same version
 to build and boot-test both images. Release publication waits for the gateway
 and both image jobs to succeed, then attaches the packages, split image

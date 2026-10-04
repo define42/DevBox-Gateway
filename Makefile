@@ -7,7 +7,7 @@ VERSION  ?= 0.0.0
 RELEASE  ?= 1
 ARCH     ?= x86_64
 DEB_ARCH ?= amd64
-IMAGE ?= ubuntu-resolute-xfce
+IMAGE ?= ubuntu26.04-xfce
 IMAGE_VERSION ?= $(VERSION)
 BINARY   := dist/devbox-gateway
 GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
@@ -22,7 +22,7 @@ SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,
 
 # VM image builds are explicit and independent of gateway/container builds.
 image image-check image-test:
-	@case "$(IMAGE)" in ubuntu-resolute-xfce|rocky9-xfce) ;; *) echo "Unsupported IMAGE: $(IMAGE)" >&2; exit 1;; esac
+	@case "$(IMAGE)" in ubuntu26.04-xfce|rocky9-xfce) ;; *) echo "Unsupported IMAGE: $(IMAGE)" >&2; exit 1;; esac
 	$(MAKE) -C images "$@" IMAGE="$(IMAGE)" IMAGE_VERSION="$(IMAGE_VERSION)"
 
 # build compiles the UI and a native (CGO/libvirt-linked) binary into dist/.

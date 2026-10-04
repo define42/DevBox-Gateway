@@ -1162,7 +1162,7 @@ and default filenames (for example, `-format deb -arch x86_64` produces `amd64`)
 ### Building VM images
 
 VM image recipes live under [`images/`](images), with one directory per image
-variant. The Ubuntu Resolute XFCE and Rocky Linux 9 XFCE recipes build standalone
+variant. The Ubuntu 26.04 XFCE and Rocky Linux 9 XFCE recipes build standalone
 QCOW2 desktop disks and install SauronAgent from the same checkout, enabling its
 guest service.
 Image builds run separately from gateway and container builds.
@@ -1176,9 +1176,9 @@ On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
 `sha256sum`, Git, Make, and the Go version specified in `go.mod`, run:
 
 ```sh
-make image-check IMAGE=ubuntu-resolute-xfce
-make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
-make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+make image-check IMAGE=ubuntu26.04-xfce
+make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 
 make image-check IMAGE=rocky9-xfce
 make image IMAGE=rocky9-xfce IMAGE_VERSION=0.0.0
@@ -1196,7 +1196,7 @@ Output goes to `dist/images/<variant>/` as
 `.img.manifest.json` sidecars. The manifest records the build commit, source
 checksum, builder container, and SauronAgent version. Downloads are cached under
 `.cache/images/`. Both directories are ignored by Git. See the
-[Ubuntu image README](images/ubuntu-resolute-xfce/README.md) and
+[Ubuntu image README](images/ubuntu26.04-xfce/README.md) and
 [Rocky image README](images/rocky9-xfce/README.md) for contents, release
 downloads, and gateway installation.
 
@@ -1272,7 +1272,7 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 ├── images/
 │   ├── Makefile     Image build, recipe validation, and boot smoke-test targets.
 │   ├── rocky9-xfce/  Rocky Linux 9 XFCE image recipe and desktop assets.
-│   └── ubuntu-resolute-xfce/  Build scripts, guest customization recipe, and desktop assets.
+│   └── ubuntu26.04-xfce/  Build scripts, guest customization recipe, and desktop assets.
 ├── dist/images/     Generated QCOW2 images, checksums, and manifests (ignored).
 ├── .cache/images/   Downloaded base images and build workspaces (ignored).
 ├── ui/              TypeScript sources for the dashboard.

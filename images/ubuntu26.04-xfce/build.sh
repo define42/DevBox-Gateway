@@ -42,12 +42,12 @@ if [[ $(uname -m) != x86_64 ]]; then
     exit 1
 fi
 
-cache_dir="$repo_dir/.cache/images/ubuntu-resolute-xfce"
-output_dir="$repo_dir/dist/images/ubuntu-resolute-xfce"
+cache_dir="$repo_dir/.cache/images/ubuntu26.04-xfce"
+output_dir="$repo_dir/dist/images/ubuntu26.04-xfce"
 mkdir -p "$cache_dir" "$output_dir"
 # The agent package and final filenames are shared by builds of this recipe.
 exec 9>"$cache_dir/build.lock"
-flock -n 9 || { echo "Another ubuntu-resolute-xfce image build is running." >&2; exit 1; }
+flock -n 9 || { echo "Another ubuntu26.04-xfce image build is running." >&2; exit 1; }
 work_dir=$(mktemp -d "$cache_dir/build.XXXXXXXX")
 cleanup() {
     local status=$?
@@ -99,7 +99,7 @@ fi
 docker run "${docker_args[@]}" "$tools_id" \
     bash /recipe/customize.sh "$(id -u):$(id -g)"
 
-image_name="ubuntu-resolute-xfce-v$version.img"
+image_name="ubuntu26.04-xfce-v$version.img"
 mv -- "$work_dir/desktop.img" "$work_dir/$image_name"
 (
     cd -- "$work_dir"
@@ -119,7 +119,7 @@ import sys
 destination, version, commit, dirty, source, checksum, tools = sys.argv[1:]
 with open(destination, "w", encoding="utf-8") as manifest:
     json.dump({
-        "image": "ubuntu-resolute-xfce",
+        "image": "ubuntu26.04-xfce",
         "version": version,
         "architecture": "amd64",
         "format": "qcow2",

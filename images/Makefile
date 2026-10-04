@@ -1,4 +1,4 @@
-IMAGE ?= ubuntu-resolute-xfce
+IMAGE ?= ubuntu26.04-xfce
 IMAGE_VERSION ?= 0.0.0
 
 .PHONY: image image-check image-test
