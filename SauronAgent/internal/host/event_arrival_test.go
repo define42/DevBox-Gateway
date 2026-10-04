@@ -62,6 +62,8 @@ func testReceivedEventAgainstGap(t *testing.T, failArrival bool) {
 	}
 	second := h.dial(102, true)
 	second.handshake(&protocol.Hello{BootID: "boot-a"})
+	// READY precedes replay checks; finish the handshake before creating the gap.
+	second.ping()
 	first.sendEvent(3, "boot-a")
 	select {
 	case <-sink.entered:
