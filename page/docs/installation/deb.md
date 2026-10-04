@@ -2,8 +2,8 @@
 
 After the Debian-specific package and libvirt steps below, the
 [production walkthrough](production.md#4-configure-dns-tls-and-network-access)
-covers gateway configuration, the first base image, administrator login, and
-image uploads. Use your Debian host's firewall and certificate-trust tools in
+covers gateway configuration, startup, administrator login, and the first
+image upload. Use your Debian host's firewall and certificate-trust tools in
 place of the walkthrough's Rocky Linux commands.
 
 For a native deployment on Debian 12 (amd64), each tagged release also publishes
@@ -48,10 +48,9 @@ installation when the available libraries cannot load it.
 2. **Satisfy the native runtime prerequisites**: a running libvirt daemon
    (version 6.2.0 or newer), QEMU/KVM, and the `vhost_vsock` kernel module loaded
    for guest-event collection. Ensure the service can write to `DATA_ROOT_DIR`
-   (native default `/var/lib/libvirt/devbox-gateway`) and place at least one
-   [prebuilt VM image](../vm-images.md#downloading-vm-images) in
-   `<DATA_ROOT_DIR>/baseimages` before starting the gateway. It refuses to start
-   with an empty image library. The gateway defines and starts its storage pool
+   (native default `/var/lib/libvirt/devbox-gateway`) and `BASE_IMAGE_DIR`.
+   Startup creates the base-image directory if missing and accepts an empty
+   library. The gateway defines and starts its storage pool
    when needed; see [Libvirt and VM storage](../configuration/storage.md#libvirt-and-vm-storage)
    for the host setup.
 
@@ -73,7 +72,9 @@ installation when the available libraries cannot load it.
 
    Point the [LDAP settings](../configuration/ldap.md#ldap) at your directory;
    the native package does not provide the Compose stack's LDAP server or test
-   accounts. Every setting is documented inline and in the
+   accounts. Set `ADMIN_GROUP` so a directory administrator can upload the
+   first image; that user must also satisfy `LDAP_REQUIRED_GROUPS` if set.
+   Every setting is documented inline and in the
    [configuration reference](../configuration/index.md#configuration).
    Splunk is optional: the native defaults write application audit and guest
    events to local files. See [Audit logs and Splunk](../operations/audit-logs.md#audit-logs-and-splunk)
@@ -94,6 +95,11 @@ installation when the available libraries cannot load it.
    systemctl status devbox-gateway
    journalctl -u devbox-gateway -f
    ```
+
+6. **Upload a base image**: sign in as an administrator, open **Admin → Base
+   Images**, and upload a [downloaded and verified image](../vm-images.md).
+   VM creation requires a valid image. You can alternatively copy one into
+   `BASE_IMAGE_DIR` on the host.
 
 ## Upgrade or remove
 

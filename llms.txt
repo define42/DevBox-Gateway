@@ -12,8 +12,8 @@ source before changing documentation.
 - [README](README.md): Project overview and links to documentation.
 - [Documentation index](page/docs/index.md): Installation, usage, configuration, operations, development, and reference guides.
 - [Installation](page/docs/installation/index.md): Deployment choices and links to Docker Compose, RPM, DEB, and SauronAgent setup.
-- [Production walkthrough](page/docs/installation/production.md): Native RPM setup, LDAP/TLS configuration, first image, startup, administrator login, and image uploads.
-- [VM images](page/docs/vm-images.md): Image variants, release downloads, reconstruction, and checksums.
+- [Production walkthrough](page/docs/installation/production.md): Native RPM setup, LDAP/TLS configuration, startup with an empty library, administrator login, and first-image upload.
+- [VM images](page/docs/vm-images.md): Image variants, release downloads, reconstruction, checksums, administrator uploads, and optional host imports.
 - [Dashboard](page/docs/usage/dashboard.md): Login, VM creation, lifecycle controls, and browser consoles.
 - [RDP access](page/docs/usage/rdp.md): Client setup, routing tokens, connection authorization, and TLS requirements.
 - [Configuration](page/docs/configuration/index.md): Config file and environment precedence, settings, and defaults.

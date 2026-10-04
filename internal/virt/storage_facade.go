@@ -39,11 +39,6 @@ func BaseImageAvailableBytes(settings *config.Settings) (uint64, error) {
 	return storage.BaseImageAvailableBytes(settings)
 }
 
-// EnsureBaseImagesAvailable returns an error when no selectable base image exists.
-func EnsureBaseImagesAvailable(settings *config.Settings) error {
-	return storage.EnsureBaseImagesAvailable(settings)
-}
-
 // StoreBaseImage streams a base image into the configured library without
 // overwriting and notifies dashboard subscribers after a successful upload.
 func StoreBaseImage(settings *config.Settings, name string, src io.Reader, maxBytes int64) (int64, error) {

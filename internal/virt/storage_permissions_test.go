@@ -3,6 +3,7 @@ package virt
 import (
 	"context"
 	"encoding/xml"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,27 +230,43 @@ func assertStorageVolXMLPermissions(t *testing.T, permissions *storageVolumePerm
 	}
 }
 
-func TestInitRequiresBaseImage(t *testing.T) {
-	t.Run("with image", func(t *testing.T) {
-		rootDir := t.TempDir()
-		settings := newInitSettings(t, rootDir)
-		poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
-		t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+func TestInitBaseImageLibrary(t *testing.T) {
+	tests := []struct {
+		name      string
+		withImage bool
+		createDir bool
+	}{
+		{name: "populated", withImage: true},
+		{name: "empty", createDir: true},
+		{name: "missing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := newInitSettings(t, t.TempDir())
+			poolName := settings.Get(config.VIRT_STORAGE_POOL_NAME)
+			t.Cleanup(func() { cleanupStoragePool(t, poolName) })
+			dir := config.BaseImageDir(settings)
+			if tt.withImage {
+				seedDummyBaseImage(t, settings)
+			}
+			if tt.createDir {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("create empty image directory: %v", err)
+				}
+			}
+			assertInitBaseImageLibrary(t, settings)
+		})
+	}
+}
 
-		if err := Init(settings); err != nil {
-			t.Fatalf("Init with a populated image library: %v", err)
-		}
-	})
-
-	t.Run("empty library", func(t *testing.T) {
-		settings := config.NewSettings(false)
-		if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
-			t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
-		}
-		if err := Init(settings); err == nil {
-			t.Fatal("expected Init to fail with an empty base image library")
-		}
-	})
+func assertInitBaseImageLibrary(t *testing.T, settings *config.Settings) {
+	t.Helper()
+	if err := Init(settings); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if info, err := os.Stat(config.BaseImageDir(settings)); err != nil || !info.IsDir() {
+		t.Fatalf("expected image directory after Init, stat error: %v", err)
+	}
 }
 
 func TestSingletonWorkerStop(t *testing.T) {

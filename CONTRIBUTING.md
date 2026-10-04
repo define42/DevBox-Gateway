@@ -44,7 +44,7 @@ bundle in the same change:
 tsc -p tsconfig.json
 ```
 
-To run the local stack, first prepare the host and base image described in
+To run the local stack, first prepare the host described in
 [Quick start](page/docs/installation/docker-compose.md), then run:
 
 ```sh

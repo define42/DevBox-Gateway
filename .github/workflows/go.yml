@@ -307,14 +307,18 @@ jobs:
             sudo apt install ./devbox-gateway_${{ needs.build.outputs.version }}_amd64.deb
             ```
 
-            Before starting the gateway, configure libvirt/KVM, a storage pool, and a base image, then edit
+            Before starting the gateway, configure libvirt/KVM and directory access, then edit
             `/etc/devbox-gateway/devbox-gateway.conf`. Follow the [RPM setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/rpm.md)
             or [DEB setup guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/deb.md) for the complete host setup.
-            Once configured, enable and start the service:
+            Set `ADMIN_GROUP` to grant a directory user administrator access. The base-image library may be empty;
+            startup creates its directory if missing. Once configured, enable and start the service:
 
             ```sh
             sudo systemctl enable --now devbox-gateway
             ```
+
+            Sign in as an administrator and open **Admin → Base Images** to upload the first verified, reconstructed image.
+            VM creation requires a valid base image. Copying an image into `BASE_IMAGE_DIR` on the host is an alternative.
 
             Separate SauronAgent RPM and DEB packages are described in the [SauronAgent installation guide](https://github.com/${{ github.repository }}/blob/${{ needs.build.outputs.tag }}/page/docs/installation/sauronagent.md).
             The Ubuntu and Rocky Linux images below are guest desktop images and already include the matching SauronAgent.

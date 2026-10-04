@@ -112,7 +112,30 @@ func TestLoadBootSettingsRejectsInvalidLDAPUsernameAttribute(t *testing.T) {
 
 func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 	requireSauronVSock(t)
+	tests := []struct {
+		name      string
+		createDir bool
+	}{
+		{name: "existing empty image directory", createDir: true},
+		{name: "missing image directory"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mcovAssertBootWithEmptyImageDir(t, tt.createDir)
+		})
+	}
+}
+
+func mcovAssertBootWithEmptyImageDir(t *testing.T, createDir bool) {
+	t.Helper()
 	mcovBootEnv(t)
+	baseImageDir := filepath.Join(t.TempDir(), "baseimages")
+	t.Setenv(config.BASE_IMAGE_DIR, baseImageDir)
+	if createDir {
+		if err := os.Mkdir(baseImageDir, 0o755); err != nil {
+			t.Fatalf("create empty image directory: %v", err)
+		}
+	}
 
 	gateway, err := bootGateway()
 	if err != nil {
@@ -120,6 +143,13 @@ func TestMcovBootGatewaySuccessAndClose(t *testing.T) {
 	}
 	defer func() { _ = gateway.Close() }()
 
+	images, err := os.ReadDir(baseImageDir)
+	if err != nil {
+		t.Fatalf("read initialized image directory: %v", err)
+	}
+	if len(images) != 0 {
+		t.Fatalf("expected startup with an empty image directory, got %v", images)
+	}
 	addr, ok := gateway.listener.Addr().(*net.TCPAddr)
 	if !ok || addr.Port == 0 {
 		t.Fatalf("expected bound TCP listener, got %v", gateway.listener.Addr())

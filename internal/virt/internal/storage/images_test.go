@@ -20,7 +20,7 @@ func newBaseImageSettings(t *testing.T, files map[string][]byte) *config.Setting
 	if err := settings.OverwriteForTestString(config.DATA_ROOT_DIR, t.TempDir()); err != nil {
 		t.Fatalf("overwrite DATA_ROOT_DIR: %v", err)
 	}
-	if len(files) == 0 {
+	if files == nil {
 		return settings
 	}
 
@@ -270,19 +270,63 @@ func TestListBaseImagesMissingDir(t *testing.T) {
 	}
 }
 
-func TestEnsureBaseImagesAvailable(t *testing.T) {
-	if err := EnsureBaseImagesAvailable(newBaseImageSettings(t, nil)); err == nil {
-		t.Fatal("expected error when the base image library is empty")
+func TestEnsureBaseImageDir(t *testing.T) {
+	tests := []struct {
+		name       string
+		files      map[string][]byte
+		customDir  bool
+		wantImages int
+	}{
+		{name: "missing directory"},
+		{name: "empty directory", files: map[string][]byte{}},
+		{name: "custom missing directory", customDir: true},
+		{name: "invalid images ignored", files: map[string][]byte{"base.img": []byte("not qcow2")}},
+		{name: "existing image", files: map[string][]byte{"base.img": qcow2TestData("data")}, wantImages: 1},
 	}
-
-	invalid := newBaseImageSettings(t, map[string][]byte{"base.img": []byte("not qcow2")})
-	if err := EnsureBaseImagesAvailable(invalid); err == nil {
-		t.Fatal("expected error when the library contains only an invalid image")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := newBaseImageSettings(t, tt.files)
+			if tt.customDir {
+				dir := filepath.Join(t.TempDir(), "custom", "images")
+				if err := settings.OverwriteForTestString(config.BASE_IMAGE_DIR, dir); err != nil {
+					t.Fatalf("set custom image directory: %v", err)
+				}
+			}
+			assertPreparedBaseImageDir(t, settings, tt.wantImages)
+		})
 	}
+}
 
-	populated := newBaseImageSettings(t, map[string][]byte{"base.img": qcow2TestData("data")})
-	if err := EnsureBaseImagesAvailable(populated); err != nil {
-		t.Fatalf("expected success with one image, got %v", err)
+func assertPreparedBaseImageDir(t *testing.T, settings *config.Settings, wantImages int) {
+	t.Helper()
+	if err := EnsureBaseImageDir(settings); err != nil {
+		t.Fatalf("prepare image directory: %v", err)
+	}
+	dir := config.BaseImageDir(settings)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("expected an image directory at %q, stat error: %v", dir, err)
+	}
+	images, err := ListBaseImages(settings)
+	if err != nil || len(images) != wantImages {
+		t.Fatalf("ListBaseImages = %v, %v; want %d images", images, err, wantImages)
+	}
+}
+
+func TestEnsureBaseImageDirRejectsUnreadableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read directories regardless of their permission bits")
+	}
+	settings := newBaseImageSettings(t, nil)
+	dir := config.BaseImageDir(settings)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create image directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatalf("remove directory permissions: %v", err)
+	}
+	if err := EnsureBaseImageDir(settings); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected directory permission error, got %v", err)
 	}
 }
 

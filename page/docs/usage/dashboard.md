@@ -19,6 +19,12 @@ Sign in with the seeded test account:
 
 ## Managing VMs
 
+A gateway with an empty image library still accepts logins. An administrator
+must [upload the first base image](../vm-images.md#upload-the-first-base-image)
+through **Admin → Base Images**, or an operator can copy one into
+`BASE_IMAGE_DIR`, before users can create VMs. Administrator access requires
+membership in `ADMIN_GROUP` as well as any configured login-access groups.
+
 A successful login redirects to `/api/dashboard`, where you can:
 
 - Create a new VM (name, base image, guest username). The guest account is

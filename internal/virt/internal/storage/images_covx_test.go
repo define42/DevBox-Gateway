@@ -33,7 +33,7 @@ func TestViocovBaseImageDirReadErrors(t *testing.T) {
 	if _, err := ResolveBaseImagePath(settings, "base.img"); err == nil {
 		t.Fatal("expected resolveBaseImagePath to surface the read error")
 	}
-	if err := EnsureBaseImagesAvailable(settings); err == nil {
-		t.Fatal("expected EnsureBaseImagesAvailable to surface the read error")
+	if err := EnsureBaseImageDir(settings); err == nil {
+		t.Fatal("expected EnsureBaseImageDir to reject a non-directory path")
 	}
 }

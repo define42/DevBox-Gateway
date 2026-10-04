@@ -12,9 +12,10 @@ The dashboard manages VMs through libvirt. The gateway expects:
   `192.168.123.0/24`, host gateway `192.168.123.1`). The gateway defines, starts,
   and enables autostart for it. Reserve this subnet for the gateway and attach
   only gateway-managed VMs to this bridge.
-- A base image library directory (`BASE_IMAGE_DIR`, default
-  `$DATA_ROOT_DIR/baseimages`) containing at least one QCOW2 disk image named
-  `.img`, `.qcow2`, or `.raw`.
+- Access to the base image library directory (`BASE_IMAGE_DIR`, default
+  `$DATA_ROOT_DIR/baseimages`). The gateway creates it if missing and accepts an
+  empty library at startup. Directory filesystem errors still prevent startup.
+  VM creation requires a valid QCOW2 disk image named `.img`, `.qcow2`, or `.raw`.
 - Host-side libvirt network filtering. The gateway installs the mandatory
   `devbox-isolated-ipv4` filter and supplies a fixed, persisted MAC/IPv4 binding
   for every VM. DHCP reservations match these assignments; addresses are never
@@ -55,17 +56,20 @@ Base images can be supplied by placing QCOW2 images in `BASE_IMAGE_DIR` or by
 uploading them from the administrator's **Base Images** modal. The filename may
 end in `.img`, `.qcow2`, or `.raw`; content is accepted only when its first four
 bytes match the QCOW2 magic header (`51 46 49 fb`). The dashboard create form
-lets each user pick which image to clone for a new VM. **If the directory
-contains no valid QCOW2 image at startup, the gateway fails to boot** with a
-clear error, so populate it first. An administrator can delete the final image
-at runtime, but VM creation then remains unavailable and another image must be
-uploaded before the gateway can restart successfully.
+lets each user pick which image to clone for a new VM. **An empty library does
+not prevent startup or administrator access.** VM creation remains unavailable
+until a valid image is uploaded or copied into the directory. Deleting the
+final image blocks new VM creation until another is added, but the gateway
+can still restart.
 
-Before the first run, [download a VM image](../vm-images.md#downloading-vm-images) from this
-project's [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases),
-join its parts, verify its checksum, and copy the complete `.img` into the
-library. Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE images are
-available.
+To populate an empty library, configure `ADMIN_GROUP`, sign in as a direct
+member who also meets `LDAP_REQUIRED_GROUPS`, and open **Admin → Base Images**.
+[Download a VM image](../vm-images.md#downloading-vm-images) from this project's
+[GitHub Releases](https://github.com/define42/DevBox-Gateway/releases), join its
+parts, verify its checksum, and upload the complete `.img`. Ubuntu 26.04 XFCE,
+Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE images are available. See the
+[production walkthrough](../installation/production.md#7-log-in-as-an-administrator)
+for the first upload.
 
 You can also [build an Ubuntu or Rocky Linux XFCE image from this checkout](../development/building.md#building-vm-images),
 including its matching SauronAgent package, and copy the resulting `.img` into
@@ -75,6 +79,6 @@ Because `docker-compose.yml` already bind-mounts `/data/`, files dropped in
 `/data/baseimages` on the host are visible to the gateway container.
 
 For a native RPM or deb install the data root defaults to
-`/var/lib/libvirt/devbox-gateway`, so populate
-`/var/lib/libvirt/devbox-gateway/baseimages` instead (or set `DATA_ROOT_DIR` /
-`BASE_IMAGE_DIR` to wherever you keep images).
+`/var/lib/libvirt/devbox-gateway`. Optional host imports go into
+`/var/lib/libvirt/devbox-gateway/baseimages` (or the directory configured by
+`DATA_ROOT_DIR` / `BASE_IMAGE_DIR`).

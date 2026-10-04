@@ -2,14 +2,13 @@
 
 This walkthrough installs DevBox Gateway on a Rocky Linux 9 x86_64 host, connects
 it to your LDAP directory, and takes you through the first administrator login,
-image upload, and desktop connection. Docker is not required. For a Debian 12
+image upload, and desktop connection. For a Debian 12
 host, use the [DEB installation guide](deb.md) for package and libvirt setup;
 the gateway configuration and dashboard steps are the same.
 
-**The first VM image must be installed on the host before starting the gateway.**
-An empty image library prevents startup, so you cannot bootstrap it through the
-web interface. After that first start, administrators can upload additional
-images from the dashboard.
+**The gateway can start with an empty base-image library.** It creates the
+configured directory if missing. Sign in as an administrator to upload the
+first image through the dashboard, then create a VM from it.
 
 ## 1. Prepare the host and directory
 
@@ -178,36 +177,12 @@ separate lines and use absolute paths; `$DATA_ROOT_DIR` is not expanded inside
 another value. The [configuration reference](../configuration/index.md) lists
 all settings, including VM sizing and idle shutdown.
 
-## 6. Install the first VM image on the host
+The service must be able to create and access `BASE_IMAGE_DIR`. The native
+path above is created at startup if it does not exist; you can also prepare
+the directory yourself. No image is required yet. Filesystem errors, such as
+an inaccessible directory or a path that names a file, still prevent startup.
 
-From the chosen release, download **all** parts for one Ubuntu 26.04, Ubuntu
-24.04, or Rocky Linux 9 XFCE image, plus its checksum and manifest. Keep them
-together in one directory. These guest choices work with the Rocky Linux host;
-they do not need to match the host distribution.
-
-In that directory, reconstruct and verify the image. Set `version` to the same
-release used above; this example chooses Ubuntu 26.04:
-
-```sh
-version=1.2.3
-image="ubuntu26.04-xfce-v${version}.img"
-cat "$image".part-* > "$image"
-sha256sum --check "$image.sha256"
-```
-
-Continue only when the checksum reports `OK`, then copy the complete disk:
-
-```sh
-sudo install -d /var/lib/libvirt/devbox-gateway/baseimages
-sudo install -m 0644 "$image" /var/lib/libvirt/devbox-gateway/baseimages/
-```
-
-Use your configured `BASE_IMAGE_DIR` if you changed it. Copy the reconstructed
-`.img`, not the individual parts. The [VM image guide](../vm-images.md) lists
-all filenames and explains the manifest. Release images already include
-cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.
-
-## 7. Start the gateway and check it
+## 6. Start the gateway and check it
 
 ```sh
 sudo systemctl enable --now devbox-gateway
@@ -219,7 +194,7 @@ curl --fail https://desktop.example.com/api/ready
 
 The service should be active, with `ok` from `/api/health` and `ready` from
 `/api/ready`. Run the HTTPS checks from a machine that trusts your certificate.
-If startup fails, use the journal to resolve missing images, libvirt access,
+If startup fails, use the journal to resolve directory access, libvirt access,
 vsock support, certificate files, or invalid settings before retrying.
 After correcting a repeated startup failure:
 
@@ -234,7 +209,7 @@ Health checks do not test LDAP login. Application events are written to
 [health checks](../operations/health-checks.md) for readiness scope and
 [audit logs](../operations/audit-logs.md) for log retention and rotation.
 
-## 8. Log in as an administrator and upload more images
+## 7. Log in as an administrator
 
 1. Open `https://desktop.example.com` in a browser.
 2. Enter the bare **Username**, for example `alice`, and the account's directory
@@ -244,10 +219,36 @@ Health checks do not test LDAP login. Application events are written to
 3. On the dashboard, select **Admin**, then **Base Images**. If **Admin** is
    absent, check `ADMIN_GROUP` and the account's direct `memberOf` values.
    Sign in again after directory membership changes.
-4. Download, reconstruct, and verify another release image on the computer
-   running your browser. Under **Upload Base Image**, choose the complete
-   disk file, then select **Upload**.
-5. Wait for **Base image uploaded.** and confirm the image appears under
+
+The **Base Images** dialog is available even when the library is empty.
+Uploading images requires administrator access; ordinary users cannot upload
+the first image themselves.
+
+## 8. Upload the first VM image
+
+On the computer running your browser, download **all** parts for one Ubuntu
+26.04, Ubuntu 24.04, or Rocky Linux 9 XFCE image from the chosen release, plus
+its checksum and manifest. Keep them together in one directory. These guest
+choices work with the Rocky Linux host; they do not need to match the host
+distribution.
+
+In that directory, reconstruct and verify the image. Set `version` to the same
+release used above; this example chooses Ubuntu 26.04:
+
+```sh
+version=1.2.3
+image="ubuntu26.04-xfce-v${version}.img"
+cat "$image".part-* > "$image"
+sha256sum --check "$image.sha256"
+```
+
+Continue only when the checksum reports `OK`. The [VM image guide](../vm-images.md)
+lists all filenames and explains the manifest. Release images already include
+cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.
+
+1. Under **Upload Base Image**, choose the complete disk file, then select
+   **Upload**.
+2. Wait for **Base image uploaded.** and confirm the image appears under
    **Available Images**.
 
 Accepted filenames end in `.img`, `.qcow2`, or `.raw`, but the content must
@@ -255,8 +256,13 @@ always be QCOW2. Do not upload `.part-*`, checksum, or manifest files. Uploads
 cannot overwrite an existing filename. The dialog shows available storage and
 the upload limit, which follows `VM_DISK_SIZE_GB` (200 GiB by default).
 
-Keep at least one valid base image in the library: deleting the last one blocks
-VM creation and prevents the next gateway startup.
+VM creation requires a valid base image. If the last image is deleted, new VM
+creation remains unavailable until another is added; the gateway can still
+start and administrators can upload a replacement.
+
+For an alternative import method, [copy a verified image directly on the
+host](../vm-images.md#copy-an-image-on-the-host) into `BASE_IMAGE_DIR`. This can
+be done before or after starting the gateway.
 
 ## 9. Create a desktop and connect
 

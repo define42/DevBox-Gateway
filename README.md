@@ -28,18 +28,18 @@ Choose an installation guide for your host:
 
 For the complete RPM setup, follow the
 [production installation walkthrough](page/docs/installation/production.md):
-install, configure, add the first image, start, sign in, and upload more images.
+install, configure, start, sign in as an administrator, and upload the first image.
 
 The native packages run the gateway directly as a systemd service using the
-host's libvirt/QEMU/KVM stack. They require an LDAP server and at least one
-base image before the first start. **Docker is not required to install the
+host's libvirt/QEMU/KVM stack. They require an LDAP server and can start with an
+empty base-image library. **Docker is not required to install the
 RPM or DEB and use prebuilt VM images.** Splunk is optional; native installations
 default to local audit files.
 
-Follow [downloading VM images](page/docs/vm-images.md) to reconstruct and verify
-the release assets, then follow your installation guide for host setup,
-configuration, and service startup. The guest operating system does not change
-the native package's supported host distribution.
+Follow your installation guide for host setup, configuration, and service
+startup. Then [download and verify a VM image](page/docs/vm-images.md) and upload
+it through **Admin → Base Images** before creating a VM. The guest operating
+system does not change the native package's supported host distribution.
 
 ## Features
 

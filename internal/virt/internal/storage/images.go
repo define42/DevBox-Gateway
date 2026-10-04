@@ -333,19 +333,15 @@ func ResolveBaseImagePath(settings *config.Settings, selected string) (string, e
 	return "", fmt.Errorf("base image %q is not available", selected)
 }
 
-// EnsureBaseImagesAvailable returns an error when no selectable base image
-// exists, so the gateway refuses to boot with an empty image library instead of
-// silently having nothing to clone VMs from.
-func EnsureBaseImagesAvailable(settings *config.Settings) error {
-	images, err := ListBaseImages(settings)
-	if err != nil {
-		return err
+// EnsureBaseImageDir creates the library directory if needed and checks that it
+// can be read. The library may be empty so administrators can upload images
+// after the gateway starts.
+func EnsureBaseImageDir(settings *config.Settings) error {
+	dir := config.BaseImageDir(settings)
+	// #nosec G301 -- newly created parents include DATA_ROOT_DIR, which QEMU must traverse to reach VM disks.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create base image directory %q: %w", dir, err)
 	}
-	if len(images) == 0 {
-		return fmt.Errorf(
-			"no QCOW2 base images found in %s; place at least one QCOW2 image named .img/.qcow2/.raw there",
-			config.BaseImageDir(settings),
-		)
-	}
-	return nil
+	_, err := ListBaseImages(settings)
+	return err
 }

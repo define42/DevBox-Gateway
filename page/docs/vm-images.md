@@ -34,10 +34,24 @@ cat "$image".part-* > "$image"
 sha256sum --check "$image.sha256"
 ```
 
-## Install the first base image
+## Upload the first base image
 
-After the checksum reports `OK`, copy the complete `.img` into `BASE_IMAGE_DIR`
-**before the first gateway start**. For Docker Compose:
+The gateway can start with an empty image library and creates `BASE_IMAGE_DIR`
+if it is missing. After the checksum reports `OK`, sign in as an administrator,
+open **Admin → Base Images**, choose the complete `.img` under **Upload Base
+Image**, and select **Upload**. The image becomes available for VM creation
+after the upload succeeds. Repeat these steps to add more images.
+
+Administrator access requires direct membership in `ADMIN_GROUP` and any
+configured login-access group requirement. The native packages do not supply
+an administrator account; configure your directory and `ADMIN_GROUP` first.
+See the [production walkthrough](installation/production.md#7-log-in-as-an-administrator).
+
+## Copy an image on the host
+
+As an alternative to the administrator upload, copy the verified complete
+`.img` into `BASE_IMAGE_DIR` before or after starting the gateway. For Docker
+Compose:
 
 ```sh
 sudo install -d /data/baseimages
@@ -52,8 +66,7 @@ sudo install -m 0644 "$image" /var/lib/libvirt/devbox-gateway/baseimages/
 ```
 
 Use your configured directory instead if you changed `DATA_ROOT_DIR` or
-`BASE_IMAGE_DIR`. Once the gateway is running,
-administrators can also upload complete images through the **Base Images** modal.
+`BASE_IMAGE_DIR`.
 The gateway provisions each VM's login account when it creates the VM; these
 images have no preset desktop login.
 

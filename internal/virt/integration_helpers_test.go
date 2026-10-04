@@ -105,14 +105,11 @@ func newInitSettings(t *testing.T, rootDir string) *config.Settings {
 	if err := settings.OverwriteForTestString(config.VIRT_STORAGE_POOL_NAME, uniquePoolName("virt-test-pool")); err != nil {
 		t.Fatalf("overwrite VIRT_STORAGE_POOL_NAME: %v", err)
 	}
-	// Init only checks the QCOW2 magic header (it does not clone), so a tiny
-	// header fixture avoids a real multi-gigabyte download here.
-	seedDummyBaseImage(t, settings)
 	return settings
 }
 
 // seedDummyBaseImage writes a tiny QCOW2-header fixture into the library so
-// checks that only need a selectable library (e.g. Init) pass without
+// checks that only need a selectable library pass without
 // downloading a real image. It returns the seeded file name.
 func seedDummyBaseImage(t *testing.T, settings *config.Settings) string {
 	t.Helper()
@@ -130,8 +127,8 @@ func seedDummyBaseImage(t *testing.T, settings *config.Settings) string {
 
 // stageExistingBaseImageFromDefaultRoot makes a real, bootable base image
 // available in the settings' BaseImageDir and returns the staged file name to
-// pass to BootNewVM. It is idempotent so callers can use it both to satisfy the
-// boot-time library check and to learn the selectable image name.
+// pass to BootNewVM. It is idempotent so callers can prepare the image library
+// and learn the selectable image name in one call.
 func stageExistingBaseImageFromDefaultRoot(t *testing.T, settings *config.Settings) string {
 	t.Helper()
 

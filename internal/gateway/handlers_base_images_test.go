@@ -175,19 +175,39 @@ func TestAdminBaseImageRoutesRequireAdmin(t *testing.T) {
 }
 
 func TestAdminBaseImageUploadListAndDelete(t *testing.T) {
+	tests := []struct {
+		name          string
+		existingImage string
+	}{
+		{name: "empty library"},
+		{name: "populated library", existingImage: "z.raw"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testAdminBaseImageUploadListAndDelete(t, tt.existingImage)
+		})
+	}
+}
+
+func testAdminBaseImageUploadListAndDelete(t *testing.T, existingImage string) {
+	t.Helper()
 	auditOutput := captureStructuredLogs(t)
 	settings := baseImageTestSettings(t)
 	dir := config.BaseImageDir(settings)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("create image dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "z.raw"), baseImageQCOW2TestData("existing"), 0o644); err != nil {
-		t.Fatalf("seed image: %v", err)
+	if existingImage != "" {
+		if err := os.WriteFile(filepath.Join(dir, existingImage), baseImageQCOW2TestData("existing"), 0o644); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
 	}
 
 	manager := session.New()
 	router := NewHandler(manager, settings)
 	cookie := baseImageAdminCookie(t, manager)
+	uploadLimit := maxBaseImageUploadBytes(settings)
+	assertAdminBaseImageListing(t, getAdminBaseImages(t, router, cookie), existingImage, uploadLimit)
 	uploaded := baseImageQCOW2TestData("uploaded bytes")
 	upload := baseImageUploadRequest(t, "base_image", "a.qcow2", uploaded)
 	upload.AddCookie(cookie)
@@ -199,24 +219,13 @@ func TestAdminBaseImageUploadListAndDelete(t *testing.T) {
 	if action := decodeBaseImageAction(t, uploadRec); !action.OK {
 		t.Fatalf("expected successful action, got %+v", action)
 	}
-	stored, err := os.ReadFile(filepath.Join(dir, "a.qcow2"))
-	if err != nil {
-		t.Fatalf("read uploaded image: %v", err)
-	}
-	if !bytes.Equal(stored, uploaded) {
-		t.Fatalf("unexpected image bytes %q", stored)
-	}
+	assertBaseImageContents(t, filepath.Join(dir, "a.qcow2"), uploaded)
 
-	list := getAdminBaseImages(t, router, cookie)
-	if strings.Join(list.BaseImages, ",") != "a.qcow2,z.raw" {
-		t.Fatalf("expected sorted images, got %v", list.BaseImages)
+	wantImages := "a.qcow2"
+	if existingImage != "" {
+		wantImages += "," + existingImage
 	}
-	if list.MaxUploadBytes != maxBaseImageUploadBytes(settings) {
-		t.Fatalf("expected upload limit %d, got %d", maxBaseImageUploadBytes(settings), list.MaxUploadBytes)
-	}
-	if list.AvailableStorageBytes <= 0 {
-		t.Fatalf("expected positive available storage, got %d", list.AvailableStorageBytes)
-	}
+	assertAdminBaseImageListing(t, getAdminBaseImages(t, router, cookie), wantImages, uploadLimit)
 
 	deleteRec := hcovPostForm(t, router, cookie, "/api/admin/base-images/delete", url.Values{
 		"base_image": {"a.qcow2"},
@@ -230,8 +239,33 @@ func TestAdminBaseImageUploadListAndDelete(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "a.qcow2")); !os.IsNotExist(err) {
 		t.Fatalf("expected image deletion, got %v", err)
 	}
+	assertAdminBaseImageListing(t, getAdminBaseImages(t, router, cookie), existingImage, uploadLimit)
 
 	assertAdminBaseImageAuditRecords(t, auditOutput)
+}
+
+func assertBaseImageContents(t *testing.T, path string, want []byte) {
+	t.Helper()
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read uploaded image: %v", err)
+	}
+	if !bytes.Equal(stored, want) {
+		t.Fatalf("unexpected image bytes %q", stored)
+	}
+}
+
+func assertAdminBaseImageListing(t *testing.T, list adminBaseImagesResponse, wantImages string, uploadLimit int64) {
+	t.Helper()
+	if strings.Join(list.BaseImages, ",") != wantImages {
+		t.Fatalf("expected sorted images %q, got %v", wantImages, list.BaseImages)
+	}
+	if list.MaxUploadBytes != uploadLimit {
+		t.Fatalf("expected upload limit %d, got %d", uploadLimit, list.MaxUploadBytes)
+	}
+	if list.AvailableStorageBytes == 0 {
+		t.Fatalf("expected positive available storage, got %d", list.AvailableStorageBytes)
+	}
 }
 
 func assertAdminBaseImageAuditRecords(t *testing.T, auditOutput *synchronizedLogBuffer) {

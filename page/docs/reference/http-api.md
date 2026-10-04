@@ -110,6 +110,10 @@ Implementation: [creation stream](https://github.com/define42/DevBox-Gateway/blo
 
 ### Base-image uploads
 
+The gateway can start with an empty image library. Administrators can use the
+listing and upload routes to add the first image; VM creation still requires
+a valid filename from the available base-image list.
+
 Use `.img`, `.qcow2` or `.raw` filenames with QCOW2 content. The upload limit is
 the configured VM disk capacity (`VM_DISK_SIZE_GB`); the HTTP request has an
 additional 1 MiB allowance for multipart overhead. Read `maxUploadBytes` from

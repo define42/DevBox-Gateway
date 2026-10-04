@@ -7,7 +7,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -354,14 +356,20 @@ func TestBootGatewayErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("missing base images", func(t *testing.T) {
+	t.Run("base image path is a file", func(t *testing.T) {
 		t.Setenv(config.LISTEN_ADDR, "127.0.0.1:0")
 		t.Setenv(config.CERT_FILE, "")
 		t.Setenv(config.KEY_FILE, "")
-		// An empty base image library must fail the boot (checked before libvirt).
-		t.Setenv(config.DATA_ROOT_DIR, t.TempDir())
-		if _, err := bootGateway(); err == nil {
-			t.Fatal("expected bootGateway to fail with an empty base image library")
+		t.Setenv(config.ConfigFileEnv, filepath.Join(t.TempDir(), "missing.conf"))
+		baseImagePath := filepath.Join(t.TempDir(), "baseimages")
+		if err := os.WriteFile(baseImagePath, []byte("not a directory"), 0o600); err != nil {
+			t.Fatalf("create invalid base image path: %v", err)
+		}
+		t.Setenv(config.BASE_IMAGE_DIR, baseImagePath)
+		_, err := bootGateway()
+		if err == nil || !strings.Contains(err.Error(), "failed to initialize virtualization") ||
+			!strings.Contains(err.Error(), baseImagePath) {
+			t.Fatalf("expected startup to reject base image path %q, got %v", baseImagePath, err)
 		}
 	})
 }

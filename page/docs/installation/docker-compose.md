@@ -16,10 +16,10 @@ Host requirements for this Docker Compose setup:
 - Write access to `/data/` on the host (used for ACME data, VM images, serial /
   VNC sockets, the application-audit HEC spool, and the separate SauronAgent
   guest log and forwarding spool).
-- At least one QCOW2 base disk image in `/data/baseimages`, named with an
-  `.img`, `.qcow2`, or `.raw` extension. The gateway will not start without a
-  valid QCOW2 image — follow
-  [Downloading VM images](../vm-images.md#downloading-vm-images) before starting the stack.
+
+The image library may be empty. Startup creates `/data/baseimages` if needed;
+filesystem access errors still prevent startup. Upload the first image after
+signing in as an administrator.
 
 ## Start the stack
 
@@ -49,6 +49,13 @@ in with `johndoe` / `dogood`. See [Login flow](../usage/dashboard.md#login-flow)
 for the dashboard and the seeded administrator account. This Compose
 configuration is a local development setup with test credentials and
 certificate verification disabled for LDAP and Splunk.
+
+For an empty image library, sign in with the seeded `admin` / `dogood` account,
+open **Admin → Base Images**, and upload a
+[downloaded and verified QCOW2 image](../vm-images.md#upload-the-first-base-image).
+The configured `ADMIN_GROUP` grants this account administrator access. Users
+can create VMs once a valid image is available. Copying an image into
+`/data/baseimages` on the host is also supported.
 
 ## View events in Splunk
 
