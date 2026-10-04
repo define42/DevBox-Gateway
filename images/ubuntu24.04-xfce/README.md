@@ -1,28 +1,24 @@
-# Ubuntu 26.04 XFCE image
+# Ubuntu 24.04 XFCE image
 
-Builds an Ubuntu 26.04 LTS amd64 desktop image for DevBox Gateway from
+Builds an Ubuntu 24.04 LTS amd64 desktop image for DevBox Gateway from
 Ubuntu's official server cloud image. The recipe, desktop assets, and guest
 agent are built together from this repository.
-
-For the same Ubuntu desktop software on Ubuntu 24.04 LTS, see the
-[Ubuntu 24.04 XFCE image](../ubuntu24.04-xfce/README.md). Ubuntu 26.04 remains
-the default variant for the root image build targets.
 
 ## Build and check
 
 Run from the repository root:
 
 ```sh
-make image-check IMAGE=ubuntu26.04-xfce
-make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
-make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
+make image-check IMAGE=ubuntu24.04-xfce
+make image IMAGE=ubuntu24.04-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu24.04-xfce IMAGE_VERSION=0.0.0
 ```
 
 `IMAGE_VERSION` must be a numeric `MAJOR.MINOR.PATCH` version. It also becomes
 the version of the SauronAgent deb installed in the image. It defaults to the
 root `VERSION` setting, or `0.0.0` when neither is specified.
 
-The `26.04` in `ubuntu26.04-xfce` identifies the Ubuntu release. The `v0.0.0`
+The `24.04` in `ubuntu24.04-xfce` identifies the Ubuntu release. The `v0.0.0`
 suffix in an image filename identifies the gateway and SauronAgent release.
 
 The build requires Linux x86_64, access to Docker, Bash, curl, Python 3, `flock`,
@@ -37,8 +33,9 @@ compressed image.
 The SauronAgent deb is generated during the image build.
 `image-test` additionally requires host `qemu-system-x86_64`, `qemu-img`,
 `xorriso`, and `timeout`. It boots a temporary QCOW2 overlay with a NoCloud seed
-to check first-boot provisioning, machine identity, and an IPv4 DHCP lease on
-the VM's Ethernet interface, leaving the base disk unchanged.
+to check Ubuntu 24.04, first-boot provisioning, machine identity, an IPv4 DHCP
+lease on the VM's Ethernet interface, XRDP service readiness, and the IntelliJ
+IDEA runtime, leaving the base disk unchanged. It does not perform an RDP login.
 
 ## Image contents
 
@@ -66,29 +63,28 @@ its configuration assets. `smoke-test.sh` boots the result.
 Keep source assets here; generated files are ignored by Git.
 
 For `IMAGE_VERSION=0.0.0`, the output directory is
-`dist/images/ubuntu26.04-xfce/`:
+`dist/images/ubuntu24.04-xfce/`:
 
 ```text
-ubuntu26.04-xfce-v0.0.0.img
-ubuntu26.04-xfce-v0.0.0.img.sha256
-ubuntu26.04-xfce-v0.0.0.img.manifest.json
+ubuntu24.04-xfce-v0.0.0.img
+ubuntu24.04-xfce-v0.0.0.img.sha256
+ubuntu24.04-xfce-v0.0.0.img.manifest.json
 ```
 
 The manifest records the source image URL and checksum, Git commit and dirty
 state, builder container digest, image version, and SauronAgent version.
-Source downloads are cached by checksum in `.cache/images/ubuntu26.04-xfce/`;
+Source downloads are cached by checksum in `.cache/images/ubuntu24.04-xfce/`;
 temporary build workspaces are removed when the build exits.
 
 ## GitHub Actions and releases
 
 The [gateway release workflow](../../.github/workflows/go.yml) calls the
-[image workflow](../../.github/workflows/ubuntu26.04-xfce.yml) on pushes to
+[image workflow](../../.github/workflows/ubuntu24.04-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
-After the gateway build and all three image boot tests (Ubuntu 26.04, Ubuntu
-24.04, and Rocky Linux 9) succeed, the gateway workflow publishes the image
-assets alongside the gateway and SauronAgent packages in the same
-`vMAJOR.MINOR.PATCH` GitHub Release.
+After the gateway build and all three image boot tests succeed,
+the gateway workflow publishes the image assets alongside the gateway and
+SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
 
 The image workflow also runs independently for relevant image, build, and
 SauronAgent changes on pull requests, using version `0.0.0`. Manual runs accept
@@ -102,7 +98,7 @@ and both sidecars into one directory. Substitute the release's version, then
 reconstruct and verify:
 
 ```sh
-image="ubuntu26.04-xfce-v1.2.3.img"
+image="ubuntu24.04-xfce-v1.2.3.img"
 cat "$image".part-* > "$image"
 sha256sum --check "$image.sha256"
 ```
@@ -118,7 +114,7 @@ Docker Compose setup, after a local build:
 ```sh
 sudo install -d /data/baseimages
 sudo install -m 0644 \
-  dist/images/ubuntu26.04-xfce/ubuntu26.04-xfce-v0.0.0.img \
+  dist/images/ubuntu24.04-xfce/ubuntu24.04-xfce-v0.0.0.img \
   /data/baseimages/
 ```
 

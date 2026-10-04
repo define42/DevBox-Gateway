@@ -39,7 +39,7 @@ configuration while leaving the base disk unchanged.
 - XFCE, LightDM, XRDP with its Xorg backend, and clipboard redirection.
 - Cloud-init, Python 3, and NetworkManager for gateway provisioning.
 - Firefox, Visual Studio Code, Vim, Nmap, and network administration tools.
-- IntelliJ IDEA 2026.2.3 with its bundled Java runtime, matching the Ubuntu image.
+- IntelliJ IDEA 2026.2.3 with its bundled Java runtime, matching the Ubuntu images.
 - SauronAgent built and packaged from the same checkout, with its guest service
   enabled. The gateway supplies the host collector.
 - Full glibc locale coverage and an XFCE configuration optimized for remote use.
@@ -80,8 +80,9 @@ The [gateway release workflow](../../.github/workflows/go.yml) calls the
 [Rocky image workflow](../../.github/workflows/rocky9-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
-After the gateway builds and image boot tests succeed, the gateway workflow
-publishes both Rocky and Ubuntu image assets alongside the gateway and
+After the gateway build and all three image boot tests succeed, the gateway
+workflow publishes Rocky Linux 9, [Ubuntu 26.04](../ubuntu26.04-xfce/README.md), and
+[Ubuntu 24.04](../ubuntu24.04-xfce/README.md) image assets alongside the gateway and
 SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
 
 The Rocky image workflow also runs independently for relevant image, build,
@@ -130,7 +131,7 @@ be overridden with `RUN_MEMORY`, `RUN_CPUS`, `RUN_SSH_PORT` and `RUN_RDP_PORT`.
 ## IntelliJ IDEA
 
 IntelliJ IDEA is installed in `/opt/intellij-idea` from JetBrains' Linux x86_64
-archive, verified against the same pinned SHA-256 checksum as the Ubuntu image.
+archive, verified against the same pinned SHA-256 checksum as the Ubuntu images.
 Launch it from the XFCE application menu in the **Development/Programming**
 category, or run `idea` in a terminal. Settings and projects belong to each
 user; the installation is shared by all users.

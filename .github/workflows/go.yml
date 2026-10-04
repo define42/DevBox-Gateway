@@ -211,6 +211,15 @@ jobs:
     with:
       version: ${{ needs.build.outputs.version }}
 
+  ubuntu24-image:
+    needs: build
+    if: github.event_name == 'push' && needs.build.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ubuntu24.04-xfce.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+
   rocky-image:
     needs: build
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
@@ -221,7 +230,7 @@ jobs:
       version: ${{ needs.build.outputs.version }}
 
   release:
-    needs: [build, ubuntu-image, rocky-image]
+    needs: [build, ubuntu-image, ubuntu24-image, rocky-image]
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -235,10 +244,16 @@ jobs:
           name: gateway-packages-${{ needs.build.outputs.tag }}
           path: release/packages
 
-      - name: Download Ubuntu image assets
+      - name: Download Ubuntu 26.04 image assets
         uses: actions/download-artifact@v8
         with:
           name: ubuntu26.04-xfce-v${{ needs.build.outputs.version }}
+          path: release/images
+
+      - name: Download Ubuntu 24.04 image assets
+        uses: actions/download-artifact@v8
+        with:
+          name: ubuntu24.04-xfce-v${{ needs.build.outputs.version }}
           path: release/images
 
       - name: Download Rocky Linux 9 image assets
@@ -312,6 +327,16 @@ jobs:
             ```sh
             cat ubuntu26.04-xfce-${{ needs.build.outputs.tag }}.img.part-* > ubuntu26.04-xfce-${{ needs.build.outputs.tag }}.img
             sha256sum --check ubuntu26.04-xfce-${{ needs.build.outputs.tag }}.img.sha256
+            ```
+
+            ### Ubuntu 24.04 XFCE image
+
+            The image and its embedded SauronAgent use version ${{ needs.build.outputs.version }}.
+            Download all image parts and the checksum file into one directory, then reconstruct and verify:
+
+            ```sh
+            cat ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img.part-* > ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img
+            sha256sum --check ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img.sha256
             ```
 
             ### Rocky Linux 9 XFCE image
