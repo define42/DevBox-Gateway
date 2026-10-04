@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"maps"
 
 	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
@@ -17,6 +18,24 @@ type gapPublication struct {
 	claim      uint64
 	source     output.Source
 	gap        seqRange
+}
+
+// readiness includes ranges whose output write is in flight. Claims prevent
+// duplicate publication but do not prove that the evidence has been accepted.
+func (d *dedup) readiness() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pending := 0
+	for _, stream := range d.streams {
+		if stream.arrivalOverflow {
+			return fmt.Errorf("arrival tracking overflowed; operator recovery required")
+		}
+		pending += len(stream.pending)
+	}
+	if pending != 0 {
+		return fmt.Errorf("%d audit gap reports await output acceptance", pending)
+	}
+	return nil
 }
 
 func cloneGapSource(source output.Source) output.Source {
@@ -46,7 +65,7 @@ func (d *dedup) claimGap(
 		copy := cloneGapSource(source)
 		stream.gapSource = &copy
 	}
-	if stream.activeGapClaim != 0 {
+	if stream.activeGapClaim != 0 || !stream.canPublishGap(first, last) {
 		return gapPublication{}, false
 	}
 	d.clock++
@@ -61,12 +80,17 @@ func (d *dedup) takePendingGap() (gapPublication, bool) {
 	defer d.mu.Unlock()
 	var key streamKey
 	var oldest *dedupStream
+	var gap seqRange
 	for candidate, stream := range d.streams {
 		if len(stream.pending) == 0 || stream.gapSource == nil || stream.activeGapClaim != 0 {
 			continue
 		}
+		next, ok := stream.nextPublishableGap()
+		if !ok {
+			continue
+		}
 		if oldest == nil || stream.used < oldest.used {
-			key, oldest = candidate, stream
+			key, oldest, gap = candidate, stream, next
 		}
 	}
 	if oldest == nil {
@@ -74,7 +98,6 @@ func (d *dedup) takePendingGap() (gapPublication, bool) {
 	}
 	d.clock++
 	oldest.used = d.clock
-	gap := oldest.pending[0]
 	return claimGapLocked(key, oldest, gap.first, gap.last), true
 }
 
@@ -87,10 +110,58 @@ func (d *dedup) takeNextPendingGap(key streamKey) (gapPublication, bool) {
 	if stream == nil || len(stream.pending) == 0 || stream.gapSource == nil || stream.activeGapClaim != 0 {
 		return gapPublication{}, false
 	}
+	gap, ok := stream.nextPublishableGap()
+	if !ok {
+		return gapPublication{}, false
+	}
 	d.clock++
 	stream.used = d.clock
-	gap := stream.pending[0]
 	return claimGapLocked(key, stream, gap.first, gap.last), true
+}
+
+// nextPublishableGap skips evidence that cannot yet fit the accepted-loss
+// ledger. Another range may merge with existing losses or close the early hole
+// keeping the ledger full. No sink write is attempted until its result can be
+// retained, so healthy output cannot be flooded with an unrecordable report.
+func (s *dedupStream) nextPublishableGap() (seqRange, bool) {
+	s.excludeArrivals()
+	for _, pending := range s.pending {
+		if gap, ok := s.safeGapPart(pending, 0); ok && s.canPublishGap(gap.first, gap.last) {
+			return gap, true
+		}
+	}
+	return seqRange{}, false
+}
+
+// canPublishGap reserves room in both ledgers before an exclusive claim starts
+// output I/O. While that claim is active, other publication completions cannot
+// grow missing; event commits can only consume its ranges. Pending evidence may
+// change, which finishGap still checks separately before accounting for a write.
+func (s *dedupStream) canPublishGap(first, last uint64) bool {
+	if s.coversArrival(first, last) {
+		return false
+	}
+	if _, ok := subtractRange(s.pending, first, last); !ok {
+		return false
+	}
+	if last < first || last <= s.written || first <= s.written+1 {
+		return true
+	}
+	ranges := 0
+	for _, gap := range s.missing {
+		if gap.last <= s.written {
+			continue
+		}
+		before := first > gap.last && first-gap.last > 1
+		after := gap.first > last && gap.first-last > 1
+		if before || after {
+			ranges++
+			continue
+		}
+		first = min(first, gap.first)
+		last = max(last, gap.last)
+	}
+	return ranges < maxMissingRanges
 }
 
 // claimGapLocked records only in-memory ownership; callers release the mutex
@@ -122,7 +193,8 @@ func (d *dedup) finishGap(publication gapPublication, accepted bool) bool {
 		return false
 	}
 	stream.activeGapClaim = 0
-	if !accepted || stream.gapGeneration != publication.generation ||
+	if !accepted || stream.coversArrival(publication.gap.first, publication.gap.last) ||
+		stream.gapGeneration != publication.generation ||
 		!stream.pendingContains(publication.gap.first, publication.gap.last) {
 		return false
 	}
@@ -141,8 +213,9 @@ func (d *dedup) finishGap(publication gapPublication, accepted bool) bool {
 }
 
 // retryPendingGaps attempts at most maxMissingRanges reports from one retained
-// stream. New guests drive recovery even when the originating boot never
-// reconnects. Sink I/O runs outside the dedup lock and stops at the first error.
+// stream. The background worker and blocked new streams can drive recovery
+// even when the originating boot never reconnects. Sink I/O runs outside the
+// dedup lock and stops at the first error.
 func (s *Server) retryPendingGaps(ctx context.Context) {
 	publication, ok := s.dedup.takePendingGap()
 	if !ok {

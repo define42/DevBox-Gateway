@@ -202,7 +202,9 @@ func (s *Spool) Append(e *event.Event) error
 func (s *Spool) Next(max int) ([]*event.Event, error)
 // NextAfter advances a sender cursor without acknowledging retained events.
 func (s *Spool) NextAfter(through uint64, max int) ([]*event.Event, error)
-// Ack discards every event up to and including seq.
+// Ack persists the checkpoint before discarding events through seq.
+// Persistence errors retain records and sequence state for retry.
+// Repeated acknowledgements retry unfinished segment cleanup.
 func (s *Spool) Ack(seq uint64) error
 // LastSequence is the highest sequence ever appended, surviving restart.
 func (s *Spool) LastSequence() uint64
@@ -274,14 +276,60 @@ type Options struct {
     // OnInternalEvent receives host-generated events such as stream loss.
     OnInternalEvent func(*output.Envelope)
     // Resolve checks live hypervisor state once per VSOCK connection, before
-    // the static VM map. Resolved VMs do not join the expected-stream monitor.
+    // the static VM map. Expectations are supplied separately.
     Resolve func(cid uint32) (config.VMMapping, bool)
+    // ExpectedVMs supplies the complete current trusted inventory.
+    // Nil uses Config.VMs entries marked Expected; errors retain the old set.
+    ExpectedVMs func() ([]config.VMMapping, error)
+    // StartupGrace allows first contact; zero uses Config.Monitor.Timeout.
+    StartupGrace time.Duration
 }
 type Server struct{ /* unexported */ }
 func New(opts Options) (*Server, error)
 func (s *Server) Run(ctx context.Context) error
 func (s *Server) Close() error
+// Readiness reports serving, inventory, stream-monitor and pending-gap failures.
+// It performs no I/O.
+func (s *Server) Readiness() error
+// ServingDone closes when the accept loop stops, before cleanup completes.
+func (s *Server) ServingDone() <-chan struct{}
+func (s *Server) ServingErr() error
 ```
+
+The public `collector.Options` exposes the same `Resolve`, `ExpectedVMs` and
+`StartupGrace` controls using `collector.VM`, plus `StreamTimeout` to override
+`Config.Monitor.Timeout`. An expectation callback must return promptly and
+derive identities from trusted hypervisor state. Failed refreshes retain the
+old expected set and fail readiness; no completed refresh for three check
+intervals also fails readiness. Only traffic matching the expected CID, VM
+name and UUID refreshes its stream deadline. TCP test peers cannot satisfy it.
+
+An unresolved dynamic session checks fresh expected inventory on valid EVENT
+or PING frames. Once its trusted CID has a complete VM name and UUID, that
+session requests reconnect before writing or acknowledging the frame. The new
+session resolves identity again; a fully resolved session is never relabelled
+in place when a CID is reused. These checks use the cached inventory, without
+per-frame hypervisor calls.
+
+Loss/resumption alerts are retried in order after output failures. Up to 4096
+pending alerts are retained in memory, including alerts for removed VMs. A
+pending alert fails readiness; queue overflow is a sticky failure requiring
+operator recovery and restart. These alerts are not durable across restarts.
+`ServingDone` permits a supervisor to react before cleanup or a blocked
+inventory callback completes; `Run` still waits for cleanup.
+
+Pending sequence gaps independently fail readiness, including while claimed
+for publication. Their current-generation evidence clears only after output
+acceptance or missing arrivals remove the gap. A `Run`-owned worker retries
+every second, selecting one pending stream fairly and attempting at most 64
+ranges within the write timeout per pass. It runs independently of inventory
+refresh and guest activity, and shutdown joins it before closing outputs.
+Pending gap evidence is bounded, pins its deduplication stream and does not
+survive restart; new arrivals are refused when retaining them would lose it.
+Each stream also retains at most 64 disjoint accepted loss ranges. A report
+that cannot fit this accounting waits without repeated output writes. Replaying
+the earlier unwritten event, or accepting its HELLO-established loss report,
+can free capacity. Other streams continue publishing eligible reports.
 
 ## Output acceptance and replay
 
@@ -290,8 +338,46 @@ its gap report. A successful `Write` controls acknowledgement; the server does
 not call `Flush` before each ACK. Sink implementations must make accepted
 writes durable themselves if that is the required delivery contract.
 
+Event acceptance is serialized for sessions sharing a peer or trusted VM UUID.
+The deduplication check, output write and commit share that gate, so successful
+acceptance precedes duplicate suppression and a failed first copy permits a
+later retry. Waiting for the gate is bounded by the write timeout. Unrelated
+VMs remain concurrent. A cumulative watermark or accepted gap report alone is
+never used as proof that an original event reached an output.
+
+Receipt is reserved before identity recovery or gate waits. Active reservations
+pin their stream and exclude decoded originals from concurrent HELLO loss
+claims and background gap completion; only a successful event write permits
+their acknowledgement. Releasing a failed write or a timed-out wait leaves
+the original replayable. When the pending-range bound prevents immediate
+exclusion, protection remains until a safe partial report frees space. Arrival
+protection is bounded by the effective deduplication window; overflow stops
+loss accounting and fails readiness until operator recovery and restart.
+
 `collector.NewFileSink` uses rotation and buffered kernel writes, with syncing
 on `Flush` and `Close`. Collector deduplication state is in memory, so
 consumers must tolerate duplicates after restarts or state eviction. See the
 [protocol reference](protocol.md#44-ack) for cumulative acknowledgement and
 gap handling.
+
+DevBox Gateway wraps its embedded outputs with readiness tracking and immutable
+copies of rejected guest records. Keys use trusted VM identity, original event
+boot ID and sequence. Matching guest replay or acceptance of the retained copy
+by every output clears that record's failure. The retained copy preserves its
+original source, including unresolved identities, independently of later guest
+connections. Host-generated records and unrelated writes cannot clear it.
+
+A separate worker retries up to 64 oldest rejected records every second within
+a five-second context deadline per pass. Failed records move behind other
+candidates; stale completions cannot erase newer failures. Shutdown joins this
+worker before closing outputs. Successful retained retries do not advance the
+collector's deduplication or guest ACK point; normal guest acceptance still
+does that, and repeated output delivery is possible.
+
+Retention is bounded at 4096 records and 64 MiB of encoded data, including
+copies in flight. Exceeding either limit or failing to retain an encoded copy
+keeps readiness unhealthy until operator recovery and restart. Generic
+write/flush failures can clear after a later successful all-output write;
+in-flight successes cannot mask newer failures. Retained copies and health
+state are in memory and are lost on restart. See
+[identity matching and recovery](deployment.md#output-failure-recovery).

@@ -160,7 +160,7 @@ func TestMonitorReportsAndResumesAnExpectedStream(t *testing.T) {
 	}
 
 	// The agent comes back.
-	f.m.seen(peer{cid: 102, vsock: true}, f.clock.Now())
+	f.m.seen(peer{cid: 102, vsock: true}, output.Source{VM: "transfer-vm-03", Known: true}, f.clock.Now())
 	resumed := f.waitInternal(t, event.TypeStreamResumed)
 	if resumed.Source.VM != "transfer-vm-03" {
 		t.Errorf("resume reported for %q", resumed.Source.VM)
@@ -211,7 +211,7 @@ func TestMonitorIgnoresPeersWithNoHypervisorIdentity(t *testing.T) {
 	// A peer with no hypervisor-backed identity claims nothing that can refresh
 	// a configured VM's health. Otherwise anything that could reach the
 	// collector could silence a VM's alert by connecting.
-	f.m.seen(peer{cid: 102, vsock: false}, f.clock.Now().Add(10*time.Minute))
+	f.m.seen(peer{cid: 102, vsock: false}, output.Source{VM: "transfer-vm-03", Known: true}, f.clock.Now().Add(10*time.Minute))
 
 	f.clock.advance(91 * time.Second)
 	f.tick()

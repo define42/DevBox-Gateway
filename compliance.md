@@ -8,7 +8,7 @@ The requirements below paraphrase Annex 1, Appendix 4, §26.3.1, printed page 1-
 
 | §26.3.1 requirement | Implemented coverage | Assessment / remaining requirement |
 |---|---|---|
-| Generate and maintain an audit log | DevBox-Gateway emits structured JSON application audits to HEC when configured, otherwise to a local file. HEC delivery first fsyncs application events to a persistent spool and replays them after restart. The gateway also starts its guest-event collector on AF_VSOCK port 9000; SauronAgent collects guest events, spools them, and forwards them to the collector. [Application delivery](internal/audit/hec.go), [guest storage](internal/sauron/sauron.go) | **Conditional; operational verification needed.** Persistence does not make an event durable when disk persistence itself fails. Local application-file writes have no per-event fsync or reported write error. Spool capacity, filesystem durability, disk-full handling and outage recovery must be verified. Guest agents must be installed and running, and collection must be monitored after startup. New VMs receive a vsock device; existing VMs without one are not automatically migrated. |
+| Generate and maintain an audit log | DevBox-Gateway fsyncs each application audit record to its selected local file or HEC spool. The HEC spool replays pending events after restart. The mandatory AF_VSOCK collector receives guest-agent events and monitors agents expected on running managed VMs. Persistence failures and stream health affect `/api/ready`; unexpected collector exit stops the gateway. [Application file](internal/audit/file.go), [application delivery](internal/audit/hec.go), [guest storage](internal/sauron/sauron.go) | **Conditional; operational verification needed.** Storage failures can still prevent retention; a failed application write is reported and latches readiness unhealthy until restart. Verify spool capacity, filesystem durability, rotation, disk-full handling, outage recovery and external monitoring. Guest agents must be installed and running. New VMs receive a vsock device; existing VMs without one are not automatically migrated and make the expected-agent inventory fail. |
 | Include system, application and user events selected through the Security Authority's risk assessment | System-security rules cover execution, permissions, credentials, persistence, kernel, network, time and mounts. DevBox-Gateway logs authentication and selected VM/admin operations. [Built-in policy](SauronAgent/internal/audit/security_paths.go#L32) | **Partial.** The approved event inventory must be mapped against coverage. Not every application action or access denial is currently audited. |
 | Record every successful and unsuccessful login attempt | DevBox-Gateway logs successful authentication and failures, including malformed requests, missing credentials, invalid usernames and rate limits. SauronAgent consumes guest authentication records. [DevBox-Gateway logging](internal/gateway/handlers.go#L378) | **Implemented for DevBox-Gateway login; conditional for guests.** SSH, PAM, desktop login and other authentication services must actually emit audit records. Execution auditing alone does not prove login coverage. |
 | Record logout, including applicable timeouts | DevBox-Gateway records explicit logout, 30-minute browser-session expiry and IP-mismatch invalidation. SauronAgent consumes guest logout/session-end records. [Expiry auditing](internal/session/session_expiry.go#L170) | **Implemented for browser sessions; conditional for guest sessions.** Browser-session expiry does not terminate existing RDP, noVNC or serial-console streams; dashboard-control WebSockets enforce expiry separately. |
@@ -138,23 +138,75 @@ SauronAgent collection remains mandatory: DevBox-Gateway always starts the colle
 
 ### Delivery and compliance boundaries
 
-The gateway requires the guest collector to start successfully, but its
-`/api/health` response only confirms that the HTTP handler is serving. It does
-not check collector lifetime, agent connectivity, audit-file writes or HEC
-delivery. A later collector failure is retained until shutdown; it does not
-automatically stop the gateway or make the health endpoint fail. Monitor event
-arrival and storage/delivery failures independently. See [collector
-lifecycle](internal/sauron/sauron.go) and the [health
-handler](internal/gateway/handlers.go).
+The gateway requires the guest collector to start successfully and exits with
+status 1 if it later stops unexpectedly. `/api/health` remains an HTTP listener
+liveness probe. The separate public `GET /api/ready` returns `200` with
+`ready\n` or `503` with `not ready\n`, without backend details. It checks known
+application audit persistence failures, collector output health, expected
+agents, inventory freshness, pending stream alerts and unreported sequence
+gaps. Readiness does not
+itself block user actions. See [readiness and supervision](internal/gateway/readiness.go).
 
-In application file mode, the gateway opens `AUDIT_LOG_FILE` at startup and
-appends through Go's JSON log handler. File mode does not fsync each record,
-and subsequent write errors are not returned to the caller or reported through
-the operational log. A successful user action therefore does not prove that its
-file audit record was retained. The application file also has no built-in
-rotation. These limits differ from the persistent HEC spool described below;
-verify file durability, capacity and external collection for file-mode
-deployments. See the [application audit writer](internal/audit/audit.go).
+Running persistent VMs with gateway ownership metadata are expected to send
+guest telemetry. The inventory refreshes every 15 seconds; a failed lookup
+retains prior expectations and fails readiness, and a snapshot older than 45
+seconds is stale. The gateway allows `SAURON_AGENT_STARTUP_GRACE` (default `5m`)
+before first contact and `SAURON_AGENT_TIMEOUT` (default `90s`) after contact.
+Missing streams produce loss/resumption events and readiness recovers when the
+current trusted VM identity resumes contact. Heartbeats can establish presence
+without proving audit completeness. Alert output failures are retried; the
+in-memory queue is bounded at 4096 alerts, and overflow keeps readiness unhealthy
+until operator recovery and restart. Verify external alerts consume these
+signals and account for duplicates or alerts lost during a process failure.
+
+In application file mode, every record is appended and fsynced before the
+writer returns. External rename-and-create rotation is detected on the next
+write; retention remains external and `copytruncate` is unsupported. A write
+racing rotation may land in the renamed file. Application persistence errors
+are logged and keep readiness unhealthy until restart even if storage recovers,
+because the failed record cannot be reconstructed automatically. User actions
+are not rolled back after an audit failure. Investigate the audit gap and
+restore storage before restarting. See the [file writer](internal/audit/file.go)
+and [persistence health](internal/audit/health.go).
+
+Rejected guest records keep readiness unhealthy until retries of retained
+copies or matching VM, event boot ID and sequence replays are accepted by every output.
+Unrelated events, heartbeats and successful flushes cannot clear these failures.
+The gateway retries retained copies every second, preserving their original
+attribution after disconnect or identity recovery. Retention is bounded at 4096
+records and 64 MiB of encoded data. Capacity or encoding failures keep readiness
+unhealthy until operator recovery and restart. Restart discards pending copies
+and health state, so investigate delivery before restarting. Background retry
+success does not advance guest acknowledgements; later guest replay can produce
+duplicates. Generic collector write/flush errors can clear after a later
+successful write to every output. See the
+[matching and recovery rules](SauronAgent/docs/deployment.md#output-failure-recovery).
+
+Event acceptance is serialized across sessions sharing a peer or trusted VM
+UUID, preventing concurrent duplicate writes from racing deduplication commit.
+Decoded originals are reserved before blocking work and excluded from
+concurrent HELLO loss claims and gap-report completion until output accepts
+them. Failure or timeout leaves them replayable. Arrival protection is bounded
+by the effective deduplication window; overflow requires investigation and
+restart.
+A pending sequence-gap report independently fails readiness until its loss
+evidence is accepted or missing arrivals remove the gap. A worker retries gap
+reports every second even without new guest traffic or a completed inventory
+query. Accepted loss evidence never establishes delivery of the missing
+records. This pending evidence is held in memory and is lost on restart.
+Each stream also retains at most 64 disjoint accepted loss ranges. Reports
+without accounting capacity wait before another output attempt. Replaying an
+earlier unwritten event or accepting its HELLO-established loss can free that
+capacity while other streams continue reporting.
+
+Once fresh inventory supplies a complete identity for an unresolved session,
+its next valid event or heartbeat triggers reconnection and fresh attribution.
+Already-written records retain their original source. A resolved connection
+keeps its pinned identity through CID reuse.
+
+Remote HEC unavailability alone does not fail readiness while local spooling
+succeeds; readiness also does not probe free disk space or confirm Splunk
+searchability. Continue monitoring capacity and end-to-end event arrival.
 
 Both ACK switches default to `false`, preserving delivery confirmation by an HTTP `2xx` response with valid HEC JSON `code: 0`. Set a stream's switch to `true` only when its Splunk deployment supports HEC indexer acknowledgement and its token has the feature enabled. DevBox-Gateway sends the same generated GUID in `X-Splunk-Request-Channel` on event POSTs and `/services/collector/ack` polls, using the same token. Only an explicit `true` for the submitted payload's exact `ackId` permits successful-delivery checkpoint advancement. False or missing ACK status, malformed replies, transport/HTTP failures and shutdown leave unconfirmed payloads pending. Polling is bounded to five minutes per delivery attempt; the forwarder then retries the stored payload with backoff. Lost responses, timeout or restart can produce duplicates even after Splunk processes a payload.
 
@@ -162,6 +214,16 @@ Event submission and ACK polling must reach the same HEC instance and channel; c
 
 - **Application audits:** HEC is the sole output when configured. Before the delivery sink accepts an event, it is appended and fsynced under `<DATA_ROOT_DIR>/audit-spool`; delivery resumes after a gateway restart, and pending records do not expire during an outage. Delivery is at-least-once, so a crash around acknowledgement can produce duplicates. An HTTP `2xx` response containing valid HEC JSON with `code: 0` is required, together with the exact ID's true ACK when `SPLUNK_HEC_ACK_ENABLED=true`; `400`, `403`, other HTTP failures, invalid responses and nonzero HEC codes remain pending rather than being dropped automatically. `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool at 10 GiB by default. At capacity, pending records are preserved and new audit writes wait for space, which can delay their user actions. A 48-hour objective must be sized from the measured encoded byte rate multiplied by 172800 seconds and operational headroom; 10 GiB alone is not a time guarantee. `AUDIT_LOG_FILE` remains unused in HEC mode, and acknowledged spool data is reclaimed rather than retained as a permanent local copy. Disk/oversize errors are diagnostic failures to persist. During shutdown, capacity waits receive a five-second grace period; after it, not-yet-persisted writes fail so shutdown can complete, while already-spooled records remain for restart replay. This is not an absolute lossless guarantee when storage cannot accept an event. See [application delivery](internal/audit/hec.go).
 - **Guest events:** forwarding uses the persistent `SAURON_SPOOL_DIR` spool and resumes after DevBox-Gateway restarts. With HEC enabled, guest acknowledgement requires acceptance into this spool and any other configured sink, not receipt by Splunk; `SAURON_SPLUNK_HEC_ACK_ENABLED` does not change that guest-ingress contract. Delivery is at-least-once, so duplicates are possible. The spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default); a full spool stops new acknowledgements, leaving events in the guests' bounded spools. Permanently invalid or oversized event submissions can be dropped with diagnostics; ACK errors and unconfirmed ACKs cannot trigger that policy. This is not an unlimited or loss-free retention guarantee. See [guest spool and forwarding](internal/sauron/forward.go) and [guest spool limits](SauronAgent/internal/spool/spool.go).
+
+If the guest-event forwarder cannot save a delivered batch's checkpoint, it
+retries persistence before moving its delivery cursor or sending another batch.
+This resumes after storage recovery even when the spool is full and no new
+append can wake it. A restart before persistence succeeds may replay the batch.
+Guest-agent acknowledgement checkpoints likewise retain records and sequence
+state on persistence failure, so a restart cannot reuse acknowledged sequence
+numbers because their checkpoint write failed. Application and guest HEC spool
+directories are exclusively locked; they must be separate, and concurrent
+gateway processes cannot share one, including through directory aliases.
 
 Separate indexes permit different access and retention policies, but forwarding alone does not establish those policies, tamper protection, review procedures or full NATO compliance. Verify both streams end to end in the deployed Splunk instance, including failure/recovery behaviour and the controls identified under [related requirements](#related-requirements-outside-this-comparison).
 
@@ -372,9 +434,11 @@ For both guest examples, HEC `time` matches the collector's `received_at`, not t
 - Validate application-spool sizing, filesystem durability, capacity backpressure,
   disk-error alerting, restart replay and duplicate handling before claiming every
   required event is retained. HEC mode has no permanent local audit-file copy.
-- In application file mode, address unreported write failures and verify
-  durability and rotation. Verify monitoring detects collector exit and missing
-  guest events while the gateway's HTTP health endpoint remains available.
+- In application file mode, verify fsync durability, external rotation and
+  retention, failure reporting and the recovery procedure for a rejected audit
+  record. Verify readiness alerts and service-manager recovery on the deployed
+  host, including missing agents, stale inventory, collector exit and pending
+  stream alerts. Listener liveness alone does not establish collection health.
 - Integrate external identity and application audit sources for changes outside the covered local Linux mechanisms.
 - Obtain Security Authority acceptance of the risk-assessed event inventory and its mapping to the deployed logging coverage.
 

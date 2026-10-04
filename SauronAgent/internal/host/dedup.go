@@ -90,11 +90,18 @@ type dedup struct {
 	clock      uint64 // monotonic counter used to evict the least recently used stream
 	nextStream uint64
 	streams    map[streamKey]*dedupStream
+	writes     map[string]*streamWriteGate
 }
 
 // dedupStream is the per-stream state.
 type dedupStream struct {
 	identity uint64
+
+	// arrivals protects decoded events before output serialization and while
+	// writes are in flight. Zero references retain an exclusion that could not
+	// yet split a full pending-range table; safe partial reports free that room.
+	arrivals        map[uint64]int
+	arrivalOverflow bool
 
 	// written is the watermark: every sequence up to and including it is
 	// accounted for, meaning it was durably written or it was reported missing.
@@ -174,6 +181,14 @@ func (d *dedup) Check(k streamKey, seq uint64) dedupResult {
 
 	s := d.stream(k)
 	if s == nil {
+		return dedupResult{Blocked: true}
+	}
+	return s.check(seq)
+}
+
+// check requires the owning dedup lock.
+func (s *dedupStream) check(seq uint64) dedupResult {
+	if s.arrivalOverflow {
 		return dedupResult{Blocked: true}
 	}
 	var r dedupResult
@@ -278,7 +293,7 @@ func (d *dedup) NoteMissing(k streamKey, first, last uint64) {
 	// A concurrent successful report may already have released this stream's
 	// pin and allowed eviction. A late completion must not recreate it.
 	s := d.streams[k]
-	if s == nil {
+	if s == nil || s.coversArrival(first, last) {
 		return
 	}
 	d.clock++
@@ -346,7 +361,7 @@ func (d *dedup) evictOldest() bool {
 		found  bool
 	)
 	for k, s := range d.streams {
-		if len(s.pending) != 0 || s.activeGapClaim != 0 {
+		if len(s.pending) != 0 || s.activeGapClaim != 0 || len(s.arrivals) != 0 || s.arrivalOverflow {
 			continue
 		}
 		if !found || s.used < oldest {
@@ -399,14 +414,7 @@ func (s *dedupStream) queueMissing(first, last uint64) bool {
 }
 
 func (s *dedupStream) pendingGap() dedupResult {
-	if len(s.pending) == 0 {
-		return dedupResult{}
-	}
-	gap := s.pending[0]
-	return dedupResult{
-		Gap: true, GapFirst: gap.first, GapLast: gap.last,
-		GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
-	}
+	return s.safePendingGap(0)
 }
 
 // excludePending removes an arriving sequence from retained gap evidence. The
@@ -447,29 +455,7 @@ func (s *dedupStream) excludePending(seq uint64) bool {
 // different range is preferred because accepting its report frees capacity; a
 // portion of the containing range is the fail-safe fallback.
 func (s *dedupStream) pendingGapExcluding(seq uint64) dedupResult {
-	for _, gap := range s.pending {
-		if seq < gap.first || seq > gap.last {
-			return dedupResult{
-				Gap: true, GapFirst: gap.first, GapLast: gap.last,
-				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
-			}
-		}
-	}
-	for _, gap := range s.pending {
-		if gap.first < seq && seq <= gap.last {
-			return dedupResult{
-				Gap: true, GapFirst: gap.first, GapLast: seq - 1,
-				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
-			}
-		}
-		if gap.first <= seq && seq < gap.last {
-			return dedupResult{
-				Gap: true, GapFirst: seq + 1, GapLast: gap.last,
-				GapVersion: gapVersion{stream: s.identity, generation: s.gapGeneration},
-			}
-		}
-	}
-	return dedupResult{}
+	return s.safePendingGap(seq)
 }
 
 // queueReplayMissing excludes events already held out of order and losses
@@ -478,6 +464,10 @@ func (s *dedupStream) queueReplayMissing(last uint64) bool {
 	accounted := make([]seqRange, 0, len(s.ahead)+len(s.missing))
 	accounted = append(accounted, s.missing...)
 	for seq := range s.ahead {
+		accounted = append(accounted, seqRange{first: seq, last: seq})
+	}
+	// Arrivals are excluded from loss claims, never treated as accepted data.
+	for seq := range s.arrivals {
 		accounted = append(accounted, seqRange{first: seq, last: seq})
 	}
 	slices.SortFunc(accounted, func(a, b seqRange) int { return cmp.Compare(a.first, b.first) })
@@ -507,10 +497,14 @@ func (s *dedupStream) prunePending() {
 			s.pending[i].first = s.written + 1
 		}
 	}
+	s.excludeArrivals()
 	s.clearGapSourceIfDrained()
 }
 
 // noteMissing records a reported-lost range and lets the watermark catch up.
+// A range beginning at the watermark's successor is consumed immediately, so
+// it does not need a free retained-range slot even when later losses fill the
+// ledger. This lets accepted HELLO loss evidence unblock the earliest hole.
 func (s *dedupStream) noteMissing(first, last uint64) bool {
 	if last < first || last <= s.written {
 		return true
@@ -535,7 +529,7 @@ func (s *dedupStream) noteMissing(first, last uint64) bool {
 		first = min(first, r.first)
 		last = max(last, r.last)
 	}
-	if len(ranges) >= maxMissingRanges {
+	if len(ranges) >= maxMissingRanges && first != s.written+1 {
 		return false
 	}
 	ranges = append(ranges, seqRange{first: first, last: last})

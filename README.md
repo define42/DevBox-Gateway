@@ -528,6 +528,8 @@ inline comments; put comments on their own lines.
 | `SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY` | `false`                                                                                                | When `true`, skip TLS certificate verification against `SAURON_SPLUNK_HEC_ENDPOINT`.              |
 | `SAURON_SPOOL_DIR`        | _(empty → `<DATA_ROOT_DIR>/sauron-spool`)_                                                                       | Where guest events wait, durably and across gateway restarts, until Splunk HEC accepts them.      |
 | `SAURON_SPOOL_MAX_MIB`    | `10240`                                                                                                          | Disk space the spool may use. Size it for the longest Splunk outage to ride out. `<=0` → the default. |
+| `SAURON_AGENT_STARTUP_GRACE` | `5m` | Time allowed for a newly observed running managed VM to contact the collector. An overdue agent makes `/api/ready` return `503`. Must be positive. |
+| `SAURON_AGENT_TIMEOUT` | `90s` | Maximum silence after an expected agent's first contact. Handshakes, events and heartbeats from its trusted vsock identity refresh this deadline. Must be positive. |
 | `DATA_ROOT_DIR`           | `/var/lib/libvirt/devbox-gateway`                                                                               | Root directory for gateway-managed state (ACME data, images, serial sockets, VNC sockets). Under `/var/lib/libvirt` so QEMU can use it under SELinux. The bundled `docker-compose.yml` overrides this to `/data`. |
 | `VIRT_STORAGE_POOL_NAME`  | `desktop`                                                                                                        | Libvirt storage pool to allocate VM volumes in.                                                   |
 | `BASE_IMAGE_DIR`          | _(empty → `<DATA_ROOT_DIR>/baseimages`)_                                                                          | Directory of selectable QCOW2 base VDI images named `.img`, `.qcow2`, or `.raw`. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image. |
@@ -598,10 +600,18 @@ sudo setfacl -m u:splunk:rx /var/log/devbox-gateway
 sudo setfacl -m u:splunk:r /var/log/devbox-gateway/audit.jsonl
 ```
 
-File mode does not rotate the log or fsync each event. After the file opens,
-write failures through the `slog` handler are not surfaced by `audit.Log` or
-the health endpoint. Monitor disk space and downstream ingestion independently;
-the process keeps the file open until shutdown.
+File mode fsyncs each record and follows external rename-and-create rotation:
+rename the old file and create a replacement at `AUDIT_LOG_FILE`. The next
+write detects the replacement and reopens it; a write racing rotation may land
+in the renamed file. Configure retention externally and preserve the gateway's
+write permissions and any forwarder read permissions on replacement files.
+`copytruncate` is unsupported because truncation can discard concurrent writes.
+
+An application audit persistence error is logged to the operational log and
+makes `/api/ready` return `503`. This state remains until restart, even if later
+writes succeed: the failed record cannot be reconstructed automatically.
+Investigate the failure, restore storage and account for the audit gap before
+restarting. User actions are not rolled back when their audit write fails.
 
 Ordinary process diagnostics remain available through `journalctl` (or Docker
 logs); application audit events go to the selected audit output.
@@ -665,6 +675,9 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
   endpoint. Other custom paths are rejected at startup when ACK is enabled.
 - Delivery is at-least-once. A crash after Splunk accepts an event but before
   its local checkpoint advances can cause that event to be sent twice.
+- Each spool directory is exclusively locked while open. Application and guest
+  HEC spools must use separate directories, and a second gateway cannot open
+  the same spool, including through a directory symlink.
 - `DEVBOX_GATEWAY_SPOOL_MAX_MIB` bounds the spool (10 GiB by default). Existing
   pending events remain intact at capacity; new application audit writes wait
   for delivery to free space instead of being discarded. That backpressure can
@@ -676,9 +689,10 @@ DEVBOX_GATEWAY_SPOOL_MAX_MIB=10240
   reclaimed, and the spool is not a permanent `audit.jsonl` copy or file
   fallback. SauronAgent guest logging and `SAURON_SPOOL_*` are separate.
 - Disk failures, a single event too large for the spool, or writes attempted
-  while the sink is closing are surfaced in process diagnostics. No design can
-  guarantee lossless retention when an event cannot be persisted; monitor these
-  errors and spool capacity through `journalctl` or Docker logs.
+  while the sink is closing are surfaced in process diagnostics and latch
+  application audit readiness as unhealthy until restart. Monitor these errors
+  and spool capacity through `journalctl` or Docker logs. A remote HEC outage
+  alone does not fail readiness while the local sink continues accepting events.
 - On shutdown, blocked capacity waits get a five-second grace period so final
   worker events can use space freed by delivery. After that deadline,
   not-yet-persisted writes return an operational error so shutdown can finish;
@@ -732,6 +746,12 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   If CID lookup fails, the collector still records the event with
   `source.known=false` and a synthetic `unknown-cid-N` name; VM UUID and owner
   labels are then unavailable.
+  Once fresh expected-VM inventory supplies a complete identity, the next valid
+  event or heartbeat on that unresolved connection asks the agent to reconnect.
+  The collector resolves the new connection's identity, and the agent replays
+  unacknowledged records.
+  Existing records keep their original attribution; a fully resolved connection
+  keeps its pinned identity even if the CID is later reused.
 - Events go to `SAURON_EVENT_LOG_FILE` and, when configured, to Splunk HEC, using
   their own endpoint, token, and index so guest telemetry can land in a different
   index than the gateway audit log. In Splunk they arrive with
@@ -748,6 +768,10 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   backoff capped at 30s for however long Splunk is unreachable — days if
   need be — and resumes from its checkpoint after a gateway restart. A long
   outage is reported in the process log every 5 minutes with the spool's size.
+  If saving an accepted batch's checkpoint fails, the forwarder retries that
+  save before reading or sending more events. Recovery does not require a new
+  append, even when the spool is full. A restart before the checkpoint is saved
+  can replay the batch.
 - The gateway spool is bounded by `SAURON_SPOOL_MAX_MIB` (10 GiB by default).
   When it fills, the gateway preserves pending records and stops acknowledging
   new events. Guests then retain events in their own spools (1 GiB by default).
@@ -774,6 +798,9 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   the event submission. This switch is independent of `SPLUNK_HEC_ACK_ENABLED`.
   If both streams share an ACK-enabled token, enable both gateway switches;
   use separate tokens to configure different ACK modes.
+  Concurrent sessions sharing a peer or trusted VM UUID serialize event
+  acceptance through deduplication, output and commit. This prevents simultaneous
+  copies on the same event stream from racing each other.
 - The gateway refuses to start when the guest-event HEC endpoint lacks a token
   (or a token, index or enabled ACK setting lacks an endpoint), or when neither
   the file nor HEC is configured. It also refuses to start when it cannot open
@@ -781,10 +808,35 @@ SAURON_SPLUNK_HEC_ACK_ENABLED=false
   not run `sauronhost` on the same port.
   The shipped systemd unit allows the `AF_VSOCK` socket family; in Docker, see
   the seccomp note under [Quick start](#quick-start-docker-compose).
-- The collector's stream-loss alert (`sauron.stream.lost`) only watches VMs
-  listed in a static `sauronhost` configuration, so it is not active for the
-  gateway's VMs: a VM whose agent is stopped or was never installed is not
-  reported.
+- Every 15 seconds the collector refreshes its expected agents from running,
+  persistent VMs with gateway ownership metadata. A new VM gets
+  `SAURON_AGENT_STARTUP_GRACE` to connect; after first contact,
+  `SAURON_AGENT_TIMEOUT` bounds silence. Overdue agents emit
+  `sauron.stream.lost` and make `/api/ready` return `503`; matching traffic emits
+  `sauron.stream.resumed`. Only the current trusted CID, VM name and UUID can
+  refresh that VM's deadline. Stopped or removed VMs leave the expected set on
+  the next successful inventory refresh.
+- Inventory errors retain the previous expectations and fail readiness. An
+  inventory query that does not complete leaves readiness unhealthy once the
+  snapshot is older than 45 seconds. Running managed VMs without an assigned
+  vsock CID also fail the inventory check. Missing agents and inventory errors
+  recover automatically after valid traffic or inventory returns; neither
+  condition restarts the gateway. An unexpected collector exit terminates the
+  gateway with exit status 1 so its service manager can restart it.
+- Stream alerts wait for successful output acceptance and are retried after
+  storage recovery. The in-memory alert queue holds at most 4096 entries;
+  overflow logs an error and keeps readiness unhealthy until operator recovery
+  and restart. Partial acceptance by multiple outputs can produce duplicate
+  alerts. See [monitoring and recovery](SauronAgent/docs/deployment.md#6-what-to-monitor).
+- Unreported sequence gaps also fail readiness, including while their output
+  write is in progress. A separate worker retries pending gap reports every
+  second, independently of guest traffic and inventory queries. A gap clears
+  when its loss report is accepted or the missing events arrive. Accepted loss
+  evidence does not prove those original events were delivered or clear a
+  rejected guest record's health tracking. When loss accounting is full, a
+  report waits for capacity before another output attempt; other streams can
+  continue. Received originals are protected before waiting for output, so a
+  concurrent loss report cannot acknowledge an original still awaiting storage.
 
 For example, `index=devbox_sauron sourcetype="devbox-gateway:sauron"
 event.type=process.exec source.labels.owner=alice` lists every program alice's
@@ -1147,12 +1199,36 @@ The [HTTP endpoint reference](docs/http-api.md) describes the dashboard routes,
 authentication, request formats, and WebSocket endpoints. OpenAPI, schema, and
 interactive API-documentation routes are disabled in the gateway.
 
-`GET /api/health` returns `200 OK` with `ok` when the public HTTP handler can
-respond. It does not check LDAP, libvirt, audit delivery, or the guest collector.
+Both probes are public and return plain text:
+
+| Probe | Response | Meaning |
+| --- | --- | --- |
+| `GET /api/health` | `200` with `ok\n` | HTTP listener liveness. |
+| `GET /api/ready` | `200` with `ready\n`, or `503` with `not ready\n` | Application audit persistence status and guest collector readiness, including expected agents, inventory freshness, pending stream alerts and unreported sequence gaps. |
+
+Readiness responses contain no VM identities, storage paths or backend errors.
+The probe reports known failures; it does not test LDAP, free disk space or
+whether Splunk events are searchable. A remote HEC outage can leave readiness
+healthy while events queue durably. A rejected guest record keeps readiness
+unhealthy until the record is accepted by every configured output. The gateway
+retains copies of rejected records and retries them every second, preserving
+their original attribution even after a guest disconnects or its identity
+resolves. Guest replay can also recover a matching failure; unrelated events
+and heartbeats cannot clear it. Generic collector write/flush failures can clear
+after a later successful write to every output. Retained retries are bounded at
+4096 records and 64 MiB of encoded data. Overflow or failure to retain a copy
+requires operator recovery and restart. These copies and their health state
+are lost on restart, so investigate delivery before restarting. Application
+audit persistence errors also require investigation and
+restart to clear. See [output recovery](SauronAgent/docs/deployment.md#output-failure-recovery)
+for the matching and recovery rules.
+Readiness does not itself block dashboard or RDP access.
+
 For the local Compose setup with a self-signed certificate:
 
 ```sh
 curl --insecure --fail https://localhost/api/health
+curl --insecure --fail https://localhost/api/ready
 ```
 
 Use certificate verification when probing a deployment with a trusted certificate.

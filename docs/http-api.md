@@ -38,6 +38,7 @@ See [session handling](../internal/session/session.go) and
 | POST | `/logout` | Same-origin | Clear the current session; for an authenticated user, remove all their sessions and request closure of tracked connections. Redirect to `/login` with `303`. No form fields. |
 | GET | `/static/*` | Public | Embedded dashboard, noVNC and other browser assets. |
 | GET | `/api/health` | Public | Listener liveness: `200` with `ok\n`. |
+| GET | `/api/ready` | Public | Audit and collector readiness: `200` with `ready\n`, or `503` with `not ready\n`. No backend details in the response. |
 | GET | `/api/dashboard` | Session | Render the user's dashboard. |
 | GET | `/api/dashboard/data` | Session | JSON inventory for the user, including available base images. HTTP bootstrap sets `rdpReady` to false; the dashboard WebSocket probes readiness. |
 | POST | `/api/dashboard` | Session, same-origin | Create a VM using the fields below. Returns JSON or an opted-in NDJSON progress stream. |
@@ -139,18 +140,65 @@ limits, see [dashboard sockets](../internal/console/dashboard_socket.go),
 [serial](../internal/console/serial.go), [VNC](../internal/console/vnc.go) and
 [shared WebSocket handling](../internal/console/console.go).
 
-## Health check
+## Health and readiness checks
 
 For the bundled local stack with its self-signed development certificate:
 
 ```sh
 curl --insecure --fail https://localhost/api/health
+curl --insecure --fail https://localhost/api/ready
 ```
 
 Use normal certificate verification for a deployment with a trusted certificate.
-The handler accepts requests without authentication and is registered without a
-method restriction; `GET` is sufficient for a probe. Its `200` response confirms
-that the HTTP listener serves requests. It does not test LDAP, libvirt, audit
-storage, the guest collector or Splunk delivery readiness. See the
-[health handler](../internal/gateway/handlers.go) and the
-[audit delivery limitations](../compliance.md#delivery-and-compliance-boundaries).
+`/api/health` accepts requests without authentication and is registered without
+a method restriction; `GET` is sufficient. Its `200` response confirms that the
+HTTP listener serves requests.
+
+`GET /api/ready` checks application audit persistence status and the mandatory
+guest collector. It returns plain text, disables caching, and includes no VM
+identities, storage paths or backend errors. A stopped collector, known output
+failure, failed or stale expected-VM inventory, overdue agent or pending stream
+alert or sequence-gap report makes it return `503`. Gap reports remain pending
+while their output write is in progress and retry every second independently
+of guest traffic or inventory queries. Accepting a gap report records loss;
+it does not establish delivery of the missing original events.
+
+The gateway refreshes running managed VM expectations every 15 seconds. A
+snapshot older than 45 seconds is stale. New expectations allow
+`SAURON_AGENT_STARTUP_GRACE` (default `5m`) before first contact;
+`SAURON_AGENT_TIMEOUT` (default `90s`) bounds later silence. Inventory and stream
+conditions recover automatically. A rejected guest record clears only when a
+retry of its retained copy or replay with matching VM identity, original event
+boot ID and sequence is accepted by every configured output. A separate worker
+retries up to 64 retained records every second with a five-second context deadline per
+pass, preserving their original attribution after disconnect or identity
+recovery. Heartbeats and unrelated successful writes cannot clear a rejection.
+Generic collector write/flush failures may clear after a later successful write
+to every output. Background retries do not advance guest acknowledgements;
+normal guest acceptance still does that, and duplicate output is possible.
+
+When fresh inventory can resolve a previously unknown or incomplete guest
+identity, its next valid event or heartbeat triggers a reconnect. The new
+connection is resolved by the collector and can satisfy that VM's stream check.
+Concurrent sessions sharing a peer or trusted VM UUID serialize event
+acceptance, so a duplicate cannot race the accepted copy's deduplication commit.
+Originals are registered before blocking identity or output work, preventing
+concurrent loss reports from acknowledging a received event before storage.
+When the per-stream accounting limit of 64 accepted loss ranges is full, reports
+wait for capacity before another output attempt; other streams continue.
+
+The gateway retains up to 4096 rejected records and 64 MiB of encoded data in
+memory, separately from its 4096 queued stream alerts. Overflow or failure to
+retain a copy requires operator recovery and restart. Arrival protection is
+also bounded by the effective deduplication window; its overflow requires the
+same recovery. Investigate delivery before restarting: restart discards pending
+copies and health state without establishing that the records arrived.
+Application audit persistence failures also require investigation and restart. See
+[output recovery](../SauronAgent/docs/deployment.md#output-failure-recovery).
+An unexpected collector exit terminates the gateway with exit status 1.
+
+Readiness reports observed failures; it does not probe LDAP, free disk space or
+Splunk searchability, and a remote HEC outage alone does not fail it while local
+spooling succeeds. A `503` does not itself block other HTTP or RDP requests.
+See [readiness handling](../internal/gateway/readiness.go) and
+[audit delivery boundaries](../compliance.md#delivery-and-compliance-boundaries).

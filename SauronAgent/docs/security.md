@@ -102,8 +102,10 @@ root and kernel control in the guest an attacker can:
   audit subsystem ever emits them.
 
 Host storage keeps already-delivered records outside the guest's direct
-control. Stream monitoring detects stopped delivery only for configured
-expected VMs. A compromised guest can continue heartbeats while selectively
+control. Stream monitoring detects stopped delivery for expected VMs, including
+agents that never connect. Standalone SauronHost uses its static expected list;
+DevBox Gateway refreshes expectations from running managed VMs. A compromised
+guest can continue heartbeats while selectively
 suppressing or fabricating audit events, so those actions need not trigger a
 stream-loss alert. The heartbeat's `audit_enabled` flag reflects startup
 configuration and is not an independent kernel-status check.
@@ -225,9 +227,29 @@ break it silently rather than loudly:
 
 ## 7. Operating this safely
 
-* **Keep `vms:` accurate and mark production VMs `expected: true`.** The
-  stream-loss alert is the design's only detection for an agent killed inside a
-  compromised guest.
+* **Keep expected agents accurate.** Standalone SauronHost uses `vms:` entries
+  marked `expected: true`; DevBox Gateway supplies running managed VMs from
+  libvirt. Monitor the gateway's `/api/ready` as well as stream-loss events.
+  Inventory failures, overdue agents, output failures and pending stream alerts
+  can make collection unready while the HTTP listener remains alive. Stream
+  liveness does not establish that a compromised guest reports every event.
+  Rejected guest records remain unhealthy until a retry of the retained copy or
+  matching guest replay is accepted by every output; unrelated successful
+  events cannot clear them. The gateway retries copies every second with their original
+  attribution, including after disconnect or identity recovery. Retention is
+  bounded at 4096 records and 64 MiB of encoded data. Investigate pending records
+  and overflow before restarting, because retry copies and health state are
+  held in memory. See
+  [output recovery](deployment.md#output-failure-recovery).
+  Pending sequence gaps also fail readiness until their loss evidence reaches
+  outputs or missing arrivals remove the gap. Accepting a loss report does not
+  prove delivery of the missing records. Unresolved dynamic connections can
+  reconnect when fresh inventory restores their identity; existing records
+  and fully resolved sessions keep their pinned attribution.
+  Decoded originals are protected before output waits, so concurrent loss
+  reports cannot acknowledge them before storage. Loss reports wait for
+  accounting capacity before another output attempt. Arrival-protection
+  overflow also requires investigation and restart.
 * **Alert on the internal events.** `sauron.stream.lost`,
   `sauron.queue.overflow`, `sauron.spool.full` and `sauron.audit.lost` are
   security events, not operational noise.

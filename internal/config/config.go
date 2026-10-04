@@ -223,6 +223,8 @@ func (s *Settings) setSauronDefaults() {
 	s.SetBool(SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY, "Skip TLS certificate verification when connecting to SAURON_SPLUNK_HEC_ENDPOINT", false)
 	s.SetString(SAURON_SPOOL_DIR, "Directory where SauronAgent guest events wait, durably and across gateway restarts, until Splunk HEC accepts them. Empty -> <DATA_ROOT_DIR>/sauron-spool", "")
 	s.SetInt(SAURON_SPOOL_MAX_MIB, "Disk space in MiB SAURON_SPOOL_DIR may use; size it for the longest Splunk outage to ride out. When full, new guest events are no longer acknowledged and wait in the guests' own spools. Values <=0 fall back to the default", DefaultSauronSpoolMaxMiB)
+	s.SetDuration(SAURON_AGENT_STARTUP_GRACE, "Time for a running managed VM to connect its audit agent before readiness fails", 5*time.Minute)
+	s.SetDuration(SAURON_AGENT_TIMEOUT, "Maximum silence from an expected guest audit agent before readiness fails", 90*time.Second)
 }
 
 func (s *Settings) setAuthDefaults() {
@@ -656,6 +658,8 @@ const (
 	SAURON_SPLUNK_HEC_TOKEN           = "SAURON_SPLUNK_HEC_TOKEN" // #nosec G101 -- setting key name, not a credential
 	SAURON_SPOOL_DIR                  = "SAURON_SPOOL_DIR"
 	SAURON_SPOOL_MAX_MIB              = "SAURON_SPOOL_MAX_MIB"
+	SAURON_AGENT_STARTUP_GRACE        = "SAURON_AGENT_STARTUP_GRACE"
+	SAURON_AGENT_TIMEOUT              = "SAURON_AGENT_TIMEOUT"
 	SPLUNK_HEC_ACK_ENABLED            = "SPLUNK_HEC_ACK_ENABLED"
 	SPLUNK_HEC_ENDPOINT               = "SPLUNK_HEC_ENDPOINT"
 	SPLUNK_HEC_INDEX                  = "SPLUNK_HEC_INDEX"

@@ -186,7 +186,7 @@ func (s *session) handshake() error {
 		"agent_version", hello.AgentVersion,
 		"resume_from", resume,
 		"first_sequence", hello.FirstSequence)
-	s.srv.monitor.seen(s.peer, s.srv.now())
+	s.srv.monitor.seen(s.peer, s.src, s.srv.now())
 
 	// first_sequence is the lowest sequence the agent can still replay. If it
 	// starts above what the host holds, the events in between exist nowhere any
@@ -282,9 +282,31 @@ func (s *session) handleEvent(f *protocol.Frame) error {
 		return s.violation(protocol.ErrCodeBadSequence,
 			"event sequence %d does not match frame sequence %d", ev.Sequence, f.Sequence)
 	}
+	arrival, err := s.srv.dedup.reserveArrival(s.key, ev.Sequence, s.src)
+	if err != nil {
+		// Old boots can fill the table with retained loss evidence. Recover
+		// those reports before retrying admission of a new stream.
+		s.srv.retryPendingGaps(s.writeCtx)
+		arrival, err = s.srv.dedup.reserveArrival(s.key, ev.Sequence, s.src)
+	}
+	if err != nil {
+		return err
+	}
+	defer arrival.release()
+	if err := s.requireResolvedIdentity(); err != nil {
+		return err
+	}
+
+	// Arrival has already invalidated covering loss claims. Serialize acceptance
+	// so concurrent copies cannot both write before either commits its result.
+	unlock, err := s.lockEventWrite()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	s.srv.metrics.EventsReceived.Add(1)
-	s.srv.monitor.seen(s.peer, s.srv.now())
+	s.srv.monitor.seen(s.peer, s.src, s.srv.now())
 
 	res := s.srv.dedup.Check(s.key, ev.Sequence)
 	if res.Blocked && !res.Gap {
@@ -354,7 +376,10 @@ func (s *session) handlePing(f *protocol.Frame) error {
 	if err := protocol.DecodePayload(f, &ping); err != nil {
 		return s.violation(protocol.ErrCodeBadPayload, "decoding PING: %v", err)
 	}
-	s.srv.monitor.seen(s.peer, s.srv.now())
+	if err := s.requireResolvedIdentity(); err != nil {
+		return err
+	}
+	s.srv.monitor.seen(s.peer, s.src, s.srv.now())
 
 	attrs := []any{
 		"uptime", ping.UptimeSeconds,
@@ -585,10 +610,10 @@ func (s *Server) publishGap(ctx context.Context, publication gapPublication, rea
 		"boot_id":                key.boot,
 		"reason":                 reason,
 	}))
-	s.dedup.finishGap(publication, err == nil)
+	accounted := s.dedup.finishGap(publication, err == nil)
 	if err != nil {
 		s.metrics.OutputErrors.Add(1)
 		return false
 	}
-	return true
+	return accounted
 }

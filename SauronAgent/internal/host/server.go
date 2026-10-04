@@ -86,9 +86,15 @@ type Options struct {
 	// the vms list; ok=false falls through to that list and then to
 	// limits.allow_unknown_cids. Whatever it returns is trusted exactly like a
 	// vms entry, so it must derive the answer from the hypervisor and never
-	// from anything the guest says. The expected flag of a resolved VM is
-	// ignored: stream monitoring covers the vms list only.
+	// from anything the guest says. ExpectedVMs independently declares the
+	// running guests whose telemetry must be present.
 	Resolve func(cid uint32) (config.VMMapping, bool)
+	// ExpectedVMs returns the complete current set of running VMs to monitor.
+	// Nil preserves the static expected entries in Config.VMs.
+	ExpectedVMs func() ([]config.VMMapping, error)
+	// StartupGrace bounds the first connection delay for a newly expected VM.
+	// Zero uses the normal stream timeout.
+	StartupGrace time.Duration
 }
 
 // Server is the collector. It accepts guest connections on one listener and
@@ -125,6 +131,8 @@ type Server struct {
 	running      atomic.Bool
 	quit         chan struct{}
 	done         chan struct{}
+	servingDone  chan struct{}
+	servingErr   error
 	closeOnce    sync.Once
 	listenerOnce sync.Once
 	listenerErr  error
@@ -174,19 +182,20 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:        cfg,
-		sink:       opts.Sink,
-		metrics:    counters,
-		log:        logger,
-		listener:   listener,
-		maxPayload: effectiveMaxPayload(cfg),
-		enrich:     newEnricher(cfg, opts.Resolve),
-		dedup:      newDedup(cfg.Limits.DedupWindow, maxTrackedStreams(cfg)),
-		now:        time.Now,
-		peerCID:    transport.PeerCID,
-		perPeer:    make(map[string]int),
-		quit:       make(chan struct{}),
-		done:       make(chan struct{}),
+		cfg:         cfg,
+		sink:        opts.Sink,
+		metrics:     counters,
+		log:         logger,
+		listener:    listener,
+		maxPayload:  effectiveMaxPayload(cfg),
+		enrich:      newEnricher(cfg, opts.Resolve),
+		dedup:       newDedup(cfg.Limits.DedupWindow, maxTrackedStreams(cfg)),
+		now:         time.Now,
+		peerCID:     transport.PeerCID,
+		perPeer:     make(map[string]int),
+		quit:        make(chan struct{}),
+		done:        make(chan struct{}),
+		servingDone: make(chan struct{}),
 	}
 	s.report = &reporter{
 		sink:    opts.Sink,
@@ -195,6 +204,10 @@ func New(opts Options) (*Server, error) {
 		now:     func() time.Time { return s.now() },
 	}
 	s.monitor = newMonitor(cfg, s.report, counters, logger, func() time.Time { return s.now() })
+	s.monitor.expected = opts.ExpectedVMs
+	if opts.StartupGrace > 0 {
+		s.monitor.startupGrace = opts.StartupGrace
+	}
 	return s, nil
 }
 
@@ -226,6 +239,8 @@ func (s *Server) Run(ctx context.Context) error {
 	stopAccept := context.AfterFunc(ctx, func() { _ = s.closeListener() })
 	defer stopAccept()
 
+	gapRetryDone := s.startGapRetries(ctx)
+
 	var monitorDone chan struct{}
 	if s.cfg.Monitor.Enabled {
 		monitorDone = make(chan struct{})
@@ -241,13 +256,19 @@ func (s *Server) Run(ctx context.Context) error {
 		"hypervisor", s.cfg.Host.Name)
 
 	runErr := s.accept(ctx)
+	s.servingErr = runErr
+	close(s.servingDone)
+	if runErr != nil {
+		s.log.Error("collector stopped accepting guests", "error", runErr)
+	}
 	// A fatal listener error ends acceptance without cancelling the parent.
-	// Stop the sessions and monitor before waiting for either to finish.
+	// Stop the sessions and background workers before waiting for them.
 	cancel()
 
 	// Sessions are woken by the same context and finish what they were doing;
 	// the sink must stay open until the last of them has stopped writing to it.
 	s.sessions.Wait()
+	<-gapRetryDone
 	if monitorDone != nil {
 		<-monitorDone
 	}
@@ -264,7 +285,7 @@ func (s *Server) accept(ctx context.Context) error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+			if ctx.Err() != nil {
 				return nil
 			}
 			var ne net.Error

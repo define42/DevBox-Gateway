@@ -6,11 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-
-	"golang.org/x/sys/unix"
 )
 
 // DeliveryPosition identifies a record boundary in a delivery spool.
@@ -27,7 +24,6 @@ type DeliveryRecord struct {
 // The directory lock is held until Close has finished all storage operations.
 type DeliverySpool struct {
 	store *spool
-	lock  *os.File
 
 	mu       sync.Mutex
 	changed  chan struct{}
@@ -45,40 +41,11 @@ func OpenDeliverySpool(dir string, maxBytes int64) (*DeliverySpool, error) {
 	if strings.TrimSpace(dir) == "" || maxBytes <= 0 {
 		return nil, errors.New("delivery spool requires a directory and a positive size limit")
 	}
-	lock, err := lockDeliveryDirectory(dir)
+	store, err := openSpool(dir, maxBytes)
 	if err != nil {
 		return nil, err
 	}
-	store, err := openSpool(dir, maxBytes)
-	if err != nil {
-		return nil, errors.Join(err, lock.Close())
-	}
-	return &DeliverySpool{store: store, lock: lock, changed: make(chan struct{})}, nil
-}
-
-func lockDeliveryDirectory(dir string) (*os.File, error) {
-	if err := os.MkdirAll(dir, spoolDirMode); err != nil {
-		return nil, fmt.Errorf("create delivery spool directory: %w", err)
-	}
-	lockPath := filepath.Join(dir, ".lock")
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600) // #nosec G304 -- fixed lock filename under the operator-configured spool directory
-	if err != nil {
-		return nil, fmt.Errorf("open delivery spool lock: %w", err)
-	}
-	info, err := lock.Stat()
-	if err == nil && !info.Mode().IsRegular() {
-		err = errors.New("delivery spool lock must be a regular file")
-	}
-	if err == nil {
-		err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-	}
-	if err == nil {
-		err = lock.Chmod(0o600)
-	}
-	if err != nil {
-		return nil, errors.Join(fmt.Errorf("acquire delivery spool lock: %w", err), lock.Close())
-	}
-	return lock, nil
+	return &DeliverySpool{store: store, changed: make(chan struct{})}, nil
 }
 
 // Append returns after record is on stable storage. A full spool waits for
@@ -185,7 +152,7 @@ func (s *DeliverySpool) Close() error {
 		close(s.changed)
 		s.mu.Unlock()
 		s.inFlight.Wait()
-		s.closeErr = errors.Join(s.store.Close(), s.lock.Close())
+		s.closeErr = s.store.Close()
 	})
 	return s.closeErr
 }

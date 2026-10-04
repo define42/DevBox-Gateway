@@ -24,7 +24,8 @@ import (
 
 const gatewayShutdownTimeout = 5 * time.Second
 
-// Run boots the gateway and blocks until ctx is canceled or the listener stops.
+// Run boots the gateway and blocks until ctx is canceled or a mandatory
+// listener or collector stops.
 // It returns a process exit code so the command entrypoint remains a thin
 // adapter around the application lifecycle.
 func Run(ctx context.Context) int {
@@ -40,19 +41,7 @@ func Run(ctx context.Context) int {
 		}
 	}()
 
-	select {
-	case <-ctx.Done():
-		return 0
-	case <-gateway.done:
-		// The accept loop exited without a shutdown signal, i.e. Accept failed
-		// permanently. Exit non-zero so systemd's Restart=on-failure replaces
-		// the process instead of leaving it alive but unable to serve anything
-		// (including /api/health, which is answered through this listener).
-		if gateway.serveErr != nil {
-			log.Printf("gateway stopped serving: %v", gateway.serveErr)
-		}
-		return 1
-	}
+	return gateway.wait(ctx)
 }
 
 type gatewayRuntime struct {
@@ -251,11 +240,10 @@ func bootGateway() (_ *gatewayRuntime, retErr error) {
 		return nil, err
 	}
 
-	runtime, err := startGatewayRuntime(settings, sessionManager, auditSink)
+	runtime, err := startGatewayRuntimeWithCollector(settings, sessionManager, auditSink, collector)
 	if err != nil {
 		return nil, errors.Join(err, collector.Close())
 	}
-	runtime.sauron = collector
 	keepAuditSink = true
 	return runtime, nil
 }
@@ -281,9 +269,12 @@ func sauronOptions(settings *config.Settings) sauron.Options {
 			ACKEnabled:         settings.Bool(config.SAURON_SPLUNK_HEC_ACK_ENABLED),
 			InsecureSkipVerify: settings.Bool(config.SAURON_SPLUNK_HEC_SKIP_TLS_VERIFY),
 		},
-		SpoolDir:      config.SauronSpoolDir(settings),
-		SpoolMaxBytes: config.SauronSpoolMaxBytes(settings),
-		Resolve:       resolveSauronGuest,
+		SpoolDir:          config.SauronSpoolDir(settings),
+		SpoolMaxBytes:     config.SauronSpoolMaxBytes(settings),
+		Resolve:           resolveSauronGuest,
+		ExpectedVMs:       expectedSauronGuests,
+		AgentStartupGrace: settings.Duration(config.SAURON_AGENT_STARTUP_GRACE),
+		AgentTimeout:      settings.Duration(config.SAURON_AGENT_TIMEOUT),
 	}
 }
 
@@ -291,13 +282,22 @@ func sauronOptions(settings *config.Settings) sauron.Options {
 // libvirt assigned its vsock CID to.
 func resolveSauronGuest(cid uint32) (sauron.VM, bool, error) {
 	guest, ok, err := virt.LookupVSockGuest(cid)
-	return sauron.VM{Name: guest.Name, UUID: guest.UUID, Owner: guest.Owner}, ok, err
+	return sauron.VM{CID: guest.CID, Name: guest.Name, UUID: guest.UUID, Owner: guest.Owner}, ok, err
 }
 
 func startGatewayRuntime(
 	settings *config.Settings,
 	sessionManager *session.Manager,
 	auditSink io.Closer,
+) (*gatewayRuntime, error) {
+	return startGatewayRuntimeWithCollector(settings, sessionManager, auditSink, nil)
+}
+
+func startGatewayRuntimeWithCollector(
+	settings *config.Settings,
+	sessionManager *session.Manager,
+	auditSink io.Closer,
+	collector io.Closer,
 ) (*gatewayRuntime, error) {
 	frontTLS, err := cert.NewTLSManager(settings)
 	if err != nil {
@@ -325,9 +325,10 @@ func startGatewayRuntime(
 		httpServers:    newHTTPServerRegistry(),
 		sessionManager: sessionManager,
 		auditSink:      auditSink,
+		sauron:         collector,
 		done:           done,
 	}
-	mux := NewHandler(sessionManager, settings)
+	mux := newHandler(sessionManager, settings, runtime.readiness)
 	go func() {
 		runtime.serveErr = serveListenerWithHTTPServers(ln, mux, frontTLS, sessionManager, settings, runtime.httpServers)
 		close(done)

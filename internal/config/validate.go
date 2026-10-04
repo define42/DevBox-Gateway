@@ -108,6 +108,11 @@ func ValidateSauron(settings *Settings) error {
 	if settings == nil {
 		return fmt.Errorf("settings is nil")
 	}
+	for _, key := range []string{SAURON_AGENT_STARTUP_GRACE, SAURON_AGENT_TIMEOUT} {
+		if settings.Duration(key) <= 0 {
+			return fmt.Errorf("%s must be positive", key)
+		}
+	}
 	endpointSet := strings.TrimSpace(settings.Get(SAURON_SPLUNK_HEC_ENDPOINT)) != ""
 	if err := validateHECSettings(settings, SAURON_SPLUNK_HEC_ENDPOINT, SAURON_SPLUNK_HEC_TOKEN, SAURON_SPLUNK_HEC_INDEX, SAURON_SPLUNK_HEC_ACK_ENABLED, "SauronAgent guest events"); err != nil {
 		return err

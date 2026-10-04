@@ -17,6 +17,7 @@ package collector
 import (
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/define42/devbox-gateway/SauronAgent/internal/config"
 	"github.com/define42/devbox-gateway/SauronAgent/internal/event"
@@ -74,9 +75,17 @@ type Options struct {
 	Logger *slog.Logger
 	// Resolve maps a hypervisor-assigned CID to its VM when a connection
 	// arrives. It is consulted once per VSOCK connection, before Config.VMs.
-	// Resolved VMs are not added to the expected-stream monitor; that monitor
-	// covers only Config.VMs entries marked Expected.
+	// ExpectedVMs separately declares which running VMs must send telemetry.
 	Resolve func(cid uint32) (VM, bool)
+	// ExpectedVMs supplies a complete trusted snapshot of running VMs to watch.
+	// An error retains the previous snapshot and degrades Readiness. Nil uses
+	// Config.VMs entries marked Expected. The callback must return promptly.
+	ExpectedVMs func() ([]VM, error)
+	// StartupGrace gives newly expected VMs time to boot and connect. Zero
+	// uses Config.Monitor.Timeout, preserving standalone monitoring behavior.
+	StartupGrace time.Duration
+	// StreamTimeout overrides Config.Monitor.Timeout when positive.
+	StreamTimeout time.Duration
 	// Listener, when set, replaces the socket Config.Listen describes. The
 	// Server owns it and closes it on shutdown.
 	Listener net.Listener
@@ -86,11 +95,16 @@ type Options struct {
 // collector that cannot listen fails here rather than after it has been
 // reported healthy. Call Run to serve and Close to stop.
 func New(opts Options) (*Server, error) {
+	if opts.StreamTimeout > 0 {
+		opts.Config.Monitor.Timeout = config.Duration(opts.StreamTimeout)
+	}
 	hostOptions := host.Options{
-		Config:  opts.Config,
-		Sink:    opts.Sink,
-		Logger:  opts.Logger,
-		Resolve: opts.Resolve,
+		Config:       opts.Config,
+		Sink:         opts.Sink,
+		Logger:       opts.Logger,
+		Resolve:      opts.Resolve,
+		ExpectedVMs:  opts.ExpectedVMs,
+		StartupGrace: opts.StartupGrace,
 	}
 	// Assigned only when set: a nil net.Listener stored in the interface would
 	// be a non-nil transport.Listener, and the collector would accept on it.

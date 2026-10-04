@@ -271,6 +271,9 @@ func TestValidateSauron(t *testing.T) {
 		wantErr string
 	}{
 		{name: "mandatory collection with default event log"},
+		{name: "zero startup grace", env: map[string]string{SAURON_AGENT_STARTUP_GRACE: "0s"}, wantErr: SAURON_AGENT_STARTUP_GRACE},
+		{name: "negative agent timeout", env: map[string]string{SAURON_AGENT_TIMEOUT: "-1s"}, wantErr: SAURON_AGENT_TIMEOUT},
+		{name: "custom monitoring windows", env: map[string]string{SAURON_AGENT_STARTUP_GRACE: "10m", SAURON_AGENT_TIMEOUT: "2m"}},
 		{name: "file output with acknowledgement disabled", env: map[string]string{SAURON_SPLUNK_HEC_ACK_ENABLED: "false"}},
 		{name: "hec with acknowledgement enabled", env: map[string]string{
 			SAURON_SPLUNK_HEC_ENDPOINT: "https://splunk.example.test:8088", SAURON_SPLUNK_HEC_TOKEN: "token", SAURON_SPLUNK_HEC_ACK_ENABLED: "true",

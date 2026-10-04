@@ -43,6 +43,7 @@ func assertVSockGuest(t *testing.T, name string, want VSockGuest) uint32 {
 			t.Fatalf("domain uuid: %v", err)
 		}
 	}
+	want.CID = cid
 
 	guest, found, err := LookupVSockGuest(cid)
 	if err != nil || !found {

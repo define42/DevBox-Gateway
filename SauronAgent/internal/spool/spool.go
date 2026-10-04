@@ -465,45 +465,47 @@ func (s *Spool) NextAfter(through uint64, max int) ([]*event.Event, error) {
 // deleted, and the checkpoint is written atomically so that a crash leaves
 // either the old position or the new one and never a half-written number. An
 // acknowledgement of a sequence that is already covered, or of anything below
-// the current position, is a no-op; an acknowledgement beyond the last
-// appended event is treated as covering everything the spool holds, since the
-// host cannot have acknowledged what was never sent to it.
+// the current position, retries any unfinished cleanup; an acknowledgement
+// beyond the last appended event is treated as covering everything the spool
+// holds, since the host cannot have acknowledged what was never sent to it.
 //
-// If the checkpoint cannot be written the error is returned but the data is
-// still discarded: the host has the events, and the worst a stale checkpoint
-// can cause is a replay of already-delivered events after a restart.
+// If the checkpoint cannot be written, the records and acknowledgement cursor
+// are retained so the same ACK can be retried. Retaining the records also
+// preserves LastSequence across a restart: deleting them without a durable
+// checkpoint could reuse sequence numbers for new events that the host would
+// then discard as duplicates.
 func (s *Spool) Ack(seq uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return errClosed
 	}
-	if seq == 0 || seq <= s.ackedThrough {
+	if seq == 0 {
 		return nil
 	}
 	if seq > s.lastSeq {
 		seq = s.lastSeq
 	}
-	if seq <= s.ackedThrough {
+	if seq == 0 {
 		return nil
 	}
-	s.ackedThrough = seq
-
-	cpErr := s.writeCheckpoint()
-	if cpErr != nil {
-		s.log.Error("spool checkpoint not written; acknowledged events may be replayed after a restart",
-			"error", cpErr, "acked_through", seq)
+	if seq > s.ackedThrough {
+		if err := s.writeCheckpoint(seq); err != nil {
+			s.log.Error("spool checkpoint not written; retaining acknowledged events for retry",
+				"error", err, "acked_through", seq)
+			return err
+		}
+		s.ackedThrough = seq
 	}
 
-	if err := s.dropAckedSegments(); err != nil {
-		return err
-	}
-	if err := s.advanceAckCursor(); err != nil {
-		return err
-	}
+	// Cleanup may have removed only a prefix before failing. Refresh the
+	// remaining cursor and totals even then, so readers and repeated ACKs can
+	// keep making progress without reopening the spool.
+	dropErr := s.dropAckedSegments()
+	cursorErr := s.advanceAckCursor()
 	s.recount()
 	s.publishMetrics()
-	return cpErr
+	return errors.Join(dropErr, cursorErr)
 }
 
 // LastSequence is the highest sequence ever appended, surviving restart.
@@ -654,10 +656,11 @@ func (s *Spool) dropAckedSegments() error {
 	for len(s.segs) > 0 && s.segs[0].last <= s.ackedThrough {
 		sg := s.segs[0]
 		if len(s.segs) == 1 && s.w != nil {
-			if err := s.w.Close(); err != nil {
+			err := s.w.Close()
+			s.w = nil
+			if err != nil {
 				return fmt.Errorf("spool: closing segment %s: %w", sg.path, err)
 			}
-			s.w = nil
 			s.dirty = false
 		}
 		if err := os.Remove(sg.path); err != nil && !os.IsNotExist(err) {
@@ -666,6 +669,11 @@ func (s *Spool) dropAckedSegments() error {
 		s.segs = s.segs[1:]
 		s.ackedInFirst, s.ackOffset = 0, 0
 		s.firstPending = 0
+		if len(s.segs) > 0 {
+			// Keep a conservative cursor if reading the next segment fails.
+			// The sender uses it to decide whether cleanup needs a retry.
+			s.firstPending = s.segs[0].base
+		}
 		removed = true
 	}
 	if !removed {
@@ -729,6 +737,15 @@ func (s *Spool) advanceAckCursor() error {
 // dropping the event that has just been accepted would report a loss the
 // caller could have avoided by not appending at all.
 func (s *Spool) enforceMaxSize() error {
+	if s.bytes > s.opts.MaxSize && len(s.segs) > 1 {
+		// The newest segment carries LastSequence after older segments are
+		// evicted. Make it durable first, even with batched syncing, so a
+		// power loss cannot truncate the new record after removing the only
+		// durable evidence of the earlier sequence numbers.
+		if err := s.sync(); err != nil {
+			return err
+		}
+	}
 	for s.bytes > s.opts.MaxSize && len(s.segs) > 1 {
 		sg := s.segs[0]
 		lost := sg.count - s.ackedInFirst
@@ -843,10 +860,10 @@ func (s *Spool) readCheckpoint() (uint64, bool) {
 // writeCheckpoint records the acknowledged sequence atomically: a temporary
 // file is written and fsynced, renamed over the old checkpoint, and the
 // directory is fsynced so the rename itself survives a power loss.
-func (s *Spool) writeCheckpoint() error {
+func (s *Spool) writeCheckpoint(seq uint64) error {
 	var buf [checkpointSize]byte
 	copy(buf[0:4], checkpointMagic[:])
-	binary.BigEndian.PutUint64(buf[4:12], s.ackedThrough)
+	binary.BigEndian.PutUint64(buf[4:12], seq)
 	binary.BigEndian.PutUint32(buf[12:16], crc32.Checksum(buf[4:12], crcTable))
 
 	tmp := filepath.Join(s.opts.Dir, checkpointTemp)

@@ -13,6 +13,7 @@ import (
 
 // VSockGuest identifies the running domain that holds a vsock CID.
 type VSockGuest struct {
+	CID   uint32
 	Name  string
 	UUID  string
 	Owner string // gateway owner metadata; empty for domains the gateway did not create
@@ -94,6 +95,7 @@ func confirmVSockGuest(conn *libvirt.Connect, name string, cid uint32) (VSockGue
 		return VSockGuest{}, false
 	}
 	guest, found, err := vsockGuest(dom)
+	guest.CID = cid
 	return guest, found && err == nil
 }
 
@@ -135,7 +137,9 @@ func scanVSockGuests(conn *libvirt.Connect, cid uint32) (VSockGuest, bool, error
 	vsockCIDHints.replace(names)
 
 	if match != nil {
-		return vsockGuest(match)
+		guest, found, err := vsockGuest(match)
+		guest.CID = cid
+		return guest, found, err
 	}
 	if len(readErrs) > 0 {
 		return VSockGuest{}, false, fmt.Errorf("read running domain xml: %w", errors.Join(readErrs...))

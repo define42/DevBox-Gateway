@@ -188,7 +188,12 @@ last_missing_sequence.
 
 Disk-backed spool at /var/lib/sauronagent/spool:
 receive -> normalize -> assign sequence -> write spool -> send -> receive ACK ->
-delete acknowledged data.
+persist acknowledgement checkpoint -> delete acknowledged data.
+
+Checkpoint failures retain records and sequence state for retry. Segment-cleanup
+failures can be retried with the same acknowledgement. Before capacity eviction
+removes older segments, the newest segment is synced so sequence recovery keeps
+the latest accepted sequence across a power loss.
 
 Retained events are replayed until acknowledged. Queue/spool limits, crash
 loss, and output durability constrain delivery. The host deduplicates on
@@ -230,6 +235,60 @@ events_dropped, audit_enabled, queue_depth, and spool_bytes. The collector
 uses received traffic to monitor expected streams. Counters are untrusted guest
 claims; audit_enabled is the configured startup value and does not detect a
 later change to kernel audit policy.
+
+Standalone collection watches static expected VMs. An embedded collector can
+provide a complete dynamic `ExpectedVMs` snapshot independently of connection
+identity resolution. The monitor retains expectations on inventory failure,
+checks snapshot freshness, and uses a separate first-contact grace period when
+configured. Trusted CID, VM name and UUID must match before traffic refreshes
+an expectation. Missing agents and queued loss/resumption alerts fail readiness.
+Alert writes retry in order; their bounded in-memory queue does not survive
+restart, and overflow remains unhealthy until operator recovery. DevBox Gateway
+exposes these states at `/api/ready` and exits on an unexpected collector stop.
+
+Unresolved dynamic sessions reconnect when fresh expected inventory can supply
+a complete identity for their CID, checked on the next valid EVENT or PING.
+Fully resolved sessions retain their pinned identity. This recovers attribution
+without changing old records or querying the hypervisor on every frame.
+
+Unreported sequence gaps independently fail readiness while queued or being
+written. A separate worker retries their evidence every second, independent of
+inventory progress and guest traffic. Its bounded pending state is released
+only by current output acceptance or arrival of the missing events. Pending
+gap evidence does not survive restart.
+Accepted loss accounting also retains at most 64 disjoint ranges per stream.
+Reports wait for space before output when that bound is reached, avoiding
+repeated writes of evidence that cannot yet advance accounting. Resolving the
+earlier unwritten event through replay or a HELLO loss report can release space.
+
+Gateway output readiness tracks rejected guest records by VM identity, original
+event boot ID and sequence, retaining immutable encoded copies. A separate
+worker retries up to 64 oldest records every second within a five-second context
+deadline, preserving their original attribution even after disconnect or
+identity recovery. Matching guest replay can also clear a failure. Every output
+must accept the record; unrelated successes and heartbeats cannot clear it.
+Retained retries do not advance guest acknowledgements or deduplication, so
+later guest replay can produce duplicates.
+
+The retry store holds at most 4096 records and 64 MiB of encoded data, including
+in-flight copies. Capacity or encoding failures remain unhealthy until operator
+recovery and restart. Pending copies and health state are lost on restart;
+restarting does not prove that rejected records arrived. Generic write/flush
+health uses a later successful write to all outputs without clearing unresolved
+guest failures. Shutdown joins the retry worker before closing outputs.
+
+Sessions sharing a peer or trusted VM UUID serialize deduplication checks,
+event writes and commits. This prevents concurrent duplicate writes from
+creating a rejected-record failure after the accepted copy has already been
+committed. Gate waits use the write timeout; unrelated VMs remain concurrent.
+Decoded originals are reserved before any blocking identity or output work.
+Reservations pin their stream and exclude originals from concurrent HELLO loss
+claims and background gap completion. Failure or timeout preserves replay;
+pending-range capacity can retain protection until a safe partial gap report
+permits permanent exclusion. Protection is bounded by the effective deduplication
+window; overflow fails readiness until operator recovery and restart.
+Accepted gap evidence records a loss and cannot substitute for delivery of the
+original event when recovering its rejection health state.
 
 # 30. Audit Configuration Monitoring
 

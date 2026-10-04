@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -45,8 +46,11 @@ type hecForwarding struct {
 	retryLimit     time.Duration
 	reportInterval time.Duration
 
-	// position is the next record to deliver. Only the forwarder uses it.
-	position spoolPosition
+	// position is the next record to deliver. A settled batch stays pending
+	// until its checkpoint is saved, so a storage error retries that save
+	// without sending the accepted events again. Only the forwarder uses these.
+	position          spoolPosition
+	pendingCheckpoint *spoolPosition
 
 	cancel    context.CancelFunc
 	stop      chan struct{}
@@ -132,20 +136,33 @@ func (h *hecForwarding) run(ctx context.Context) {
 	defer close(h.done)
 	outage := outage{backoff: h.retryInitial}
 	for {
-		records, err := h.spool.readBatch(h.position, hecBatchSize, hecBatchBytes)
-		if err == nil && len(records) == 0 {
+		empty, err := h.forwardOnce(ctx)
+		if empty {
 			if !h.waitForRecords() {
 				return
 			}
 			continue
 		}
-		if err == nil {
-			err = h.deliverAndAdvance(ctx, records)
-		}
 		if !h.pace(&outage, err) {
 			return
 		}
 	}
+}
+
+// forwardOnce completes a pending checkpoint or delivers the next batch. It
+// reports an empty spool only when neither operation has work left to do.
+func (h *hecForwarding) forwardOnce(ctx context.Context) (empty bool, err error) {
+	if h.pendingCheckpoint != nil {
+		return false, h.advanceCheckpoint()
+	}
+	records, err := h.spool.readBatch(h.position, hecBatchSize, hecBatchBytes)
+	if err != nil {
+		return false, err
+	}
+	if len(records) == 0 {
+		return true, nil
+	}
+	return false, h.deliverAndAdvance(ctx, records)
 }
 
 // waitForRecords blocks until the spool has new records, and reports false
@@ -172,7 +189,7 @@ type outage struct {
 func (h *hecForwarding) pace(o *outage, err error) bool {
 	if err == nil {
 		if o.failures > 0 {
-			log.Printf("sauron: splunk hec is accepting guest events again after %d failed attempt(s); delivering the spooled backlog", o.failures)
+			log.Printf("sauron: splunk hec forwarding recovered after %d failed attempt(s); delivering the spooled backlog", o.failures)
 		}
 		*o = outage{backoff: h.retryInitial}
 		return true
@@ -181,8 +198,8 @@ func (h *hecForwarding) pace(o *outage, err error) bool {
 	o.failures++
 	if now := time.Now(); o.failures == 1 || now.Sub(o.lastReport) >= h.reportInterval {
 		o.lastReport = now
-		log.Printf("sauron: splunk hec did not accept guest events (%d failed attempt(s)); they stay in the gateway spool (%d MiB used) and are retried at least every %s: %v",
-			o.failures, h.spool.usage()>>20, h.retryLimit, err)
+		log.Printf("sauron: splunk hec forwarding failed (%d failed attempt(s)); pending delivery or checkpoint updates are retried at least every %s (%d MiB spooled): %v",
+			o.failures, h.retryLimit, h.spool.usage()>>20, err)
 	}
 	timer := time.NewTimer(o.backoff)
 	defer timer.Stop()
@@ -200,12 +217,23 @@ func (h *hecForwarding) pace(o *outage, err error) bool {
 func (h *hecForwarding) deliverAndAdvance(ctx context.Context, records []spoolRecord) error {
 	settled, err := h.deliver(ctx, records)
 	if settled > 0 {
-		h.position = records[settled-1].end
-		if ackErr := h.spool.acknowledge(h.position); ackErr != nil {
-			log.Printf("sauron: %v", ackErr)
-		}
+		position := records[settled-1].end
+		h.pendingCheckpoint = &position
+		return errors.Join(err, h.advanceCheckpoint())
 	}
 	return err
+}
+
+// advanceCheckpoint finishes settling an accepted batch before another read or
+// delivery. It is retried independently of appends, including when the spool is
+// full and cannot signal that new records are ready.
+func (h *hecForwarding) advanceCheckpoint() error {
+	if err := h.spool.acknowledge(*h.pendingCheckpoint); err != nil {
+		return err
+	}
+	h.position = *h.pendingCheckpoint
+	h.pendingCheckpoint = nil
+	return nil
 }
 
 // spoolMeta is the part of a spooled envelope the HEC event metadata needs.

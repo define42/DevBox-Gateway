@@ -515,6 +515,10 @@ func securityHeaders(next http.Handler) http.Handler {
 
 // NewHandler constructs the gateway's HTTP application.
 func NewHandler(sessionManager *session.Manager, settings *config.Settings) http.Handler {
+	return newHandler(sessionManager, settings, nil)
+}
+
+func newHandler(sessionManager *session.Manager, settings *config.Settings, readiness func() error) http.Handler {
 	router := chi.NewRouter()
 	loginLimiter := newLoginRateLimiter(settings)
 	if settings.Bool(config.DEBUG_CONNECTIONS) {
@@ -529,6 +533,7 @@ func NewHandler(sessionManager *session.Manager, settings *config.Settings) http
 	router.Post("/login", handleLoginPost(sessionManager, settings, loginLimiter))
 	router.Get("/login", handleLoginGet(settings))
 	router.Post("/logout", handleLogout(sessionManager))
+	router.Get("/api/ready", readinessHandler(readiness))
 
 	router.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		// Health checks are unauthenticated; close the connection after each

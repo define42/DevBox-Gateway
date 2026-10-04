@@ -118,8 +118,9 @@ type Options struct {
 // configuredSink owns the audit destinations and the process logging state
 // that was active before Configure installed the audit logger.
 type configuredSink struct {
-	file              *os.File
+	file              *auditFile
 	forwarder         *hecForwarder
+	health            *auditHealth
 	previousLogger    *slog.Logger
 	previousLogWriter io.Writer
 	once              sync.Once
@@ -137,27 +138,31 @@ type configuredSink struct {
 // package output keeps its existing destination. Keep the returned closer open
 // while audit records can be emitted; closing it restores the previous logging
 // state and attempts a bounded HEC drain (retaining pending records) or closes
-// the file. HEC spool failures are reported through the operational log. The
-// file-only handler does not surface write failures through Log.
+// the file. File records are fsynced individually, with new file and directory
+// entries committed before accepting writes. Rename-and-create rotation is
+// detected on the next write. Persistence failures are reported through the
+// operational log and latch Readiness unhealthy until restart.
 func Configure(options Options) (io.Closer, error) {
-	var file *os.File
+	var file *auditFile
 	var forwarder *hecForwarder
-	var handler slog.Handler
+	var destination io.Writer
+	health := &auditHealth{}
 	if strings.TrimSpace(options.HEC.Endpoint) != "" {
 		var err error
 		if forwarder, err = newHECForwarder(options.HEC, options.SpoolDir, options.SpoolMaxBytes); err != nil {
 			return nil, fmt.Errorf("configure splunk hec forwarding: %w", err)
 		}
 		forwarder.start()
-		handler = slog.NewJSONHandler(forwarder, nil)
+		destination = forwarder
 	} else {
 		var err error
-		file, err = openAuditFile(options.FilePath)
+		file, err = newAuditFile(options.FilePath)
 		if err != nil {
 			return nil, err
 		}
-		handler = slog.NewJSONHandler(file, nil)
+		destination = file
 	}
+	handler := slog.NewJSONHandler(observedAuditWriter{destination: destination, health: health}, nil)
 
 	previousLogger := slog.Default()
 	previousLogWriter := log.Writer()
@@ -169,6 +174,7 @@ func Configure(options Options) (io.Closer, error) {
 	return &configuredSink{
 		file:              file,
 		forwarder:         forwarder,
+		health:            health,
 		previousLogger:    previousLogger,
 		previousLogWriter: previousLogWriter,
 	}, nil
@@ -179,12 +185,30 @@ func openAuditFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("configure audit JSON file: path is empty")
 	}
 	directory := filepath.Dir(path)
+	directories, err := auditDirectoriesToSync(directory)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return nil, fmt.Errorf("create audit log directory %q: %w", directory, err)
 	}
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640) // #nosec G302,G304 -- operator-configured path; group-readable mode allows a log collector to ingest the audit stream
 	if err != nil {
 		return nil, fmt.Errorf("open audit log file %q: %w", path, err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("stat audit log file %q: %w", path, err), file.Close())
+	}
+	if info.Mode().IsRegular() {
+		// fsyncing records alone does not commit the directory entries that
+		// name the file. Also sync files created by an external rotator: an
+		// existing path does not imply its creation has reached stable storage.
+		for _, directory := range directories {
+			if err := syncAuditDirectory(directory); err != nil {
+				return nil, errors.Join(err, file.Close())
+			}
+		}
 	}
 	return file, nil
 }
@@ -211,7 +235,7 @@ func (sink *configuredSink) Close() error {
 		if sink.file != nil {
 			fileErr = sink.file.Close()
 		}
-		sink.closeErr = errors.Join(forwarderErr, fileErr)
+		sink.closeErr = errors.Join(forwarderErr, fileErr, sink.Readiness())
 	})
 	return sink.closeErr
 }

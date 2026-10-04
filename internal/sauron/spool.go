@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -85,6 +87,7 @@ type spool struct {
 	dir         string
 	maxBytes    int64
 	segmentSize int64
+	lock        *os.File // exclusive directory ownership until Close completes
 
 	mu         sync.Mutex
 	segments   []spoolSegment // oldest first; the last one is being appended to
@@ -112,22 +115,24 @@ func openSpool(dir string, maxBytes int64) (*spool, error) {
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("sauron spool size limit must be positive, got %d", maxBytes)
 	}
-	if err := os.MkdirAll(dir, spoolDirMode); err != nil {
-		return nil, fmt.Errorf("create sauron spool directory %s: %w", dir, err)
+	lock, err := lockDeliveryDirectory(dir)
+	if err != nil {
+		return nil, err
 	}
 	segments, err := listSpoolSegments(dir)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, lock.Close())
 	}
 
 	s := &spool{
 		dir:         dir,
 		maxBytes:    maxBytes,
 		segmentSize: min(spoolSegmentSize, max(maxBytes/4, 1)),
+		lock:        lock,
 		ready:       make(chan struct{}, 1),
 	}
 	if err := s.openSegments(segments); err != nil {
-		return nil, err
+		return nil, errors.Join(err, s.Close())
 	}
 	for _, segment := range s.segments {
 		s.total += segment.size
@@ -139,6 +144,31 @@ func openSpool(dir string, maxBytes int64) (*spool, error) {
 		log.Printf("sauron: %v", err)
 	}
 	return s, nil
+}
+
+func lockDeliveryDirectory(dir string) (*os.File, error) {
+	if err := os.MkdirAll(dir, spoolDirMode); err != nil {
+		return nil, fmt.Errorf("create delivery spool directory: %w", err)
+	}
+	lockPath := filepath.Join(dir, ".lock")
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600) // #nosec G304 -- fixed lock filename under the operator-configured spool directory
+	if err != nil {
+		return nil, fmt.Errorf("open delivery spool lock: %w", err)
+	}
+	info, err := lock.Stat()
+	if err == nil && !info.Mode().IsRegular() {
+		err = errors.New("delivery spool lock must be a regular file")
+	}
+	if err == nil {
+		err = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	}
+	if err == nil {
+		err = lock.Chmod(0o600)
+	}
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("acquire delivery spool lock %s: %w", lockPath, err), lock.Close())
+	}
+	return lock, nil
 }
 
 // openSegments adopts the segments found on disk, repairing the last one's
@@ -610,8 +640,11 @@ func (s *spool) usage() int64 {
 	return s.total
 }
 
-// Close makes every appended record durable and closes the spool.
+// Close makes every appended record durable and closes the spool before
+// releasing its directory lock.
 func (s *spool) Close() error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -619,11 +652,11 @@ func (s *spool) Close() error {
 	}
 	s.closed = true
 	if s.active == nil {
-		return nil
+		return s.lock.Close()
 	}
 	file := s.active
 	s.active = nil
-	return errors.Join(file.Sync(), file.Close())
+	return errors.Join(file.Sync(), file.Close(), s.lock.Close())
 }
 
 // syncDir makes changes to a directory's entries durable.

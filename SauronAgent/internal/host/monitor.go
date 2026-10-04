@@ -12,32 +12,23 @@ import (
 	"github.com/define42/devbox-gateway/SauronAgent/internal/output"
 )
 
-// tickerFunc produces the monitor's check ticker. Tests replace it so that
-// stream-loss detection is driven deterministically instead of by sleeping.
+// tickerFunc lets tests drive health checks without wall-clock sleeps.
 type tickerFunc func(d time.Duration) (<-chan time.Time, func())
 
-// realTicker is the production ticker.
 func realTicker(d time.Duration) (<-chan time.Time, func()) {
 	t := time.NewTicker(d)
 	return t.C, t.Stop
 }
 
-// monitor tracks the health of each VM's audit stream.
-//
-// This exists because of DESIGN section 28: a missing audit stream is itself a
-// security event. A fully compromised guest can disable auditing, kill the
-// agent or block the VSOCK path, and silencing the telemetry is the first thing
-// an intruder does -- so the absence of events has to be as loud as the events
-// themselves. Nothing inside the guest can suppress this: the timer runs on the
-// hypervisor and fires on silence.
-//
-// Only VMs configured with expected: true are watched. A VM that is rebuilt
-// several times a day would otherwise produce an alert an operator learns to
-// ignore, which is worse than no alert at all.
+// monitor watches trusted expected VMs, independently of whether their agents
+// ever connect. Guest-supplied names cannot refresh another VM's health.
 type monitor struct {
-	enabled  bool
-	timeout  time.Duration
-	interval time.Duration
+	enabled      bool
+	timeout      time.Duration
+	startupGrace time.Duration
+	interval     time.Duration
+	hostName     string
+	expected     func() ([]config.VMMapping, error)
 
 	report  *reporter
 	metrics *metrics.Host
@@ -45,91 +36,95 @@ type monitor struct {
 	now     func() time.Time
 	ticker  tickerFunc
 
-	mu  sync.Mutex
-	vms map[uint32]*vmHealth
+	mu          sync.Mutex
+	vms         map[uint32]*vmHealth
+	lastRefresh time.Time
+	refreshErr  error
+	pending     []*streamAlert
+	publishing  bool
+	overflow    bool
 }
 
-// vmHealth is the per-VM state.
 type vmHealth struct {
 	mapping  config.VMMapping
 	source   output.Source
 	lastSeen time.Time
+	observed bool
 	lost     bool
 }
 
-// newMonitor builds the stream-health tracker for the expected VMs in cfg.
+type streamAlert struct {
+	source output.Source
+	event  *event.Event
+}
+
+// A failed output must not allow a flapping guest to grow memory indefinitely.
+// Saturation is a sticky readiness failure and is logged explicitly.
+const maxPendingStreamAlerts = 4096
+
 func newMonitor(cfg config.Host, rep *reporter, counters *metrics.Host, log *slog.Logger, now func() time.Time) *monitor {
 	m := &monitor{
-		enabled:  cfg.Monitor.Enabled,
-		timeout:  cfg.Monitor.Timeout.Duration(),
-		interval: cfg.Monitor.CheckInterval.Duration(),
-		report:   rep,
-		metrics:  counters,
-		log:      log,
-		now:      now,
-		ticker:   realTicker,
-		vms:      make(map[uint32]*vmHealth),
+		enabled: cfg.Monitor.Enabled, timeout: cfg.Monitor.Timeout.Duration(),
+		startupGrace: cfg.Monitor.Timeout.Duration(), interval: cfg.Monitor.CheckInterval.Duration(),
+		hostName: cfg.Host.Name, report: rep, metrics: counters, log: log,
+		now: now, ticker: realTicker, vms: make(map[uint32]*vmHealth),
 	}
-	enrich := newEnricher(cfg, nil)
 	for _, vm := range cfg.VMs {
-		if !vm.Expected {
-			continue
-		}
-		m.vms[vm.CID] = &vmHealth{
-			mapping: vm,
-			// The source of a stream-loss event is the configured mapping: the
-			// event is about a VM the operator declared, and there is no
-			// connection to take an identity from.
-			source: enrich.source(peer{cid: vm.CID, vsock: true}),
+		if vm.Expected {
+			m.vms[vm.CID] = m.newVMHealth(vm, now())
 		}
 	}
 	return m
 }
 
-// run evaluates stream health every check interval until ctx is cancelled.
+func (m *monitor) newVMHealth(vm config.VMMapping, now time.Time) *vmHealth {
+	vm.Labels = cloneGapSource(output.Source{Labels: vm.Labels}).Labels
+	return &vmHealth{
+		mapping: vm, lastSeen: now,
+		source: output.Source{
+			CID: vm.CID, VM: vm.Name, UUID: vm.UUID, Host: m.hostName, Known: true,
+			Environment: vm.Environment, SecurityDomain: vm.SecurityDomain,
+			VLAN: vm.VLAN, Labels: vm.Labels,
+		},
+	}
+}
+
+// run refreshes dynamic expectations and evaluates stream health until stopped.
 func (m *monitor) run(ctx context.Context) {
-	if !m.enabled || m.interval <= 0 || len(m.vms) == 0 {
+	if !m.enabled || m.interval <= 0 {
 		return
 	}
-
-	// Silence is measured from the moment the collector started watching, not
-	// from process start or from the zero time: a collector restart must not
-	// report every expected VM as lost before its agent has had a chance to
-	// reconnect.
-	start := m.now()
 	m.mu.Lock()
 	for _, h := range m.vms {
-		h.lastSeen = start
+		if !h.observed {
+			h.lastSeen = m.now()
+		}
 	}
 	m.mu.Unlock()
-
+	m.refresh(m.now())
 	tick, stop := m.ticker(m.interval)
 	defer stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick:
-			m.check(m.now())
+			m.refresh(m.now())
+			m.checkContext(ctx, m.now())
 		}
 	}
 }
 
-// seen records that a guest was heard from: a connection, an event or a
-// heartbeat all count, because any of them proves the agent is alive and the
-// path to it is open.
-func (m *monitor) seen(p peer, at time.Time) {
-	if !p.vsock {
-		// An unidentified peer cannot be attributed to a configured VM, and
-		// letting one refresh a VM's health would mean a peer with no
-		// hypervisor-backed identity could silence that VM's alert.
+// seen records a completed handshake, event or heartbeat. The source was pinned
+// at connection admission: an old connection cannot refresh a replacement VM
+// after its CID has been reused by the hypervisor.
+func (m *monitor) seen(p peer, src output.Source, at time.Time) {
+	if !m.enabled || !p.vsock {
 		return
 	}
-
 	m.mu.Lock()
-	h, tracked := m.vms[p.cid]
-	if !tracked {
+	h := m.vms[p.cid]
+	if h == nil || !src.Known || h.mapping.Name != src.VM || h.mapping.UUID != src.UUID {
 		m.mu.Unlock()
 		return
 	}
@@ -137,71 +132,110 @@ func (m *monitor) seen(p peer, at time.Time) {
 	if at.After(h.lastSeen) {
 		h.lastSeen = at
 	}
-	resumed := h.lost
-	if resumed {
-		h.lost = false
+	h.observed = true
+	if h.lost {
+		m.resumeLocked(h, silence)
 	}
-	src := h.source
-	name := h.mapping.Name
 	m.mu.Unlock()
-
-	if !resumed {
-		return
-	}
-	m.log.Warn("audit stream resumed", "vm", name, "cid", p.cid,
-		"silent_for", silence.String())
-	// Published outside the lock: a sink write is not something to hold a
-	// mutex across when every session goroutine needs this map.
-	m.report.publish(context.Background(), src,
-		event.NewInternal(event.TypeStreamResumed, event.SeverityNotice, map[string]any{
-			"vm":              name,
-			"cid":             p.cid,
-			"silent_seconds":  silence.Seconds(),
-			"monitor_timeout": m.timeout.String(),
-		}))
+	m.publishPending(context.Background())
 }
 
-// check reports every expected VM that has gone silent for longer than the
-// configured timeout.
-func (m *monitor) check(now time.Time) {
-	type lostVM struct {
-		src     output.Source
-		name    string
-		cid     uint32
-		last    time.Time
-		silence time.Duration
+func (m *monitor) resumeLocked(h *vmHealth, silence time.Duration) {
+	ev := event.NewInternal(event.TypeStreamResumed, event.SeverityNotice, map[string]any{
+		"vm": h.mapping.Name, "cid": h.mapping.CID,
+		"silent_seconds": silence.Seconds(), "monitor_timeout": m.timeout.String(),
+	})
+	if m.queueLocked(h.source, ev) {
+		h.lost = false
+		m.log.Warn("audit stream resumed", "vm", h.mapping.Name, "cid", h.mapping.CID)
 	}
-	var lost []lostVM
+}
 
+func (m *monitor) check(now time.Time) {
+	m.checkContext(context.Background(), now)
+}
+
+func (m *monitor) checkContext(ctx context.Context, now time.Time) {
 	m.mu.Lock()
-	for cid, h := range m.vms {
-		if h.lost {
-			continue
-		}
+	for _, h := range m.vms {
 		silence := now.Sub(h.lastSeen)
-		if silence <= m.timeout {
+		if silence <= m.allowedSilence(h) {
+			if h.lost && h.observed {
+				m.resumeLocked(h, silence)
+			}
 			continue
 		}
-		h.lost = true
-		lost = append(lost, lostVM{
-			src: h.source, name: h.mapping.Name, cid: cid,
-			last: h.lastSeen, silence: silence,
-		})
+		if !h.lost {
+			m.loseLocked(h, silence)
+		}
 	}
 	m.mu.Unlock()
+	m.publishPending(ctx)
+}
 
-	for _, v := range lost {
+func (m *monitor) allowedSilence(h *vmHealth) time.Duration {
+	if !h.observed {
+		return m.startupGrace
+	}
+	return m.timeout
+}
+
+func (m *monitor) loseLocked(h *vmHealth, silence time.Duration) {
+	ev := event.NewInternal(event.TypeStreamLost, event.SeverityCritical, map[string]any{
+		"vm": h.mapping.Name, "cid": h.mapping.CID,
+		"last_seen":      h.lastSeen.UTC().Format(time.RFC3339Nano),
+		"silent_seconds": silence.Seconds(), "monitor_timeout": m.timeout.String(),
+		"never_connected": !h.observed,
+	})
+	if m.queueLocked(h.source, ev) {
+		h.lost = true
 		m.metrics.StreamsLost.Add(1)
-		m.log.Error("audit stream lost", "vm", v.name, "cid", v.cid,
-			"last_seen", v.last.UTC().Format(time.RFC3339Nano),
-			"silent_for", v.silence.String(), "monitor_timeout", m.timeout.String())
-		m.report.publish(context.Background(), v.src,
-			event.NewInternal(event.TypeStreamLost, event.SeverityCritical, map[string]any{
-				"vm":              v.name,
-				"cid":             v.cid,
-				"last_seen":       v.last.UTC().Format(time.RFC3339Nano),
-				"silent_seconds":  v.silence.Seconds(),
-				"monitor_timeout": m.timeout.String(),
-			}))
+		m.log.Error("audit stream lost", "vm", h.mapping.Name, "cid", h.mapping.CID,
+			"silent_for", silence.String(), "never_connected", !h.observed)
+	}
+}
+
+func (m *monitor) queueLocked(src output.Source, ev *event.Event) bool {
+	if len(m.pending) >= maxPendingStreamAlerts {
+		if !m.overflow {
+			m.log.Error("stream alert backlog full; collector readiness requires operator recovery")
+		}
+		m.overflow = true
+		return false
+	}
+	m.pending = append(m.pending, &streamAlert{source: cloneGapSource(src), event: ev})
+	return true
+}
+
+// publishPending serializes publication without holding the health lock over
+// I/O. Failed writes retain the same event; later checks retry even after the
+// VM resumes or is removed from the expected set. Recovery follows loss in FIFO
+// order. A multi-sink partial failure can duplicate alerts on retry.
+func (m *monitor) publishPending(ctx context.Context) {
+	m.mu.Lock()
+	if m.publishing {
+		m.mu.Unlock()
+		return
+	}
+	m.publishing = true
+	attempts := len(m.pending)
+	m.mu.Unlock()
+	defer func() { m.mu.Lock(); m.publishing = false; m.mu.Unlock() }()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for range attempts {
+		if ctx.Err() != nil {
+			return
+		}
+		m.mu.Lock()
+		pending := m.pending[0]
+		m.mu.Unlock()
+		if err := m.report.publish(ctx, pending.source, pending.event); err != nil {
+			return
+		}
+		m.mu.Lock()
+		m.pending[0] = nil
+		m.pending = m.pending[1:]
+		m.mu.Unlock()
 	}
 }

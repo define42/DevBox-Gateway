@@ -30,6 +30,7 @@ const stopTimeout = 5 * time.Second
 
 // VM is what the gateway knows about the VM behind a CID.
 type VM struct {
+	CID   uint32
 	Name  string
 	UUID  string
 	Owner string
@@ -55,6 +56,14 @@ type Options struct {
 	// authoritative identity of every event on a connection, so it must come
 	// from the hypervisor.
 	Resolve func(cid uint32) (VM, bool, error)
+	// ExpectedVMs returns running gateway-managed VMs and their assigned CIDs.
+	// Errors retain previous expectations and degrade collector readiness.
+	ExpectedVMs func() ([]VM, error)
+	// AgentStartupGrace allows a newly running guest to boot and connect.
+	// Zero uses five minutes. AgentTimeout bounds silence after first contact;
+	// zero uses ninety seconds. Checks run every fifteen seconds.
+	AgentStartupGrace time.Duration
+	AgentTimeout      time.Duration
 
 	// listener replaces the AF_VSOCK socket in tests.
 	listener net.Listener
@@ -66,6 +75,7 @@ type Collector struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	runErr error
+	output *observedSink
 
 	closeOnce sync.Once
 	closeErr  error
@@ -79,15 +89,19 @@ func Start(options Options) (*Collector, error) {
 	if err != nil {
 		return nil, err
 	}
+	observed := &observedSink{Sink: sink}
 
 	config := collector.DefaultConfig()
 	config.Listen.Port = options.Port
 	server, err := collector.New(collector.Options{
-		Config:   config,
-		Sink:     sink,
-		Logger:   newLogger(),
-		Resolve:  resolver(options.Resolve),
-		Listener: options.listener,
+		Config:        config,
+		Sink:          observed,
+		Logger:        newLogger(),
+		Resolve:       resolver(options.Resolve),
+		Listener:      options.listener,
+		ExpectedVMs:   expectedVMs(options.ExpectedVMs),
+		StartupGrace:  defaultDuration(options.AgentStartupGrace, 5*time.Minute),
+		StreamTimeout: defaultDuration(options.AgentTimeout, 90*time.Second),
 	})
 	if err != nil {
 		// The server never took ownership of the sink.
@@ -95,10 +109,17 @@ func Start(options Options) (*Collector, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Collector{server: server, cancel: cancel, done: make(chan struct{})}
+	observed.startRetries(ctx)
+	c := &Collector{server: server, cancel: cancel, done: make(chan struct{}), output: observed}
 	go func() {
 		defer close(c.done)
 		c.runErr = server.Run(ctx)
+		if ctx.Err() == nil {
+			if c.runErr == nil {
+				c.runErr = errors.New("sauron collector stopped unexpectedly")
+			}
+			log.Printf("sauron collector stopped: %v", c.runErr)
+		}
 	}()
 	log.Printf("sauron: collecting SauronAgent guest events on vsock port %d", options.Port)
 	return c, nil

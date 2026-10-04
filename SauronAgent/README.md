@@ -296,8 +296,9 @@ its timestamp, remains guest-supplied data.
 
 The agent reports detected queue, spool, parsing, and kernel losses in the
 event stream. These reports share the same delivery path and can themselves
-be lost if the guest or its storage fails. The standalone collector also
-monitors VMs marked `expected: true` in its static configuration:
+be lost if the guest or its storage fails. The standalone collector monitors
+VMs marked `expected: true` in its static configuration. DevBox Gateway supplies
+a dynamic expected set from running managed VMs:
 
 | Event | Meaning |
 |---|---|
@@ -306,16 +307,53 @@ monitors VMs marked `expected: true` in its static configuration:
 | `sauron.audit.lost` | the kernel dropped records before the agent could read them |
 | `sauron.parse.failure` | a record could not be interpreted; carries the record text |
 | `sauron.transport.disconnected` / `.connected` | the link to the collector went away and came back |
-| `sauron.stream.lost` / `.resumed` | **host-generated**: an `expected: true` VM stopped sending |
+| `sauron.stream.lost` / `.resumed` | **host-generated**: an expected VM is overdue for first contact or stopped sending, then resumed |
 
 ```json
 {"version":1,"type":"sauron.queue.overflow","severity":"critical","boot_id":"5f1c7d2a-…","fields":{"events_dropped":1842,"first_missing_sequence":184213,"last_missing_sequence":186054}}
 ```
 
-`sauron.stream.lost` detects a guest that stops sending. A compromised guest
-can keep sending heartbeats while suppressing audit data; stream liveness does
-not prove that collection is complete. Dynamic CID resolution alone does not
-add a VM to the expected-stream monitor.
+DevBox Gateway checks the expected inventory every 15 seconds. Its defaults
+allow five minutes for first contact and 90 seconds of later silence; configure
+`SAURON_AGENT_STARTUP_GRACE` and `SAURON_AGENT_TIMEOUT` on the gateway. Missing
+agents, inventory failures, stale snapshots and pending stream alerts affect
+the gateway's `/api/ready` probe. The standalone collector uses `monitor.timeout`
+for both first contact and later silence (90 seconds by default).
+
+An unresolved gateway connection reconnects on its next valid event or heartbeat
+once fresh inventory can identify its CID completely. The collector resolves
+the new connection's identity; prior records keep their original attribution.
+
+Failed stream-alert writes are retried in order, including after a VM resumes
+or leaves the expected set. Up to 4096 alerts remain in memory; overflow is
+logged and keeps readiness unhealthy until operator recovery and restart.
+These pending alerts do not survive a collector restart. See
+[deployment monitoring](docs/deployment.md#6-what-to-monitor).
+
+DevBox Gateway also retains rejected guest records and retries them every second
+until every output accepts them. Retries preserve the original record and source
+even after the guest disconnects or its identity resolves. Matching guest replay
+can clear the same failure; heartbeats and unrelated events cannot. The retry
+store holds at most 4096 records and 64 MiB of encoded data in memory. Overflow
+or failure to retain a copy requires investigation and restart. Restart discards
+pending copies and health state without proving delivery. See
+[output failure recovery](docs/deployment.md#output-failure-recovery).
+
+Unreported sequence gaps also keep the collector unready. A separate worker
+retries their loss reports every second without requiring guest traffic or
+inventory progress. Accepting a gap report records the loss, rather than
+delivery of the missing events. Event acceptance across concurrent sessions
+sharing a peer or trusted VM UUID is serialized through deduplication and output
+commit. Originals are registered before waiting for output, preventing a
+concurrent gap report from acknowledging an event still awaiting storage.
+Reports that cannot fit the bounded loss accounting wait for capacity before
+another output attempt, while other streams continue.
+
+Only traffic matching the expected VM's trusted vsock identity refreshes its
+deadline. A compromised guest can keep sending heartbeats while suppressing
+audit data; stream liveness does not prove collection completeness. An embedded
+collector must supply `ExpectedVMs` separately from its CID resolver to monitor
+dynamic VMs.
 
 ## Privilege model
 
@@ -347,6 +385,10 @@ see [packaging/systemd/](packaging/systemd/).
   retains the backlog until acknowledgements or the spool size limit remove
   it. An abrupt agent exit can lose records still in memory; guest power loss
   can also lose unsynced spool writes.
+* An acknowledgement checkpoint must be persisted before acknowledged records
+  are discarded. Storage errors retain those records for retry and preserve
+  sequence continuity after restart; cleanup failures can be retried with the
+  same acknowledgement.
 * Acknowledgements are cumulative and follow sink acceptance. The default file
   sink does not sync every write; stdout and syslog rely on the downstream
   logger for durability. An ACK alone does not guarantee survival of host
