@@ -261,8 +261,8 @@ jobs:
             Download all image parts and the checksum file into one directory, then reconstruct and verify:
 
             ```sh
-            cat resolute-desktop-xfce-cloudimg-amd64-${{ needs.build.outputs.tag }}.img.part-* > resolute-desktop-xfce-cloudimg-amd64-${{ needs.build.outputs.tag }}.img
-            sha256sum --check resolute-desktop-xfce-cloudimg-amd64-${{ needs.build.outputs.tag }}.img.sha256
+            cat ubuntu-resolute-xfce-${{ needs.build.outputs.tag }}.img.part-* > ubuntu-resolute-xfce-${{ needs.build.outputs.tag }}.img
+            sha256sum --check ubuntu-resolute-xfce-${{ needs.build.outputs.tag }}.img.sha256
             ```
 
             The `.img.manifest.json` asset records the source image and build provenance.

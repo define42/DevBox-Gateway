@@ -1186,7 +1186,7 @@ requires host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`; it boo
 a temporary overlay and leaves the base image unchanged.
 
 Output goes to `dist/images/ubuntu-resolute-xfce/` as
-`resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img`, with `.img.sha256` and
+`ubuntu-resolute-xfce-v0.0.0.img`, with `.img.sha256` and
 `.img.manifest.json` sidecars. The manifest records the build commit, source
 checksum, builder container, and SauronAgent version. Downloads are cached under
 `.cache/images/`. Both directories are ignored by Git. See the

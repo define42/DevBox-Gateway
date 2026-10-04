@@ -99,7 +99,7 @@ fi
 docker run "${docker_args[@]}" "$tools_id" \
     bash /recipe/customize.sh "$(id -u):$(id -g)"
 
-image_name="resolute-desktop-xfce-cloudimg-amd64-v$version.img"
+image_name="ubuntu-resolute-xfce-v$version.img"
 mv -- "$work_dir/desktop.img" "$work_dir/$image_name"
 (
     cd -- "$work_dir"

@@ -58,9 +58,9 @@ For `IMAGE_VERSION=0.0.0`, the output directory is
 `dist/images/ubuntu-resolute-xfce/`:
 
 ```text
-resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img
-resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img.sha256
-resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img.manifest.json
+ubuntu-resolute-xfce-v0.0.0.img
+ubuntu-resolute-xfce-v0.0.0.img.sha256
+ubuntu-resolute-xfce-v0.0.0.img.manifest.json
 ```
 
 The manifest records the source image URL and checksum, Git commit and dirty
@@ -90,7 +90,7 @@ and both sidecars into one directory. Substitute the release's version, then
 reconstruct and verify:
 
 ```sh
-image="resolute-desktop-xfce-cloudimg-amd64-v1.2.3.img"
+image="ubuntu-resolute-xfce-v1.2.3.img"
 cat "$image".part-* > "$image"
 sha256sum --check "$image.sha256"
 ```
@@ -106,7 +106,7 @@ Docker Compose setup, after a local build:
 ```sh
 sudo install -d /data/baseimages
 sudo install -m 0644 \
-  dist/images/ubuntu-resolute-xfce/resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img \
+  dist/images/ubuntu-resolute-xfce/ubuntu-resolute-xfce-v0.0.0.img \
   /data/baseimages/
 ```
 

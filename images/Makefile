@@ -10,4 +10,4 @@ image-check:
 	bash "$(IMAGE)/build.sh" --check
 
 image-test:
-	bash "$(IMAGE)/smoke-test.sh" "../dist/images/$(IMAGE)/resolute-desktop-xfce-cloudimg-amd64-v$(IMAGE_VERSION).img"
+	bash "$(IMAGE)/smoke-test.sh" "../dist/images/$(IMAGE)/ubuntu-resolute-xfce-v$(IMAGE_VERSION).img"

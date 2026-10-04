@@ -97,7 +97,7 @@ jobs:
       - name: Verify and split image into release assets
         working-directory: dist/images/ubuntu-resolute-xfce
         run: |
-          image="resolute-desktop-xfce-cloudimg-amd64-v${IMAGE_VERSION}.img"
+          image="ubuntu-resolute-xfce-v${IMAGE_VERSION}.img"
           sha256sum --check "$image.sha256"
           test -s "$image.manifest.json"
           # Each GitHub release asset must be smaller than 2 GiB.
