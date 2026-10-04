@@ -1381,7 +1381,7 @@
 <h1 id="installing-the-rpm">Installing the RPM<a class="headerlink" href="#installing-the-rpm" title="Permanent link">&para;</a></h1>
 <p>For the complete first-time setup, follow the
 <a href="../production/">production installation walkthrough</a>, including configuration,
-the first base image, administrator login, and image uploads. This page provides
+startup, administrator login, and the first image upload. This page provides
 the package reference and service commands.</p>
 <p>For a native (non-container) deployment on Rocky Linux 9 (x86_64), each tagged
 release publishes a <code>devbox-gateway-&lt;version&gt;-1.x86_64.rpm</code> artifact on the
@@ -1442,13 +1442,13 @@ by default, or your custom
 <ol>
 <li><strong>Satisfy the native runtime prerequisites</strong>: a running libvirt daemon
    (version 6.2.0 or newer), QEMU/KVM, the <code>vhost_vsock</code> kernel module loaded for
-   guest-event collection, a storage pool, write access to <code>DATA_ROOT_DIR</code>
-   (native default <code>/var/lib/libvirt/devbox-gateway</code>), and at least one base
-   image in <code>&lt;DATA_ROOT_DIR&gt;/baseimages</code> (the gateway refuses to start with an
-   empty library). Docker and Docker Compose are not required.
-   The default lives under <code>/var/lib/libvirt</code> so
-   images and sockets sit in a tree QEMU can use under SELinux without
-   relabeling. Use a <a href="../../vm-images/#downloading-vm-images">prebuilt release image</a>; see
+   guest-event collection, and write access to <code>DATA_ROOT_DIR</code>
+   (native default <code>/var/lib/libvirt/devbox-gateway</code>) and <code>BASE_IMAGE_DIR</code>.
+   Startup creates the base-image directory if missing and accepts an empty
+   library. The gateway defines and starts its storage pool when needed.
+   Docker and Docker Compose are not required.
+   The default lives under <code>/var/lib/libvirt</code> so images and sockets sit in a
+   tree QEMU can use under SELinux without relabeling. See
    <a href="../../configuration/storage/#libvirt-and-vm-storage">Libvirt and VM storage</a> for the host setup.</li>
 </ol>
 <p>Make sure libvirt itself is enabled — the gateway's unit only <em>wants</em>
@@ -1476,7 +1476,9 @@ by default, or your custom
 </code></pre></div>
 <p>Point the <a href="../../configuration/ldap/#ldap">LDAP settings</a> at your directory;
    the native package does not provide the Compose stack's LDAP server or test
-   accounts. Splunk is optional: the native defaults write application audit
+   accounts. Set <code>ADMIN_GROUP</code> so a directory administrator can upload the
+   first image; that user must also satisfy <code>LDAP_REQUIRED_GROUPS</code> if set.
+   Splunk is optional: the native defaults write application audit
    and guest events to local files. See <a href="../../operations/audit-logs/#audit-logs-and-splunk">Audit logs and Splunk</a>
    and <a href="../../operations/guest-events/#sauronagent-guest-events">SauronAgent guest events</a>.</p>
 <ol>
@@ -1491,6 +1493,12 @@ by default, or your custom
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>systemctl<span class="w"> </span>status<span class="w"> </span>devbox-gateway
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>devbox-gateway<span class="w"> </span>-f
 </code></pre></div>
+<ol>
+<li><strong>Upload a base image</strong>: sign in as an administrator, open <strong>Admin → Base
+   Images</strong>, and upload a <a href="../../vm-images/">downloaded and verified image</a>.
+   VM creation requires a valid image. You can alternatively copy one into
+   <code>BASE_IMAGE_DIR</code> on the host.</li>
+</ol>
 <h2 id="upgrade-or-remove">Upgrade or remove<a class="headerlink" href="#upgrade-or-remove" title="Permanent link">&para;</a></h2>
 <p>To upgrade, install the newer RPM (<code>sudo dnf upgrade ./devbox-gateway-*.rpm</code>);
 your config file is preserved and the service is restarted automatically. To

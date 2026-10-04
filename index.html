@@ -1385,20 +1385,21 @@ Microsoft RD Gateway's HTTP/UDP transports. Read the
 <h2 id="get-started">Get started<a class="headerlink" href="#get-started" title="Permanent link">&para;</a></h2>
 <p>For a complete native setup, follow the
 <a href="installation/production/">production installation walkthrough</a>. It covers
-installing the RPM, configuring LDAP and TLS, installing the first image,
-starting the service, signing in, and uploading additional images.</p>
+installing the RPM, configuring LDAP and TLS, starting with an empty image
+library, signing in as an administrator, and uploading the first image.</p>
 <ol>
 <li>Choose a <a href="installation/">deployment method</a>: native
    <a href="installation/rpm/">RPM on Rocky Linux 9</a>, native
    <a href="installation/deb/">DEB on Debian 12</a>, or the
    <a href="installation/docker-compose/">Docker Compose development stack</a>.
    Native packages do not require Docker on the host.</li>
-<li><a href="vm-images/">Download and verify a VM image</a> before the first gateway
-   start. Releases include Ubuntu 26.04, Ubuntu 24.04, and Rocky Linux 9 XFCE
-   images with SauronAgent already installed.</li>
 <li>Follow your installation guide to configure libvirt, LDAP, and the gateway,
    then start the service.</li>
-<li><a href="usage/dashboard/">Sign in to the dashboard</a>, create a VM, and
+<li><a href="usage/dashboard/">Sign in to the dashboard</a> as an administrator.
+   <a href="vm-images/">Download and verify a VM image</a>, then upload it through
+   <strong>Admin → Base Images</strong>. Releases include Ubuntu 26.04, Ubuntu 24.04, and
+   Rocky Linux 9 XFCE images with SauronAgent already installed.</li>
+<li>Create a VM from an uploaded image and
    <a href="usage/rdp/">connect with an RDP client</a>.</li>
 </ol>
 <p>Packages and VM images are available on

@@ -513,10 +513,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-install-the-first-vm-image-on-the-host" class="md-nav__link">
+  <a href="#6-start-the-gateway-and-check-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Install the first VM image on the host
+        6. Start the gateway and check it
       
     </span>
   </a>
@@ -524,10 +524,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-start-the-gateway-and-check-it" class="md-nav__link">
+  <a href="#7-log-in-as-an-administrator" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Start the gateway and check it
+        7. Log in as an administrator
       
     </span>
   </a>
@@ -535,10 +535,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-log-in-as-an-administrator-and-upload-more-images" class="md-nav__link">
+  <a href="#8-upload-the-first-vm-image" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. Log in as an administrator and upload more images
+        8. Upload the first VM image
       
     </span>
   </a>
@@ -1447,10 +1447,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#6-install-the-first-vm-image-on-the-host" class="md-nav__link">
+  <a href="#6-start-the-gateway-and-check-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Install the first VM image on the host
+        6. Start the gateway and check it
       
     </span>
   </a>
@@ -1458,10 +1458,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#7-start-the-gateway-and-check-it" class="md-nav__link">
+  <a href="#7-log-in-as-an-administrator" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Start the gateway and check it
+        7. Log in as an administrator
       
     </span>
   </a>
@@ -1469,10 +1469,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-log-in-as-an-administrator-and-upload-more-images" class="md-nav__link">
+  <a href="#8-upload-the-first-vm-image" class="md-nav__link">
     <span class="md-ellipsis">
       
-        8. Log in as an administrator and upload more images
+        8. Upload the first VM image
       
     </span>
   </a>
@@ -1513,13 +1513,12 @@
 <h1 id="production-installation-with-the-rpm">Production installation with the RPM<a class="headerlink" href="#production-installation-with-the-rpm" title="Permanent link">&para;</a></h1>
 <p>This walkthrough installs DevBox Gateway on a Rocky Linux 9 x86_64 host, connects
 it to your LDAP directory, and takes you through the first administrator login,
-image upload, and desktop connection. Docker is not required. For a Debian 12
+image upload, and desktop connection. For a Debian 12
 host, use the <a href="../deb/">DEB installation guide</a> for package and libvirt setup;
 the gateway configuration and dashboard steps are the same.</p>
-<p><strong>The first VM image must be installed on the host before starting the gateway.</strong>
-An empty image library prevents startup, so you cannot bootstrap it through the
-web interface. After that first start, administrators can upload additional
-images from the dashboard.</p>
+<p><strong>The gateway can start with an empty base-image library.</strong> It creates the
+configured directory if missing. Sign in as an administrator to upload the
+first image through the dashboard, then create a VM from it.</p>
 <h2 id="1-prepare-the-host-and-directory">1. Prepare the host and directory<a class="headerlink" href="#1-prepare-the-host-and-directory" title="Permanent link">&para;</a></h2>
 <p>You need:</p>
 <ul>
@@ -1650,47 +1649,31 @@ grants administrator access but does not bypass <code>LDAP_REQUIRED_GROUPS</code
 separate lines and use absolute paths; <code>$DATA_ROOT_DIR</code> is not expanded inside
 another value. The <a href="../../configuration/">configuration reference</a> lists
 all settings, including VM sizing and idle shutdown.</p>
-<h2 id="6-install-the-first-vm-image-on-the-host">6. Install the first VM image on the host<a class="headerlink" href="#6-install-the-first-vm-image-on-the-host" title="Permanent link">&para;</a></h2>
-<p>From the chosen release, download <strong>all</strong> parts for one Ubuntu 26.04, Ubuntu
-24.04, or Rocky Linux 9 XFCE image, plus its checksum and manifest. Keep them
-together in one directory. These guest choices work with the Rocky Linux host;
-they do not need to match the host distribution.</p>
-<p>In that directory, reconstruct and verify the image. Set <code>version</code> to the same
-release used above; this example chooses Ubuntu 26.04:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">version</span><span class="o">=</span><span class="m">1</span>.2.3
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">image</span><span class="o">=</span><span class="s2">"ubuntu26.04-xfce-v</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">.img"</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>.part-*<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sha256sum<span class="w"> </span>--check<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">.sha256"</span>
-</code></pre></div>
-<p>Continue only when the checksum reports <code>OK</code>, then copy the complete disk:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>/var/lib/libvirt/devbox-gateway/baseimages
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span><span class="w"> </span>/var/lib/libvirt/devbox-gateway/baseimages/
-</code></pre></div>
-<p>Use your configured <code>BASE_IMAGE_DIR</code> if you changed it. Copy the reconstructed
-<code>.img</code>, not the individual parts. The <a href="../../vm-images/">VM image guide</a> lists
-all filenames and explains the manifest. Release images already include
-cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.</p>
-<h2 id="7-start-the-gateway-and-check-it">7. Start the gateway and check it<a class="headerlink" href="#7-start-the-gateway-and-check-it" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>devbox-gateway
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>--no-pager<span class="w"> </span>--full<span class="w"> </span>status<span class="w"> </span>devbox-gateway
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sudo<span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>devbox-gateway<span class="w"> </span>-n<span class="w"> </span><span class="m">100</span><span class="w"> </span>--no-pager
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/health
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/ready
+<p>The service must be able to create and access <code>BASE_IMAGE_DIR</code>. The native
+path above is created at startup if it does not exist; you can also prepare
+the directory yourself. No image is required yet. Filesystem errors, such as
+an inaccessible directory or a path that names a file, still prevent startup.</p>
+<h2 id="6-start-the-gateway-and-check-it">6. Start the gateway and check it<a class="headerlink" href="#6-start-the-gateway-and-check-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>devbox-gateway
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>--no-pager<span class="w"> </span>--full<span class="w"> </span>status<span class="w"> </span>devbox-gateway
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>sudo<span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>devbox-gateway<span class="w"> </span>-n<span class="w"> </span><span class="m">100</span><span class="w"> </span>--no-pager
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/health
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/ready
 </code></pre></div>
 <p>The service should be active, with <code>ok</code> from <code>/api/health</code> and <code>ready</code> from
 <code>/api/ready</code>. Run the HTTPS checks from a machine that trusts your certificate.
-If startup fails, use the journal to resolve missing images, libvirt access,
+If startup fails, use the journal to resolve directory access, libvirt access,
 vsock support, certificate files, or invalid settings before retrying.
 After correcting a repeated startup failure:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>reset-failed<span class="w"> </span>devbox-gateway
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>devbox-gateway
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>reset-failed<span class="w"> </span>devbox-gateway
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>devbox-gateway
 </code></pre></div>
 <p>Health checks do not test LDAP login. Application events are written to
 <code>/var/log/devbox-gateway/audit.jsonl</code>; guest events appear in
 <code>/var/log/devbox-gateway/sauron.jsonl</code> as agents connect. See
 <a href="../../operations/health-checks/">health checks</a> for readiness scope and
 <a href="../../operations/audit-logs/">audit logs</a> for log retention and rotation.</p>
-<h2 id="8-log-in-as-an-administrator-and-upload-more-images">8. Log in as an administrator and upload more images<a class="headerlink" href="#8-log-in-as-an-administrator-and-upload-more-images" title="Permanent link">&para;</a></h2>
+<h2 id="7-log-in-as-an-administrator">7. Log in as an administrator<a class="headerlink" href="#7-log-in-as-an-administrator" title="Permanent link">&para;</a></h2>
 <ol>
 <li>Open <code>https://desktop.example.com</code> in a browser.</li>
 <li>Enter the bare <strong>Username</strong>, for example <code>alice</code>, and the account's directory
@@ -1700,9 +1683,29 @@ After correcting a repeated startup failure:</p>
 <li>On the dashboard, select <strong>Admin</strong>, then <strong>Base Images</strong>. If <strong>Admin</strong> is
    absent, check <code>ADMIN_GROUP</code> and the account's direct <code>memberOf</code> values.
    Sign in again after directory membership changes.</li>
-<li>Download, reconstruct, and verify another release image on the computer
-   running your browser. Under <strong>Upload Base Image</strong>, choose the complete
-   disk file, then select <strong>Upload</strong>.</li>
+</ol>
+<p>The <strong>Base Images</strong> dialog is available even when the library is empty.
+Uploading images requires administrator access; ordinary users cannot upload
+the first image themselves.</p>
+<h2 id="8-upload-the-first-vm-image">8. Upload the first VM image<a class="headerlink" href="#8-upload-the-first-vm-image" title="Permanent link">&para;</a></h2>
+<p>On the computer running your browser, download <strong>all</strong> parts for one Ubuntu
+26.04, Ubuntu 24.04, or Rocky Linux 9 XFCE image from the chosen release, plus
+its checksum and manifest. Keep them together in one directory. These guest
+choices work with the Rocky Linux host; they do not need to match the host
+distribution.</p>
+<p>In that directory, reconstruct and verify the image. Set <code>version</code> to the same
+release used above; this example chooses Ubuntu 26.04:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">version</span><span class="o">=</span><span class="m">1</span>.2.3
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">image</span><span class="o">=</span><span class="s2">"ubuntu26.04-xfce-v</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">.img"</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>.part-*<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>sha256sum<span class="w"> </span>--check<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">.sha256"</span>
+</code></pre></div>
+<p>Continue only when the checksum reports <code>OK</code>. The <a href="../../vm-images/">VM image guide</a>
+lists all filenames and explains the manifest. Release images already include
+cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.</p>
+<ol>
+<li>Under <strong>Upload Base Image</strong>, choose the complete disk file, then select
+   <strong>Upload</strong>.</li>
 <li>Wait for <strong>Base image uploaded.</strong> and confirm the image appears under
    <strong>Available Images</strong>.</li>
 </ol>
@@ -1710,8 +1713,12 @@ After correcting a repeated startup failure:</p>
 always be QCOW2. Do not upload <code>.part-*</code>, checksum, or manifest files. Uploads
 cannot overwrite an existing filename. The dialog shows available storage and
 the upload limit, which follows <code>VM_DISK_SIZE_GB</code> (200 GiB by default).</p>
-<p>Keep at least one valid base image in the library: deleting the last one blocks
-VM creation and prevents the next gateway startup.</p>
+<p>VM creation requires a valid base image. If the last image is deleted, new VM
+creation remains unavailable until another is added; the gateway can still
+start and administrators can upload a replacement.</p>
+<p>For an alternative import method, <a href="../../vm-images/#copy-an-image-on-the-host">copy a verified image directly on the
+host</a> into <code>BASE_IMAGE_DIR</code>. This can
+be done before or after starting the gateway.</p>
 <h2 id="9-create-a-desktop-and-connect">9. Create a desktop and connect<a class="headerlink" href="#9-create-a-desktop-and-connect" title="Permanent link">&para;</a></h2>
 <p>Return to <strong>My DevBoxes</strong> and select <strong>Create DevBox</strong>. Enter a <strong>New DevBox
 Name</strong>, choose a <strong>Base Image</strong>, and set the guest <strong>Username</strong>. Submit

@@ -1372,6 +1372,11 @@ browser will warn — choose <strong>Advanced</strong> → <strong>Proceed to lo
 <li>password: <code>dogood</code></li>
 </ul>
 <h2 id="managing-vms">Managing VMs<a class="headerlink" href="#managing-vms" title="Permanent link">&para;</a></h2>
+<p>A gateway with an empty image library still accepts logins. An administrator
+must <a href="../../vm-images/#upload-the-first-base-image">upload the first base image</a>
+through <strong>Admin → Base Images</strong>, or an operator can copy one into
+<code>BASE_IMAGE_DIR</code>, before users can create VMs. Administrator access requires
+membership in <code>ADMIN_GROUP</code> as well as any configured login-access groups.</p>
 <p>A successful login redirects to <code>/api/dashboard</code>, where you can:</p>
 <ul>
 <li>Create a new VM (name, base image, guest username). The guest account is

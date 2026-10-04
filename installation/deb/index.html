@@ -1381,8 +1381,8 @@
 <h1 id="installing-the-deb">Installing the deb<a class="headerlink" href="#installing-the-deb" title="Permanent link">&para;</a></h1>
 <p>After the Debian-specific package and libvirt steps below, the
 <a href="../production/#4-configure-dns-tls-and-network-access">production walkthrough</a>
-covers gateway configuration, the first base image, administrator login, and
-image uploads. Use your Debian host's firewall and certificate-trust tools in
+covers gateway configuration, startup, administrator login, and the first
+image upload. Use your Debian host's firewall and certificate-trust tools in
 place of the walkthrough's Rocky Linux commands.</p>
 <p>For a native deployment on Debian 12 (amd64), each tagged release also publishes
 a <code>devbox-gateway_&lt;version&gt;_amd64.deb</code> artifact on the
@@ -1439,10 +1439,9 @@ installation when the available libraries cannot load it.</p>
 <li><strong>Satisfy the native runtime prerequisites</strong>: a running libvirt daemon
    (version 6.2.0 or newer), QEMU/KVM, and the <code>vhost_vsock</code> kernel module loaded
    for guest-event collection. Ensure the service can write to <code>DATA_ROOT_DIR</code>
-   (native default <code>/var/lib/libvirt/devbox-gateway</code>) and place at least one
-   <a href="../../vm-images/#downloading-vm-images">prebuilt VM image</a> in
-   <code>&lt;DATA_ROOT_DIR&gt;/baseimages</code> before starting the gateway. It refuses to start
-   with an empty image library. The gateway defines and starts its storage pool
+   (native default <code>/var/lib/libvirt/devbox-gateway</code>) and <code>BASE_IMAGE_DIR</code>.
+   Startup creates the base-image directory if missing and accepts an empty
+   library. The gateway defines and starts its storage pool
    when needed; see <a href="../../configuration/storage/#libvirt-and-vm-storage">Libvirt and VM storage</a>
    for the host setup.</li>
 </ol>
@@ -1459,7 +1458,9 @@ installation when the available libraries cannot load it.</p>
 </code></pre></div>
 <p>Point the <a href="../../configuration/ldap/#ldap">LDAP settings</a> at your directory;
    the native package does not provide the Compose stack's LDAP server or test
-   accounts. Every setting is documented inline and in the
+   accounts. Set <code>ADMIN_GROUP</code> so a directory administrator can upload the
+   first image; that user must also satisfy <code>LDAP_REQUIRED_GROUPS</code> if set.
+   Every setting is documented inline and in the
    <a href="../../configuration/#configuration">configuration reference</a>.
    Splunk is optional: the native defaults write application audit and guest
    events to local files. See <a href="../../operations/audit-logs/#audit-logs-and-splunk">Audit logs and Splunk</a>
@@ -1477,6 +1478,12 @@ installation when the available libraries cannot load it.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>systemctl<span class="w"> </span>status<span class="w"> </span>devbox-gateway
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>journalctl<span class="w"> </span>-u<span class="w"> </span>devbox-gateway<span class="w"> </span>-f
 </code></pre></div>
+<ol>
+<li><strong>Upload a base image</strong>: sign in as an administrator, open <strong>Admin → Base
+   Images</strong>, and upload a <a href="../../vm-images/">downloaded and verified image</a>.
+   VM creation requires a valid image. You can alternatively copy one into
+   <code>BASE_IMAGE_DIR</code> on the host.</li>
+</ol>
 <h2 id="upgrade-or-remove">Upgrade or remove<a class="headerlink" href="#upgrade-or-remove" title="Permanent link">&para;</a></h2>
 <p>Install a newer DEB with <code>sudo apt install ./devbox-gateway_&lt;version&gt;_amd64.deb</code>.
 An upgrade preserves your config and restarts the service. To remove the

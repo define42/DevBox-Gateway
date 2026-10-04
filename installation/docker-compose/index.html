@@ -1438,11 +1438,10 @@
 <li>Write access to <code>/data/</code> on the host (used for ACME data, VM images, serial /
   VNC sockets, the application-audit HEC spool, and the separate SauronAgent
   guest log and forwarding spool).</li>
-<li>At least one QCOW2 base disk image in <code>/data/baseimages</code>, named with an
-  <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code> extension. The gateway will not start without a
-  valid QCOW2 image — follow
-  <a href="../../vm-images/#downloading-vm-images">Downloading VM images</a> before starting the stack.</li>
 </ul>
+<p>The image library may be empty. Startup creates <code>/data/baseimages</code> if needed;
+filesystem access errors still prevent startup. Upload the first image after
+signing in as an administrator.</p>
 <h2 id="start-the-stack">Start the stack<a class="headerlink" href="#start-the-stack" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/define42/DevBox-Gateway.git
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nb">cd</span><span class="w"> </span>DevBox-Gateway
@@ -1467,6 +1466,12 @@ in with <code>johndoe</code> / <code>dogood</code>. See <a href="../../usage/das
 for the dashboard and the seeded administrator account. This Compose
 configuration is a local development setup with test credentials and
 certificate verification disabled for LDAP and Splunk.</p>
+<p>For an empty image library, sign in with the seeded <code>admin</code> / <code>dogood</code> account,
+open <strong>Admin → Base Images</strong>, and upload a
+<a href="../../vm-images/#upload-the-first-base-image">downloaded and verified QCOW2 image</a>.
+The configured <code>ADMIN_GROUP</code> grants this account administrator access. Users
+can create VMs once a valid image is available. Copying an image into
+<code>/data/baseimages</code> on the host is also supported.</p>
 <h2 id="view-events-in-splunk">View events in Splunk<a class="headerlink" href="#view-events-in-splunk" title="Permanent link">&para;</a></h2>
 <p>The first Splunk start takes a few minutes. Application audit events are fsynced
 to <code>/data/audit-spool</code> before the delivery sink accepts them, then retried in the

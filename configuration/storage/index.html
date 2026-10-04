@@ -1280,9 +1280,10 @@
   <code>192.168.123.0/24</code>, host gateway <code>192.168.123.1</code>). The gateway defines, starts,
   and enables autostart for it. Reserve this subnet for the gateway and attach
   only gateway-managed VMs to this bridge.</li>
-<li>A base image library directory (<code>BASE_IMAGE_DIR</code>, default
-  <code>$DATA_ROOT_DIR/baseimages</code>) containing at least one QCOW2 disk image named
-  <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>.</li>
+<li>Access to the base image library directory (<code>BASE_IMAGE_DIR</code>, default
+  <code>$DATA_ROOT_DIR/baseimages</code>). The gateway creates it if missing and accepts an
+  empty library at startup. Directory filesystem errors still prevent startup.
+  VM creation requires a valid QCOW2 disk image named <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>.</li>
 <li>Host-side libvirt network filtering. The gateway installs the mandatory
   <code>devbox-isolated-ipv4</code> filter and supplies a fixed, persisted MAC/IPv4 binding
   for every VM. DHCP reservations match these assignments; addresses are never
@@ -1320,25 +1321,28 @@ finishes.</p>
 uploading them from the administrator's <strong>Base Images</strong> modal. The filename may
 end in <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>; content is accepted only when its first four
 bytes match the QCOW2 magic header (<code>51 46 49 fb</code>). The dashboard create form
-lets each user pick which image to clone for a new VM. <strong>If the directory
-contains no valid QCOW2 image at startup, the gateway fails to boot</strong> with a
-clear error, so populate it first. An administrator can delete the final image
-at runtime, but VM creation then remains unavailable and another image must be
-uploaded before the gateway can restart successfully.</p>
-<p>Before the first run, <a href="../../vm-images/#downloading-vm-images">download a VM image</a> from this
-project's <a href="https://github.com/define42/DevBox-Gateway/releases">GitHub Releases</a>,
-join its parts, verify its checksum, and copy the complete <code>.img</code> into the
-library. Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE images are
-available.</p>
+lets each user pick which image to clone for a new VM. <strong>An empty library does
+not prevent startup or administrator access.</strong> VM creation remains unavailable
+until a valid image is uploaded or copied into the directory. Deleting the
+final image blocks new VM creation until another is added, but the gateway
+can still restart.</p>
+<p>To populate an empty library, configure <code>ADMIN_GROUP</code>, sign in as a direct
+member who also meets <code>LDAP_REQUIRED_GROUPS</code>, and open <strong>Admin → Base Images</strong>.
+<a href="../../vm-images/#downloading-vm-images">Download a VM image</a> from this project's
+<a href="https://github.com/define42/DevBox-Gateway/releases">GitHub Releases</a>, join its
+parts, verify its checksum, and upload the complete <code>.img</code>. Ubuntu 26.04 XFCE,
+Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE images are available. See the
+<a href="../../installation/production/#7-log-in-as-an-administrator">production walkthrough</a>
+for the first upload.</p>
 <p>You can also <a href="../../development/building/#building-vm-images">build an Ubuntu or Rocky Linux XFCE image from this checkout</a>,
 including its matching SauronAgent package, and copy the resulting <code>.img</code> into
 <code>BASE_IMAGE_DIR</code> or upload it through the administrator's <strong>Base Images</strong> modal.</p>
 <p>Because <code>docker-compose.yml</code> already bind-mounts <code>/data/</code>, files dropped in
 <code>/data/baseimages</code> on the host are visible to the gateway container.</p>
 <p>For a native RPM or deb install the data root defaults to
-<code>/var/lib/libvirt/devbox-gateway</code>, so populate
-<code>/var/lib/libvirt/devbox-gateway/baseimages</code> instead (or set <code>DATA_ROOT_DIR</code> /
-<code>BASE_IMAGE_DIR</code> to wherever you keep images).</p>
+<code>/var/lib/libvirt/devbox-gateway</code>. Optional host imports go into
+<code>/var/lib/libvirt/devbox-gateway/baseimages</code> (or the directory configured by
+<code>DATA_ROOT_DIR</code> / <code>BASE_IMAGE_DIR</code>).</p>
 
 
 

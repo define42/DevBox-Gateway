@@ -1462,7 +1462,7 @@ inline comments; put comments on their own lines.</p>
 <tr>
 <td><code>BASE_IMAGE_DIR</code></td>
 <td><em>(empty → <code>&lt;DATA_ROOT_DIR&gt;/baseimages</code>)</em></td>
-<td>Directory of selectable QCOW2 base VDI images named <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>. Users pick one per VM in the dashboard. The gateway refuses to start if it contains no valid QCOW2 image.</td>
+<td>Directory of selectable QCOW2 base VDI images named <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>. Startup creates it if missing and accepts an empty library; filesystem errors still prevent startup. Administrators can upload the first image through the dashboard. VM creation requires a valid image.</td>
 </tr>
 <tr>
 <td><code>MAX_VDI_PER_USER</code></td>

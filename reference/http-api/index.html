@@ -1706,6 +1706,9 @@ Even when NDJSON was requested, check <code>Content-Type</code> before selecting
 If the connection ends without a result, inspect the inventory before retrying.
 Implementation: <a href="https://github.com/define42/DevBox-Gateway/blob/main/internal/dashboard/creation_stream.go">creation stream</a>.</p>
 <h3 id="base-image-uploads">Base-image uploads<a class="headerlink" href="#base-image-uploads" title="Permanent link">&para;</a></h3>
+<p>The gateway can start with an empty image library. Administrators can use the
+listing and upload routes to add the first image; VM creation still requires
+a valid filename from the available base-image list.</p>
 <p>Use <code>.img</code>, <code>.qcow2</code> or <code>.raw</code> filenames with QCOW2 content. The upload limit is
 the configured VM disk capacity (<code>VM_DISK_SIZE_GB</code>); the HTTP request has an
 additional 1 MiB allowance for multipart overhead. Read <code>maxUploadBytes</code> from
