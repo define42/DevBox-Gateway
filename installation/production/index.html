@@ -1,0 +1,1790 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="HTTPS and RDP gateway for libvirt-managed Linux desktops with LDAP authentication and guest audit collection.">
+      
+      
+      
+        <link rel="canonical" href="https://define42.github.io/DevBox-Gateway/installation/production/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../docker-compose/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Production walkthrough - DevBox Gateway</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="green" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#production-installation-with-the-rpm" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DevBox Gateway" class="md-header__button md-logo" aria-label="DevBox Gateway" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DevBox Gateway
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Production walkthrough
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="green" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="green" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/define42/DevBox-Gateway" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    define42/DevBox-Gateway
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DevBox Gateway" class="md-nav__button md-logo" aria-label="DevBox Gateway" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DevBox Gateway
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/define42/DevBox-Gateway" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    define42/DevBox-Gateway
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Installation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production walkthrough
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production walkthrough
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-prepare-the-host-and-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Prepare the host and directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-install-the-rpm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Install the RPM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-enable-libvirt-and-guest-event-transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Enable libvirt and guest-event transport
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configure-dns-tls-and-network-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Configure DNS, TLS, and network access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-edit-devbox-gatewayconf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Edit devbox-gateway.conf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-install-the-first-vm-image-on-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Install the first VM image on the host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-start-the-gateway-and-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Start the gateway and check it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-log-in-as-an-administrator-and-upload-more-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Log in as an administrator and upload more images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-create-a-desktop-and-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Create a desktop and connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../docker-compose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Compose
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rpm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RPM package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Debian package
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sauronagent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SauronAgent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../vm-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    VM images
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using the gateway
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Using the gateway
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../usage/rdp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RDP connections
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Configuration
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Settings reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/ldap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LDAP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/tls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TLS certificates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Libvirt and storage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/audit-logs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Audit logs and Splunk
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/guest-events/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SauronAgent guest events
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/health-checks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Health checks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/http-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HTTP API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_10" id="__nav_10_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_10">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building from source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing and linting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/repository-layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repository layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-prepare-the-host-and-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Prepare the host and directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-install-the-rpm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Install the RPM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-enable-libvirt-and-guest-event-transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Enable libvirt and guest-event transport
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-configure-dns-tls-and-network-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Configure DNS, TLS, and network access
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-edit-devbox-gatewayconf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Edit devbox-gateway.conf
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-install-the-first-vm-image-on-the-host" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Install the first VM image on the host
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-start-the-gateway-and-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Start the gateway and check it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-log-in-as-an-administrator-and-upload-more-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Log in as an administrator and upload more images
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-create-a-desktop-and-connect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Create a desktop and connect
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="production-installation-with-the-rpm">Production installation with the RPM<a class="headerlink" href="#production-installation-with-the-rpm" title="Permanent link">&para;</a></h1>
+<p>This walkthrough installs DevBox Gateway on a Rocky Linux 9 x86_64 host, connects
+it to your LDAP directory, and takes you through the first administrator login,
+image upload, and desktop connection. Docker is not required. For a Debian 12
+host, use the <a href="../deb/">DEB installation guide</a> for package and libvirt setup;
+the gateway configuration and dashboard steps are the same.</p>
+<p><strong>The first VM image must be installed on the host before starting the gateway.</strong>
+An empty image library prevents startup, so you cannot bootstrap it through the
+web interface. After that first start, administrators can upload additional
+images from the dashboard.</p>
+<h2 id="1-prepare-the-host-and-directory">1. Prepare the host and directory<a class="headerlink" href="#1-prepare-the-host-and-directory" title="Permanent link">&para;</a></h2>
+<p>You need:</p>
+<ul>
+<li>A Rocky Linux 9 x86_64 host with root or <code>sudo</code> access and hardware
+  virtualization available to QEMU/KVM. If the host is itself a VM, its
+  hypervisor must expose nested virtualization.</li>
+<li>Enough memory and disk space for your desktops. Defaults are four vCPUs,
+  4 GiB RAM, and a 200 GiB virtual disk per VM; QCOW2 disk usage grows as guests
+  write data. Reserve the gateway's <code>192.168.123.0/24</code> network for its managed
+  guests. See <a href="../../configuration/storage/">libvirt and storage</a>.</li>
+<li>A hostname such as <code>desktop.example.com</code> that resolves to the host from your
+  clients, and a matching TLS certificate trusted by those clients.</li>
+<li>An LDAP directory reachable from the host, including a user who will be an
+  administrator. The example below uses <code>alice@example.com</code> as the directory
+  bind identity and the <code>userPrincipalName</code> attribute for search and identity.
+  The directory must accept that bind and allow the user to read their own
+  entry and <code>memberOf</code>. Adapt the attributes to your directory as described in
+  <a href="../../configuration/ldap/">LDAP configuration</a>.</li>
+<li>Direct membership in <code>devbox-users</code> for gateway users. Administrators also
+  need direct membership in <code>devbox-admins</code>. These example groups must exist
+  in your directory; the gateway does not create them or resolve nested groups.</li>
+</ul>
+<p>This guide uses local audit files. Splunk can be configured later through the
+<a href="../../operations/audit-logs/">audit</a> and
+<a href="../../operations/guest-events/">guest-event</a> settings.</p>
+<h2 id="2-install-the-rpm">2. Install the RPM<a class="headerlink" href="#2-install-the-rpm" title="Permanent link">&para;</a></h2>
+<p>Choose a version from <a href="https://github.com/define42/DevBox-Gateway/releases">GitHub Releases</a>.
+Replace <code>1.2.3</code> below with that version, without the <code>v</code> prefix:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">version</span><span class="o">=</span><span class="m">1</span>.2.3
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>curl<span class="w"> </span>--fail<span class="w"> </span>--location<span class="w"> </span>--remote-name<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="s2">"https://github.com/define42/DevBox-Gateway/releases/download/v</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">/devbox-gateway-</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">-1.x86_64.rpm"</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span><span class="s2">"./devbox-gateway-</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">-1.x86_64.rpm"</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>sudo<span class="w"> </span>dnf<span class="w"> </span>install<span class="w"> </span>libvirt-daemon<span class="w"> </span>libvirt-client
+</code></pre></div>
+<p>The RPM installs the gateway binary, systemd service, configuration template,
+and its libvirt/QEMU dependencies. Installation does not start the gateway.
+The additional packages ensure <code>libvirtd</code> and the <code>virsh</code> client are available
+for the monolithic-daemon setup and connection checks below.
+See the <a href="../rpm/">RPM reference</a> for package contents and upgrades.</p>
+<h2 id="3-enable-libvirt-and-guest-event-transport">3. Enable libvirt and guest-event transport<a class="headerlink" href="#3-enable-libvirt-and-guest-event-transport" title="Permanent link">&para;</a></h2>
+<p>For a fresh host, this walkthrough uses the monolithic <code>libvirtd</code> service:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>libvirtd.service
+</code></pre></div>
+<p>Keep an existing host's libvirt mode. If it is already configured to use
+modular daemons, enable these sockets instead of starting <code>libvirtd</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>virtqemud.socket<span class="w"> </span>virtnetworkd.socket<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>virtstoraged.socket<span class="w"> </span>virtnwfilterd.socket<span class="w"> </span>virtproxyd.socket
+</code></pre></div>
+<p><code>virtproxyd.socket</code> provides <code>/var/run/libvirt/libvirt-sock</code>, the socket used by
+the gateway, when modular daemons are in use. On a modular host,
+<code>libvirtd.service</code> must remain masked as part of libvirt's
+<a href="https://libvirt.org/daemons.html#switching-to-modular-daemons">modular setup</a>:
+the gateway unit has <code>Wants=libvirtd.service</code>, so merely disabling it does not
+prevent a startup attempt. Do not activate both daemon modes together. If you
+are unsure which mode the host uses, follow libvirt's
+<a href="https://libvirt.org/daemons.html#checking-whether-modular-monolithic-mode-is-in-use">daemon-mode checks</a>.</p>
+<p>Load the vsock module now and on future boots, then verify KVM and the exact
+libvirt connection the gateway needs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>sudo<span class="w"> </span>modprobe<span class="w"> </span>vhost_vsock
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span>vhost_vsock<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>tee<span class="w"> </span>/etc/modules-load.d/devbox-gateway.conf
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="nb">test</span><span class="w"> </span>-c<span class="w"> </span>/dev/kvm
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sudo<span class="w"> </span>virsh<span class="w"> </span>-c<span class="w"> </span><span class="s1">'qemu+unix:///system?socket=/var/run/libvirt/libvirt-sock'</span><span class="w"> </span>version
+</code></pre></div>
+<p>The <code>test</code> command must succeed and <code>virsh</code> must report the host's libvirt/QEMU
+versions. The gateway requires libvirt 6.2.0 or newer. It creates its storage
+pool, dedicated NAT network, and network filter when it starts; you do not need
+to define them manually. Leave the standalone <code>sauronhost</code> service disabled:
+the gateway already runs the guest-event collector on AF_VSOCK port 9000.</p>
+<h2 id="4-configure-dns-tls-and-network-access">4. Configure DNS, TLS, and network access<a class="headerlink" href="#4-configure-dns-tls-and-network-access" title="Permanent link">&para;</a></h2>
+<p>Point <code>desktop.example.com</code> at the host and allow client TCP connections to port
+443. Both HTTPS and RDP use this port. This walkthrough connects clients
+directly to the gateway; a normal HTTP reverse proxy cannot carry its raw RDP
+connections.</p>
+<p>If firewalld is active and the client-facing interface uses the <code>public</code> zone:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sudo<span class="w"> </span>firewall-cmd<span class="w"> </span>--get-active-zones
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sudo<span class="w"> </span>firewall-cmd<span class="w"> </span>--permanent<span class="w"> </span>--zone<span class="o">=</span>public<span class="w"> </span>--add-port<span class="o">=</span><span class="m">443</span>/tcp
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>sudo<span class="w"> </span>firewall-cmd<span class="w"> </span>--reload
+</code></pre></div>
+<p>Use the zone for your client-facing interface if it differs. See Rocky Linux's
+<a href="https://docs.rockylinux.org/guides/security/firewalld/">firewalld guide</a> for zone
+selection. Allow the same TCP port through any upstream firewall. The host must
+also reach your LDAP server; the example uses LDAPS on port 636.</p>
+<p>Obtain a certificate for <code>desktop.example.com</code> through your certificate
+authority. With its PEM certificate chain and matching unencrypted private key
+available locally as <code>fullchain.pem</code> and <code>privkey.pem</code>, install them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0700</span><span class="w"> </span>/etc/devbox-gateway/tls
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span>fullchain.pem<span class="w"> </span>/etc/devbox-gateway/tls/fullchain.pem
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0600</span><span class="w"> </span>privkey.pem<span class="w"> </span>/etc/devbox-gateway/tls/privkey.pem
+</code></pre></div>
+<p>Clients must trust the frontend certificate's CA. The host must trust the LDAP
+server's CA, and its certificate must cover the LDAP hostname. Keep certificate
+verification enabled. This guide uses static PEM files; see
+<a href="../../configuration/tls/">TLS certificates</a> if you prefer ACME.</p>
+<h2 id="5-edit-devbox-gatewayconf">5. Edit devbox-gateway.conf<a class="headerlink" href="#5-edit-devbox-gatewayconf" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sudo<span class="w"> </span>vi<span class="w"> </span>/etc/devbox-gateway/devbox-gateway.conf
+</code></pre></div>
+<p>Set the following values, replacing the example hostnames, directory base,
+identity attribute, and groups with your deployment's values. Edit existing
+active settings instead of appending duplicate keys. The first occurrence of
+a key wins within the file; explicit process environment variables override it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="na">LISTEN_ADDR</span><span class="o">=</span><span class="s">:443</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="na">FRONT_DOMAIN</span><span class="o">=</span><span class="s">desktop.example.com</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="na">CERT_FILE</span><span class="o">=</span><span class="s">/etc/devbox-gateway/tls/fullchain.pem</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="na">KEY_FILE</span><span class="o">=</span><span class="s">/etc/devbox-gateway/tls/privkey.pem</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="na">ACME_ENABLE</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="na">DATA_ROOT_DIR</span><span class="o">=</span><span class="s">/var/lib/libvirt/devbox-gateway</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="na">BASE_IMAGE_DIR</span><span class="o">=</span><span class="s">/var/lib/libvirt/devbox-gateway/baseimages</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="na">LDAP_URL</span><span class="o">=</span><span class="s">ldaps://ldap.example.com:636</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="na">LDAP_BASE_DN</span><span class="o">=</span><span class="s">dc=example,dc=com</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="na">LDAP_USER_DOMAIN</span><span class="o">=</span><span class="s">@example.com</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="na">LDAP_USER_FILTER</span><span class="o">=</span><span class="s">(userPrincipalName=%s)</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="na">LDAP_USERNAME_ATTRIBUTE</span><span class="o">=</span><span class="s">userPrincipalName</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="na">LDAP_STARTTLS</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="na">LDAP_SKIP_TLS_VERIFY</span><span class="o">=</span><span class="s">false</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="na">LDAP_REQUIRED_GROUPS</span><span class="o">=</span><span class="s">devbox-users</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="na">ADMIN_GROUP</span><span class="o">=</span><span class="s">devbox-admins</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="na">AUDIT_LOG_FILE</span><span class="o">=</span><span class="s">/var/log/devbox-gateway/audit.jsonl</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="na">SAURON_EVENT_LOG_FILE</span><span class="o">=</span><span class="s">/var/log/devbox-gateway/sauron.jsonl</span>
+</code></pre></div>
+<p>Leave the application and guest Splunk endpoint, token, and index settings
+unset and their ACK settings disabled for this local-logging setup. An
+administrator must belong directly to <strong>both</strong> example groups: <code>ADMIN_GROUP</code>
+grants administrator access but does not bypass <code>LDAP_REQUIRED_GROUPS</code>.</p>
+<p>This file uses literal <code>KEY=VALUE</code> entries, not shell commands. Put comments on
+separate lines and use absolute paths; <code>$DATA_ROOT_DIR</code> is not expanded inside
+another value. The <a href="../../configuration/">configuration reference</a> lists
+all settings, including VM sizing and idle shutdown.</p>
+<h2 id="6-install-the-first-vm-image-on-the-host">6. Install the first VM image on the host<a class="headerlink" href="#6-install-the-first-vm-image-on-the-host" title="Permanent link">&para;</a></h2>
+<p>From the chosen release, download <strong>all</strong> parts for one Ubuntu 26.04, Ubuntu
+24.04, or Rocky Linux 9 XFCE image, plus its checksum and manifest. Keep them
+together in one directory. These guest choices work with the Rocky Linux host;
+they do not need to match the host distribution.</p>
+<p>In that directory, reconstruct and verify the image. Set <code>version</code> to the same
+release used above; this example chooses Ubuntu 26.04:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nv">version</span><span class="o">=</span><span class="m">1</span>.2.3
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">image</span><span class="o">=</span><span class="s2">"ubuntu26.04-xfce-v</span><span class="si">${</span><span class="nv">version</span><span class="si">}</span><span class="s2">.img"</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>.part-*<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>sha256sum<span class="w"> </span>--check<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">.sha256"</span>
+</code></pre></div>
+<p>Continue only when the checksum reports <code>OK</code>, then copy the complete disk:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sudo<span class="w"> </span>install<span class="w"> </span>-d<span class="w"> </span>/var/lib/libvirt/devbox-gateway/baseimages
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sudo<span class="w"> </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0644</span><span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span><span class="w"> </span>/var/lib/libvirt/devbox-gateway/baseimages/
+</code></pre></div>
+<p>Use your configured <code>BASE_IMAGE_DIR</code> if you changed it. Copy the reconstructed
+<code>.img</code>, not the individual parts. The <a href="../../vm-images/">VM image guide</a> lists
+all filenames and explains the manifest. Release images already include
+cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.</p>
+<h2 id="7-start-the-gateway-and-check-it">7. Start the gateway and check it<a class="headerlink" href="#7-start-the-gateway-and-check-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>devbox-gateway
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>--no-pager<span class="w"> </span>--full<span class="w"> </span>status<span class="w"> </span>devbox-gateway
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sudo<span class="w"> </span>journalctl<span class="w"> </span>-u<span class="w"> </span>devbox-gateway<span class="w"> </span>-n<span class="w"> </span><span class="m">100</span><span class="w"> </span>--no-pager
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/health
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>curl<span class="w"> </span>--fail<span class="w"> </span>https://desktop.example.com/api/ready
+</code></pre></div>
+<p>The service should be active, with <code>ok</code> from <code>/api/health</code> and <code>ready</code> from
+<code>/api/ready</code>. Run the HTTPS checks from a machine that trusts your certificate.
+If startup fails, use the journal to resolve missing images, libvirt access,
+vsock support, certificate files, or invalid settings before retrying.
+After correcting a repeated startup failure:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>reset-failed<span class="w"> </span>devbox-gateway
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>sudo<span class="w"> </span>systemctl<span class="w"> </span>start<span class="w"> </span>devbox-gateway
+</code></pre></div>
+<p>Health checks do not test LDAP login. Application events are written to
+<code>/var/log/devbox-gateway/audit.jsonl</code>; guest events appear in
+<code>/var/log/devbox-gateway/sauron.jsonl</code> as agents connect. See
+<a href="../../operations/health-checks/">health checks</a> for readiness scope and
+<a href="../../operations/audit-logs/">audit logs</a> for log retention and rotation.</p>
+<h2 id="8-log-in-as-an-administrator-and-upload-more-images">8. Log in as an administrator and upload more images<a class="headerlink" href="#8-log-in-as-an-administrator-and-upload-more-images" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Open <code>https://desktop.example.com</code> in a browser.</li>
+<li>Enter the bare <strong>Username</strong>, for example <code>alice</code>, and the account's directory
+   <strong>Password</strong>, then select <strong>Continue</strong>. Do not enter <code>alice@example.com</code>:
+   the gateway appends the configured domain. Native installations have no
+   bundled <code>johndoe</code> or <code>admin</code> test accounts.</li>
+<li>On the dashboard, select <strong>Admin</strong>, then <strong>Base Images</strong>. If <strong>Admin</strong> is
+   absent, check <code>ADMIN_GROUP</code> and the account's direct <code>memberOf</code> values.
+   Sign in again after directory membership changes.</li>
+<li>Download, reconstruct, and verify another release image on the computer
+   running your browser. Under <strong>Upload Base Image</strong>, choose the complete
+   disk file, then select <strong>Upload</strong>.</li>
+<li>Wait for <strong>Base image uploaded.</strong> and confirm the image appears under
+   <strong>Available Images</strong>.</li>
+</ol>
+<p>Accepted filenames end in <code>.img</code>, <code>.qcow2</code>, or <code>.raw</code>, but the content must
+always be QCOW2. Do not upload <code>.part-*</code>, checksum, or manifest files. Uploads
+cannot overwrite an existing filename. The dialog shows available storage and
+the upload limit, which follows <code>VM_DISK_SIZE_GB</code> (200 GiB by default).</p>
+<p>Keep at least one valid base image in the library: deleting the last one blocks
+VM creation and prevents the next gateway startup.</p>
+<h2 id="9-create-a-desktop-and-connect">9. Create a desktop and connect<a class="headerlink" href="#9-create-a-desktop-and-connect" title="Permanent link">&para;</a></h2>
+<p>Return to <strong>My DevBoxes</strong> and select <strong>Create DevBox</strong>. Enter a <strong>New DevBox
+Name</strong>, choose a <strong>Base Image</strong>, and set the guest <strong>Username</strong>. Submit
+<strong>Create DevBox</strong>; the gateway creates and starts the VM.</p>
+<p>The guest's password is the password used for this gateway login. Wait until
+the VM's <strong>RDP</strong> button is enabled, select it, and open the downloaded <code>.rdp</code>
+file in an RDP client within two minutes. Log into the guest with the guest
+username and that password. Each downloaded connection token is single-use;
+select <strong>RDP</strong> again for a new connection. See the
+<a href="../../usage/rdp/">RDP client guide</a> for the connection requirements.</p>
+<p>For subsequent changes to <code>devbox-gateway.conf</code> or the static certificate files,
+run <code>sudo systemctl restart devbox-gateway</code>. A restart reloads those files,
+invalidates browser sessions, and disconnects active gateway connections.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.top", "navigation.tracking", "navigation.sections", "toc.follow", "content.code.copy", "content.code.annotate", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
