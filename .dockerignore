@@ -1,0 +1,6 @@
+.git
+.cache/images
+dist
+SauronAgent/bin
+coverage*.out
+coverage.html

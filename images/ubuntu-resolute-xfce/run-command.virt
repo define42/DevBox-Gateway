@@ -1,0 +1,125 @@
+# Refresh the archive indexes from the downloaded cloud image before upgrading.
+run-command apt-get update
+run-command DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
+# The gateway's NoCloud seed requires cloud-init, Python, and XRDP at first boot.
+install cloud-init,python3,ca-certificates,xfce4,xfce4-goodies,xfce4-terminal,lightdm,lightdm-gtk-greeter,xauth,xserver-xorg-input-libinput,xserver-xorg-legacy,xrdp,xorgxrdp,dbus-x11,grub-pc-bin,vim,net-tools,nmap,wget,gnupg,auditd
+
+# PipeWire desktop audio and XRDP playback/microphone redirection.
+# The XRDP module loads through its packaged XDG autostart entry in XFCE.
+# pulseaudio-utils supplies pactl so the module can select the XRDP devices.
+install pipewire-audio,pipewire-module-xrdp,pulseaudio-utils
+
+run-command ln -sf /dev/null /etc/systemd/system/systemd-networkd-wait-online.service
+
+
+run-command grub-install --target=i386-pc /dev/sda
+run-command update-grub
+run-command apt-get clean && rm -rf /var/lib/apt/lists/*
+
+
+# Default XFCE session for new users
+upload .xsession:/etc/skel/.xsession
+run-command chmod 0755 /etc/skel/.xsession
+
+# LightDM config for XFCE
+run-command install -d -m 0755 /etc/lightdm/lightdm.conf.d
+upload 50-xfce.conf:/etc/lightdm/lightdm.conf.d/50-xfce.conf
+run-command chmod 0644 /etc/lightdm/lightdm.conf.d/50-xfce.conf
+
+# Make LightDM the default display manager
+upload default-display-manager:/etc/X11/default-display-manager
+run-command chmod 0644 /etc/X11/default-display-manager
+
+# Allow XRDP to launch Xorg for non-console users
+upload Xwrapper.config:/etc/X11/Xwrapper.config
+run-command chmod 0644 /etc/X11/Xwrapper.config
+
+# Force XRDP sessions to start XFCE
+upload startwm.sh:/etc/xrdp/startwm.sh
+run-command chmod 0755 /etc/xrdp/startwm.sh
+
+# Disable XFCE compositor for XRDP performance
+upload xfwm4.xml:/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+run-command chmod 0644 /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
+
+# Disable AppArmor at kernel level
+upload 99-disable-apparmor.cfg:/etc/default/grub.d/99-disable-apparmor.cfg
+run-command chmod 0644 /etc/default/grub.d/99-disable-apparmor.cfg
+
+# Add Mozilla APT repository and pin it above Ubuntu archive
+run-command install -d -m 0755 /etc/apt/keyrings
+run-command wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O /etc/apt/keyrings/packages.mozilla.org.asc
+run-command printf 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main\n' > /etc/apt/sources.list.d/mozilla.list
+run-command printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /etc/apt/preferences.d/mozilla
+run-command apt-get update
+install firefox
+
+# Add VS Code repository and install code
+run-command wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/packages.microsoft.gpg
+run-command printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main\n' > /etc/apt/sources.list.d/vscode.list
+run-command apt-get update
+install code
+
+# Install IntelliJ IDEA with its bundled runtime and a menu entry for all users
+run-command wget --tries=3 --timeout=60 -q https://download.jetbrains.com/idea/idea-2026.2.3.tar.gz -O /tmp/idea-2026.2.3.tar.gz
+run-command printf '%s\n' '68751c8ae4d49407251cd197df795fbed91b6fdc85d10c73c4649a99e496ab37  /tmp/idea-2026.2.3.tar.gz' | sha256sum --check
+run-command install -d -m 0755 /opt/intellij-idea
+run-command tar -xzf /tmp/idea-2026.2.3.tar.gz --strip-components=1 --no-same-owner -C /opt/intellij-idea
+run-command rm /tmp/idea-2026.2.3.tar.gz
+run-command test -x /opt/intellij-idea/bin/idea && test -x /opt/intellij-idea/jbr/bin/java && test -r /opt/intellij-idea/bin/idea.svg
+run-command ln -s /opt/intellij-idea/bin/idea /usr/local/bin/idea
+upload jetbrains-idea.desktop:/usr/share/applications/jetbrains-idea.desktop
+run-command chown root:root /usr/share/applications/jetbrains-idea.desktop
+run-command chmod 0644 /usr/share/applications/jetbrains-idea.desktop
+
+# Add Google Chrome repository and install chrome
+run-command wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+run-command printf 'deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\n' > /etc/apt/sources.list.d/google-chrome.list
+run-command apt-get update
+install google-chrome-stable
+
+# Add Go (longsleep/golang-backports) deb repository and install newest golang
+run-command wget -qO- 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x876b22ba887ca91614b5323fc631127f87fa12d1' | gpg --dearmor -o /etc/apt/keyrings/golang-backports.gpg
+run-command printf 'deb [signed-by=/etc/apt/keyrings/golang-backports.gpg] https://ppa.launchpadcontent.net/longsleep/golang-backports/ubuntu resolute main\n' > /etc/apt/sources.list.d/golang-backports.list
+run-command apt-get update
+install golang-go
+
+# Install Docker from the Ubuntu repository
+run-command DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-buildx docker-compose-v2
+
+# Make rootful Docker available to every current and future user.
+# Docker access is equivalent to root access, so every image user must be trusted.
+run-command install -d -m 0755 /etc/systemd/system/docker.socket.d
+run-command printf '[Socket]\nSocketMode=0666\n' > /etc/systemd/system/docker.socket.d/override.conf
+run-command systemctl enable docker.service docker.socket containerd.service
+
+run-command apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Reduce Firefox CPU usage under XRDP
+run-command mkdir -p /etc/firefox/policies/
+upload policies.json:/etc/firefox/policies/policies.json
+run-command chmod 0644 /etc/firefox/policies/policies.json
+
+# Setup xrdp
+upload xrdp.ini:/etc/xrdp/xrdp.ini
+run-command chmod 0644 /etc/xrdp/xrdp.ini
+
+# Enable XRDP
+run-command usermod -aG ssl-cert xrdp
+run-command systemctl enable xrdp
+
+# Prefer LightDM/XFCE for local UI
+run-command systemctl set-default graphical.target
+
+# Remove AppArmor entirely (kernel param disables the LSM after reboot)
+run-command DEBIAN_FRONTEND=noninteractive apt-get purge -y apparmor
+
+# Update GRUB so the kernel parameters apply at first boot.
+run-command update-grub
+
+# Remove provisioning state so every VM consumes its own NoCloud seed.
+run-command cloud-init clean --logs
+
+# Reset machine identity for each new VM.
+run-command truncate -s 0 /etc/machine-id
+run-command truncate -s 0 /var/lib/dbus/machine-id

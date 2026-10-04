@@ -7,6 +7,8 @@ VERSION  ?= 0.0.0
 RELEASE  ?= 1
 ARCH     ?= x86_64
 DEB_ARCH ?= amd64
+IMAGE ?= ubuntu-resolute-xfce
+IMAGE_VERSION ?= $(VERSION)
 BINARY   := dist/devbox-gateway
 GO_VERSION := $(shell awk '/^go / {print $$2; exit}' go.mod)
 COVERAGE_MIN ?= 80.0
@@ -16,7 +18,12 @@ GATEWAY_PACKAGES := ./cmd/... ./internal/...
 SAURON_RPM_GOARCH = $(patsubst x86_64,amd64,$(patsubst aarch64,arm64,$(patsubst i686,386,$(patsubst armhfp,arm,$(patsubst armv7hl,arm,$(patsubst loongarch64,loong64,$(ARCH)))))))
 SAURON_DEB_GOARCH = $(patsubst i386,386,$(patsubst armhf,arm,$(patsubst ppc64el,ppc64le,$(DEB_ARCH))))
 
-.PHONY: all build rpm deb sauron-build sauron-rpm sauron-deb lint lint2 gosec test run ui
+.PHONY: all build rpm deb sauron-build sauron-rpm sauron-deb image image-check image-test lint lint2 gosec test run ui
+
+# VM image builds are explicit and independent of gateway/container builds.
+image image-check image-test:
+	@test "$(IMAGE)" = ubuntu-resolute-xfce || { echo "Unsupported IMAGE: $(IMAGE)" >&2; exit 1; }
+	$(MAKE) -C images "$@" IMAGE="$(IMAGE)" IMAGE_VERSION="$(IMAGE_VERSION)"
 
 # build compiles the UI and a native (CGO/libvirt-linked) binary into dist/.
 # Requires the libvirt development headers and a C toolchain on the build host.

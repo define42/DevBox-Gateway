@@ -70,6 +70,27 @@ The build writes static `sauronagent` and `sauronhost` binaries under
 need the gateway's libvirt headers. Deployment and protocol details are in
 [SauronAgent/README.md](SauronAgent/README.md).
 
+## VM image changes
+
+Image sources live in `images/<variant>/`; generated disks belong in
+`dist/images/`, and downloads are cached in `.cache/images/`. For the Ubuntu
+Resolute XFCE image, run:
+
+```sh
+make image-check IMAGE=ubuntu-resolute-xfce
+make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+```
+
+The syntax and upload-source check is quick. The full build requires Linux
+x86_64, Docker access, Bash, curl, Python 3, `flock`, `sha256sum`, Git, Make, and
+the root module's Go toolchain. It builds the SauronAgent deb from this checkout
+and installs it into the desktop image. KVM is optional but speeds up the build.
+The smoke test needs host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`
+and boots a temporary overlay without modifying the base image. See the
+[image README](images/ubuntu-resolute-xfce/README.md) for artifact paths and
+guest configuration.
+
 ## Checks before a pull request
 
 Run the full test target before submitting changes:
@@ -131,8 +152,18 @@ screenshots when the dashboard or login flow changes.
 
 The [release workflow](.github/workflows/go.yml) creates version tags and GitHub
 Releases with generated release notes, builds gateway and SauronAgent packages,
-and publishes gateway container images after pushes to `main`. Describe changes
-in commit and pull-request text so the release notes are useful.
+and publishes gateway container images after pushes to `main`. It calls the
+[image workflow](.github/workflows/ubuntu-resolute-xfce.yml) with the same version
+to build and boot-test the Ubuntu image. Release publication waits for both
+the gateway and image jobs to succeed, then attaches the packages, split image
+parts, image checksum, and build manifest to one `vMAJOR.MINOR.PATCH` release.
+The SauronAgent installed in the image also uses that release version. Describe
+changes in commit and pull-request text so the release notes are useful.
+
+The image workflow also runs for relevant image, build, and SauronAgent changes
+on pull requests, using version `0.0.0`, and supports manual runs with a numeric
+`MAJOR.MINOR.PATCH` version input that defaults to `0.0.0`. These standalone runs
+publish workflow artifacts only; they do not create tags or GitHub Releases.
 
 Preserve the existing license boundaries: the gateway has an
 [MIT license](LICENSE), while `SauronAgent/` has an

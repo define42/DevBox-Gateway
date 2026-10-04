@@ -1,0 +1,10 @@
+{
+  "policies": {
+    "DisableHardwareAcceleration": true,
+    "Preferences": {
+      "layers.acceleration.disabled": { "Value": true, "Status": "locked" },
+      "gfx.webrender.enabled": { "Value": false, "Status": "locked" },
+      "gfx.webrender.all": { "Value": false, "Status": "locked" }
+    }
+  }
+}

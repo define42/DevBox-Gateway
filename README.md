@@ -1046,6 +1046,10 @@ curl -L -o /data/baseimages/resolute-desktop-cloudimg-amd64-v0.0.9.img \
   https://github.com/define42/ubuntu-resolute-desktop-cloud-image/releases/download/v0.0.9/resolute-desktop-cloudimg-amd64-v0.0.9.img
 ```
 
+You can also [build the Ubuntu XFCE image from this checkout](#building-vm-images),
+including its matching SauronAgent package, and copy the resulting `.img` into
+`BASE_IMAGE_DIR` or upload it through the administrator's **Base Images** modal.
+
 Because `docker-compose.yml` already bind-mounts `/data/`, files dropped in
 `/data/baseimages` on the host are visible to the gateway container.
 
@@ -1155,6 +1159,40 @@ headers and rejects binaries that do not match the requested architecture.
 Recognized CPU aliases are normalized to the selected package format in metadata
 and default filenames (for example, `-format deb -arch x86_64` produces `amd64`).
 
+### Building VM images
+
+VM image recipes live under [`images/`](images), with one directory per image
+variant. The Ubuntu Resolute XFCE recipe builds a standalone QCOW2 desktop disk
+and installs SauronAgent from the same checkout, enabling its guest service.
+Image builds run separately from gateway and container builds.
+
+GitHub Releases publish the Ubuntu image alongside the gateway and SauronAgent
+packages under the same `vMAJOR.MINOR.PATCH` tag. The image filename and its
+installed SauronAgent use that gateway release version.
+
+On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
+`sha256sum`, Git, Make, and the Go version specified in `go.mod`, run:
+
+```sh
+make image-check IMAGE=ubuntu-resolute-xfce
+make image IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu-resolute-xfce IMAGE_VERSION=0.0.0
+```
+
+The build downloads the Ubuntu source image and a container with the image
+customization tools. KVM speeds up customization; software emulation works when
+`/dev/kvm` is absent but is considerably slower. The smoke test additionally
+requires host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`; it boots
+a temporary overlay and leaves the base image unchanged.
+
+Output goes to `dist/images/ubuntu-resolute-xfce/` as
+`resolute-desktop-xfce-cloudimg-amd64-v0.0.0.img`, with `.img.sha256` and
+`.img.manifest.json` sidecars. The manifest records the build commit, source
+checksum, builder container, and SauronAgent version. Downloads are cached under
+`.cache/images/`. Both directories are ignored by Git. See the
+[image README](images/ubuntu-resolute-xfce/README.md) for contents, release
+downloads, and gateway installation.
+
 ### UI (TypeScript)
 
 The dashboard UI source lives in `ui/dashboard.ts`. Rebuild the embedded asset
@@ -1224,6 +1262,11 @@ Some integration tests (e.g. `ldap_integration_test.go`,
 │   └── webassets/   Embedded static assets, including the compiled dashboard.js.
 ├── SauronAgent/     Guest audit agent and hypervisor collector in the root Go module;
 │                    the gateway embeds its collector package.
+├── images/
+│   ├── Makefile     Image build, recipe validation, and boot smoke-test targets.
+│   └── ubuntu-resolute-xfce/  Build scripts, guest customization recipe, and desktop assets.
+├── dist/images/     Generated QCOW2 images, checksums, and manifests (ignored).
+├── .cache/images/   Downloaded base images and build workspaces (ignored).
 ├── ui/              TypeScript sources for the dashboard.
 ├── testldap/        glauth config + cert/key used for local LDAP.
 ├── testsplunk/      Post-setup task creating the local Splunk's audit and SauronAgent indexes.
