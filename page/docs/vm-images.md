@@ -10,11 +10,13 @@ Open the chosen release's **Assets** list and select an image:
 | Guest desktop | Reconstructed filename | Image details |
 | --- | --- | --- |
 | Ubuntu 26.04 XFCE | `ubuntu26.04-xfce-v<version>.img` | [Ubuntu 26.04 image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu26.04-xfce/README.md) |
-| Ubuntu 24.04 XFCE | `ubuntu24.04-xfce-v<version>.img` | [Ubuntu 24.04 image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md) |
+| Ubuntu 24.04 XFCE | `ubuntu24.04-xfce-v<version>.img` | [Ubuntu 24.04 XFCE image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md) |
+| Ubuntu 24.04 GNOME | `ubuntu24.04-gnome-v<version>.img` | [Ubuntu 24.04 GNOME image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-gnome/README.md) |
 | Rocky Linux 9 XFCE | `rocky9-xfce-v<version>.img` | [Rocky image README](https://github.com/define42/DevBox-Gateway/blob/main/images/rocky9-xfce/README.md) |
 
-All three are x86_64 QCOW2 disks with XFCE, XRDP, cloud-init, IntelliJ IDEA
-2026.2.3, and SauronAgent. The `v<version>` suffix and the installed SauronAgent
+All four are x86_64 QCOW2 disks with the selected desktop, XRDP, cloud-init,
+IntelliJ IDEA 2026.2.3, and SauronAgent. GNOME sessions use Xorg for RDP.
+The `v<version>` suffix and the installed SauronAgent
 use the gateway release version; `26.04`, `24.04`, and `9` identify the guest
 operating systems.
 
@@ -28,7 +30,8 @@ chosen release version:
 
 ```sh
 image="ubuntu26.04-xfce-v1.2.3.img"
-# For Ubuntu 24.04, use image="ubuntu24.04-xfce-v1.2.3.img" instead.
+# For Ubuntu 24.04 XFCE, use image="ubuntu24.04-xfce-v1.2.3.img" instead.
+# For Ubuntu 24.04 GNOME, use image="ubuntu24.04-gnome-v1.2.3.img" instead.
 # For Rocky Linux 9, use image="rocky9-xfce-v1.2.3.img" instead.
 cat "$image".part-* > "$image"
 sha256sum --check "$image.sha256"

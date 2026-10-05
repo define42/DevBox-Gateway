@@ -82,8 +82,9 @@ make image IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 ```
 
-Use `IMAGE=ubuntu24.04-xfce` or `IMAGE=rocky9-xfce` with the same targets to build
-and test Ubuntu 24.04 XFCE or Rocky Linux 9 XFCE. `IMAGE` defaults to
+Use `IMAGE=ubuntu24.04-xfce`, `IMAGE=ubuntu24.04-gnome`, or `IMAGE=rocky9-xfce`
+with the same targets to build and test Ubuntu 24.04 XFCE, Ubuntu 24.04 GNOME,
+or Rocky Linux 9 XFCE. `IMAGE` defaults to
 `ubuntu26.04-xfce` when omitted.
 
 The syntax and upload-source check is quick. The full build requires Linux
@@ -93,8 +94,9 @@ checkout and installs it into the selected desktop image. KVM is optional but
 speeds up the build.
 The smoke test needs host `qemu-system-x86_64`, `qemu-img`, `xorriso`, and `timeout`
 and boots a temporary overlay without modifying the base image. See the
-[Ubuntu 26.04](images/ubuntu26.04-xfce/README.md),
-[Ubuntu 24.04](images/ubuntu24.04-xfce/README.md), and
+[Ubuntu 26.04 XFCE](images/ubuntu26.04-xfce/README.md),
+[Ubuntu 24.04 XFCE](images/ubuntu24.04-xfce/README.md),
+[Ubuntu 24.04 GNOME](images/ubuntu24.04-gnome/README.md), and
 [Rocky](images/rocky9-xfce/README.md) image READMEs for artifact paths and
 guest configuration.
 
@@ -163,11 +165,12 @@ screenshots when the dashboard or login flow changes.
 The [release workflow](.github/workflows/go.yml) creates version tags and GitHub
 Releases with generated release notes, builds gateway and SauronAgent packages,
 and publishes gateway container images after pushes to `main`. It calls the
-[Ubuntu 26.04 image workflow](.github/workflows/ubuntu26.04-xfce.yml),
-[Ubuntu 24.04 image workflow](.github/workflows/ubuntu24.04-xfce.yml), and
+[Ubuntu 26.04 XFCE image workflow](.github/workflows/ubuntu26.04-xfce.yml),
+[Ubuntu 24.04 XFCE image workflow](.github/workflows/ubuntu24.04-xfce.yml),
+[Ubuntu 24.04 GNOME image workflow](.github/workflows/ubuntu24.04-gnome.yml), and
 [Rocky image workflow](.github/workflows/rocky9-xfce.yml) with the same version
-to build and boot-test all three images. Release publication waits for the
-gateway and all three image jobs to succeed, then attaches the packages, split
+to build and boot-test all four images. Release publication waits for the
+gateway and all four image jobs to succeed, then attaches the packages, split
 image parts, image checksums, and build manifests to one `vMAJOR.MINOR.PATCH` release.
 The SauronAgent installed in each image also uses that release version. Describe
 changes in commit and pull-request text so the release notes are useful.

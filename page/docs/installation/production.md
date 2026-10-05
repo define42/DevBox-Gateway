@@ -227,10 +227,10 @@ the first image themselves.
 ## 8. Upload the first VM image
 
 On the computer running your browser, download **all** parts for one Ubuntu
-26.04, Ubuntu 24.04, or Rocky Linux 9 XFCE image from the chosen release, plus
-its checksum and manifest. Keep them together in one directory. These guest
-choices work with the Rocky Linux host; they do not need to match the host
-distribution.
+26.04 XFCE, Ubuntu 24.04 XFCE or GNOME, or Rocky Linux 9 XFCE image from the
+chosen release, plus its checksum and manifest. Keep them together in one
+directory. These guest choices work with the Rocky Linux host; they do not need
+to match the host distribution.
 
 In that directory, reconstruct and verify the image. Set `version` to the same
 release used above; this example chooses Ubuntu 26.04:
@@ -244,7 +244,8 @@ sha256sum --check "$image.sha256"
 
 Continue only when the checksum reports `OK`. The [VM image guide](../vm-images.md)
 lists all filenames and explains the manifest. Release images already include
-cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.
+cloud-init, the selected desktop, XRDP, IntelliJ IDEA, and the matching
+SauronAgent.
 
 1. Under **Upload Base Image**, choose the complete disk file, then select
    **Upload**.

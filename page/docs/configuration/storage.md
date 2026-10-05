@@ -67,11 +67,11 @@ member who also meets `LDAP_REQUIRED_GROUPS`, and open **Admin → Base Images**
 [Download a VM image](../vm-images.md#downloading-vm-images) from this project's
 [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases), join its
 parts, verify its checksum, and upload the complete `.img`. Ubuntu 26.04 XFCE,
-Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE images are available. See the
+Ubuntu 24.04 XFCE or GNOME, and Rocky Linux 9 XFCE images are available. See the
 [production walkthrough](../installation/production.md#7-log-in-as-an-administrator)
 for the first upload.
 
-You can also [build an Ubuntu or Rocky Linux XFCE image from this checkout](../development/building.md#building-vm-images),
+You can also [build an Ubuntu or Rocky Linux desktop image from this checkout](../development/building.md#building-vm-images),
 including its matching SauronAgent package, and copy the resulting `.img` into
 `BASE_IMAGE_DIR` or upload it through the administrator's **Base Images** modal.
 

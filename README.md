@@ -14,8 +14,8 @@ SauronAgent collects audit events from inside the guests over virtio-vsock.
 
 ## Getting started
 
-Download gateway and SauronAgent packages, plus **Ubuntu 26.04**, **Ubuntu 24.04**,
-and **Rocky Linux 9** XFCE VM images, from
+Download gateway and SauronAgent packages, plus **Ubuntu 26.04 XFCE**,
+**Ubuntu 24.04 XFCE or GNOME**, and **Rocky Linux 9 XFCE** VM images, from
 [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases).
 
 Choose an installation guide for your host:

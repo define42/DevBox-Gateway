@@ -35,6 +35,7 @@
 ├── images/
 │   ├── Makefile     Image build, recipe validation, and boot smoke-test targets.
 │   ├── rocky9-xfce/  Rocky Linux 9 XFCE image recipe and desktop assets.
+│   ├── ubuntu24.04-gnome/  Ubuntu 24.04 GNOME image recipe and desktop assets.
 │   ├── ubuntu24.04-xfce/  Ubuntu 24.04 XFCE image recipe and desktop assets.
 │   └── ubuntu26.04-xfce/  Build scripts, guest customization recipe, and desktop assets.
 ├── dist/images/     Generated QCOW2 images, checksums, and manifests (ignored).

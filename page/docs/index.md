@@ -25,8 +25,8 @@ library, signing in as an administrator, and uploading the first image.
    then start the service.
 3. [Sign in to the dashboard](usage/dashboard.md) as an administrator.
    [Download and verify a VM image](vm-images.md), then upload it through
-   **Admin → Base Images**. Releases include Ubuntu 26.04, Ubuntu 24.04, and
-   Rocky Linux 9 XFCE images with SauronAgent already installed.
+   **Admin → Base Images**. Releases include Ubuntu 26.04 XFCE, Ubuntu 24.04
+   XFCE or GNOME, and Rocky Linux 9 XFCE images with SauronAgent already installed.
 4. Create a VM from an uploaded image and
    [connect with an RDP client](usage/rdp.md).
 

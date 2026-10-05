@@ -4,6 +4,9 @@ Builds an Ubuntu 24.04 LTS amd64 desktop image for DevBox Gateway from
 Ubuntu's official server cloud image. The recipe, desktop assets, and guest
 agent are built together from this repository.
 
+For a GNOME desktop on the same Ubuntu release, use the
+[Ubuntu 24.04 GNOME image](../ubuntu24.04-gnome/README.md).
+
 ## Build and check
 
 Run from the repository root:
@@ -82,7 +85,7 @@ The [gateway release workflow](../../.github/workflows/go.yml) calls the
 [image workflow](../../.github/workflows/ubuntu24.04-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
-After the gateway build and all three image boot tests succeed,
+After the gateway build and all four image boot tests succeed,
 the gateway workflow publishes the image assets alongside the gateway and
 SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
 

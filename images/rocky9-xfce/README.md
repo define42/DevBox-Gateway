@@ -80,10 +80,11 @@ The [gateway release workflow](../../.github/workflows/go.yml) calls the
 [Rocky image workflow](../../.github/workflows/rocky9-xfce.yml) on pushes to
 `main`, passing the gateway's numeric `MAJOR.MINOR.PATCH` version. The image and
 its installed SauronAgent use that exact version and the same source commit.
-After the gateway build and all three image boot tests succeed, the gateway
-workflow publishes Rocky Linux 9, [Ubuntu 26.04](../ubuntu26.04-xfce/README.md), and
-[Ubuntu 24.04](../ubuntu24.04-xfce/README.md) image assets alongside the gateway and
-SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
+After the gateway build and all four image boot tests succeed, the gateway
+workflow publishes Rocky Linux 9, [Ubuntu 26.04 XFCE](../ubuntu26.04-xfce/README.md),
+[Ubuntu 24.04 XFCE](../ubuntu24.04-xfce/README.md), and
+[Ubuntu 24.04 GNOME](../ubuntu24.04-gnome/README.md) image assets alongside the
+gateway and SauronAgent packages in the same `vMAJOR.MINOR.PATCH` GitHub Release.
 
 The Rocky image workflow also runs independently for relevant image, build,
 and SauronAgent changes on pull requests, using version `0.0.0`. Manual runs

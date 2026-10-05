@@ -102,16 +102,16 @@ and default filenames (for example, `-format deb -arch x86_64` produces `amd64`)
 ## Building VM images
 
 VM image recipes live under [`images/`](https://github.com/define42/DevBox-Gateway/blob/main/images), with one directory per image
-variant. The Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE recipes
-build standalone QCOW2 desktop disks and install SauronAgent from the same
-checkout, enabling its guest service.
+variant. The Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, Ubuntu 24.04 GNOME, and
+Rocky Linux 9 XFCE recipes build standalone QCOW2 desktop disks and install
+SauronAgent from the same checkout, enabling its guest service.
 Image builds run separately from gateway and container builds.
 
 [GitHub Releases](https://github.com/define42/DevBox-Gateway/releases) publish
-all three images alongside the gateway and SauronAgent packages under the same
+all four images alongside the gateway and SauronAgent packages under the same
 `vMAJOR.MINOR.PATCH` tag. Each image filename and its
 installed SauronAgent use that gateway release version. Publication waits for
-all three images to build and pass their boot tests. For prebuilt downloads,
+all four images to build and pass their boot tests. For prebuilt downloads,
 follow [Downloading VM images](../vm-images.md#downloading-vm-images).
 
 On a Linux x86_64 host with Docker access, Bash, curl, Python 3, `flock`,
@@ -125,6 +125,10 @@ make image-test IMAGE=ubuntu26.04-xfce IMAGE_VERSION=0.0.0
 make image-check IMAGE=ubuntu24.04-xfce
 make image IMAGE=ubuntu24.04-xfce IMAGE_VERSION=0.0.0
 make image-test IMAGE=ubuntu24.04-xfce IMAGE_VERSION=0.0.0
+
+make image-check IMAGE=ubuntu24.04-gnome
+make image IMAGE=ubuntu24.04-gnome IMAGE_VERSION=0.0.0
+make image-test IMAGE=ubuntu24.04-gnome IMAGE_VERSION=0.0.0
 
 make image-check IMAGE=rocky9-xfce
 make image IMAGE=rocky9-xfce IMAGE_VERSION=0.0.0
@@ -145,7 +149,8 @@ Output goes to `dist/images/<variant>/` as
 checksum, builder container, and SauronAgent version. Downloads are cached under
 `.cache/images/`. Both directories are ignored by Git. See the
 [Ubuntu 26.04 image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu26.04-xfce/README.md),
-[Ubuntu 24.04 image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md), and
+[Ubuntu 24.04 XFCE image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md),
+[Ubuntu 24.04 GNOME image README](https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-gnome/README.md), and
 [Rocky image README](https://github.com/define42/DevBox-Gateway/blob/main/images/rocky9-xfce/README.md) for contents, release
 downloads, and gateway installation.
 

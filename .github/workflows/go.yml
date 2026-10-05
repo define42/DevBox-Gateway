@@ -220,6 +220,15 @@ jobs:
     with:
       version: ${{ needs.build.outputs.version }}
 
+  ubuntu24-gnome-image:
+    needs: build
+    if: github.event_name == 'push' && needs.build.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ubuntu24.04-gnome.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+
   rocky-image:
     needs: build
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
@@ -230,7 +239,7 @@ jobs:
       version: ${{ needs.build.outputs.version }}
 
   release:
-    needs: [build, ubuntu-image, ubuntu24-image, rocky-image]
+    needs: [build, ubuntu-image, ubuntu24-image, ubuntu24-gnome-image, rocky-image]
     if: github.event_name == 'push' && needs.build.outputs.tag != ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -250,10 +259,16 @@ jobs:
           name: ubuntu26.04-xfce-v${{ needs.build.outputs.version }}
           path: release/images
 
-      - name: Download Ubuntu 24.04 image assets
+      - name: Download Ubuntu 24.04 XFCE image assets
         uses: actions/download-artifact@v8
         with:
           name: ubuntu24.04-xfce-v${{ needs.build.outputs.version }}
+          path: release/images
+
+      - name: Download Ubuntu 24.04 GNOME image assets
+        uses: actions/download-artifact@v8
+        with:
+          name: ubuntu24.04-gnome-v${{ needs.build.outputs.version }}
           path: release/images
 
       - name: Download Rocky Linux 9 image assets
@@ -341,6 +356,16 @@ jobs:
             ```sh
             cat ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img.part-* > ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img
             sha256sum --check ubuntu24.04-xfce-${{ needs.build.outputs.tag }}.img.sha256
+            ```
+
+            ### Ubuntu 24.04 GNOME image
+
+            The image and its embedded SauronAgent use version ${{ needs.build.outputs.version }}.
+            Download all image parts and the checksum file into one directory, then reconstruct and verify:
+
+            ```sh
+            cat ubuntu24.04-gnome-${{ needs.build.outputs.tag }}.img.part-* > ubuntu24.04-gnome-${{ needs.build.outputs.tag }}.img
+            sha256sum --check ubuntu24.04-gnome-${{ needs.build.outputs.tag }}.img.sha256
             ```
 
             ### Rocky Linux 9 XFCE image
