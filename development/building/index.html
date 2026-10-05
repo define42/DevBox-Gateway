@@ -1527,15 +1527,15 @@ Recognized CPU aliases are normalized to the selected package format in metadata
 and default filenames (for example, <code>-format deb -arch x86_64</code> produces <code>amd64</code>).</p>
 <h2 id="building-vm-images">Building VM images<a class="headerlink" href="#building-vm-images" title="Permanent link">&para;</a></h2>
 <p>VM image recipes live under <a href="https://github.com/define42/DevBox-Gateway/blob/main/images"><code>images/</code></a>, with one directory per image
-variant. The Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, and Rocky Linux 9 XFCE recipes
-build standalone QCOW2 desktop disks and install SauronAgent from the same
-checkout, enabling its guest service.
+variant. The Ubuntu 26.04 XFCE, Ubuntu 24.04 XFCE, Ubuntu 24.04 GNOME, and
+Rocky Linux 9 XFCE recipes build standalone QCOW2 desktop disks and install
+SauronAgent from the same checkout, enabling its guest service.
 Image builds run separately from gateway and container builds.</p>
 <p><a href="https://github.com/define42/DevBox-Gateway/releases">GitHub Releases</a> publish
-all three images alongside the gateway and SauronAgent packages under the same
+all four images alongside the gateway and SauronAgent packages under the same
 <code>vMAJOR.MINOR.PATCH</code> tag. Each image filename and its
 installed SauronAgent use that gateway release version. Publication waits for
-all three images to build and pass their boot tests. For prebuilt downloads,
+all four images to build and pass their boot tests. For prebuilt downloads,
 follow <a href="../../vm-images/#downloading-vm-images">Downloading VM images</a>.</p>
 <p>On a Linux x86_64 host with Docker access, Bash, curl, Python 3, <code>flock</code>,
 <code>sha256sum</code>, Git, Make, and the Go version specified in <code>go.mod</code>, run:</p>
@@ -1547,9 +1547,13 @@ follow <a href="../../vm-images/#downloading-vm-images">Downloading VM images</a
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>make<span class="w"> </span>image<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>ubuntu24.04-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>make<span class="w"> </span>image-test<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>ubuntu24.04-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
 <a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>make<span class="w"> </span>image-check<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>make<span class="w"> </span>image<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>make<span class="w"> </span>image-test<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>make<span class="w"> </span>image-check<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>ubuntu24.04-gnome
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>make<span class="w"> </span>image<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>ubuntu24.04-gnome<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>make<span class="w"> </span>image-test<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>ubuntu24.04-gnome<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>make<span class="w"> </span>image-check<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>make<span class="w"> </span>image<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>make<span class="w"> </span>image-test<span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span>rocky9-xfce<span class="w"> </span><span class="nv">IMAGE_VERSION</span><span class="o">=</span><span class="m">0</span>.0.0
 </code></pre></div>
 <p><code>IMAGE</code> defaults to <code>ubuntu26.04-xfce</code> when omitted.</p>
 <p>The build downloads the selected distribution's source image and a container
@@ -1563,7 +1567,8 @@ test additionally requires host <code>qemu-system-x86_64</code>, <code>qemu-img<
 checksum, builder container, and SauronAgent version. Downloads are cached under
 <code>.cache/images/</code>. Both directories are ignored by Git. See the
 <a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu26.04-xfce/README.md">Ubuntu 26.04 image README</a>,
-<a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md">Ubuntu 24.04 image README</a>, and
+<a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md">Ubuntu 24.04 XFCE image README</a>,
+<a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-gnome/README.md">Ubuntu 24.04 GNOME image README</a>, and
 <a href="https://github.com/define42/DevBox-Gateway/blob/main/images/rocky9-xfce/README.md">Rocky image README</a> for contents, release
 downloads, and gateway installation.</p>
 <h2 id="ui-typescript">UI (TypeScript)<a class="headerlink" href="#ui-typescript" title="Permanent link">&para;</a></h2>

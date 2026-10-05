@@ -1717,10 +1717,10 @@ Uploading images requires administrator access; ordinary users cannot upload
 the first image themselves.</p>
 <h2 id="8-upload-the-first-vm-image">8. Upload the first VM image<a class="headerlink" href="#8-upload-the-first-vm-image" title="Permanent link">&para;</a></h2>
 <p>On the computer running your browser, download <strong>all</strong> parts for one Ubuntu
-26.04, Ubuntu 24.04, or Rocky Linux 9 XFCE image from the chosen release, plus
-its checksum and manifest. Keep them together in one directory. These guest
-choices work with the Rocky Linux host; they do not need to match the host
-distribution.</p>
+26.04 XFCE, Ubuntu 24.04 XFCE or GNOME, or Rocky Linux 9 XFCE image from the
+chosen release, plus its checksum and manifest. Keep them together in one
+directory. These guest choices work with the Rocky Linux host; they do not need
+to match the host distribution.</p>
 <p>In that directory, reconstruct and verify the image. Set <code>version</code> to the same
 release used above; this example chooses Ubuntu 26.04:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">version</span><span class="o">=</span><span class="m">1</span>.2.3
@@ -1730,7 +1730,8 @@ release used above; this example chooses Ubuntu 26.04:</p>
 </code></pre></div>
 <p>Continue only when the checksum reports <code>OK</code>. The <a href="../../vm-images/">VM image guide</a>
 lists all filenames and explains the manifest. Release images already include
-cloud-init, XFCE, XRDP, IntelliJ IDEA, and the matching SauronAgent.</p>
+cloud-init, the selected desktop, XRDP, IntelliJ IDEA, and the matching
+SauronAgent.</p>
 <ol>
 <li>Under <strong>Upload Base Image</strong>, choose the complete disk file, then select
    <strong>Upload</strong>.</li>

@@ -1448,7 +1448,12 @@ includes prebuilt VM images alongside the gateway and SauronAgent RPM and DEB pa
 <tr>
 <td>Ubuntu 24.04 XFCE</td>
 <td><code>ubuntu24.04-xfce-v&lt;version&gt;.img</code></td>
-<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md">Ubuntu 24.04 image README</a></td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-xfce/README.md">Ubuntu 24.04 XFCE image README</a></td>
+</tr>
+<tr>
+<td>Ubuntu 24.04 GNOME</td>
+<td><code>ubuntu24.04-gnome-v&lt;version&gt;.img</code></td>
+<td><a href="https://github.com/define42/DevBox-Gateway/blob/main/images/ubuntu24.04-gnome/README.md">Ubuntu 24.04 GNOME image README</a></td>
 </tr>
 <tr>
 <td>Rocky Linux 9 XFCE</td>
@@ -1457,8 +1462,9 @@ includes prebuilt VM images alongside the gateway and SauronAgent RPM and DEB pa
 </tr>
 </tbody>
 </table>
-<p>All three are x86_64 QCOW2 disks with XFCE, XRDP, cloud-init, IntelliJ IDEA
-2026.2.3, and SauronAgent. The <code>v&lt;version&gt;</code> suffix and the installed SauronAgent
+<p>All four are x86_64 QCOW2 disks with the selected desktop, XRDP, cloud-init,
+IntelliJ IDEA 2026.2.3, and SauronAgent. GNOME sessions use Xorg for RDP.
+The <code>v&lt;version&gt;</code> suffix and the installed SauronAgent
 use the gateway release version; <code>26.04</code>, <code>24.04</code>, and <code>9</code> identify the guest
 operating systems.</p>
 <h2 id="download-and-verify">Download and verify<a class="headerlink" href="#download-and-verify" title="Permanent link">&para;</a></h2>
@@ -1468,10 +1474,11 @@ The manifest records the source image and build provenance. Reconstruct the
 complete disk and verify it from that directory, replacing <code>1.2.3</code> with the
 chosen release version:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nv">image</span><span class="o">=</span><span class="s2">"ubuntu26.04-xfce-v1.2.3.img"</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># For Ubuntu 24.04, use image="ubuntu24.04-xfce-v1.2.3.img" instead.</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># For Rocky Linux 9, use image="rocky9-xfce-v1.2.3.img" instead.</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>.part-*<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>sha256sum<span class="w"> </span>--check<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">.sha256"</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># For Ubuntu 24.04 XFCE, use image="ubuntu24.04-xfce-v1.2.3.img" instead.</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># For Ubuntu 24.04 GNOME, use image="ubuntu24.04-gnome-v1.2.3.img" instead.</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># For Rocky Linux 9, use image="rocky9-xfce-v1.2.3.img" instead.</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>.part-*<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">"</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>sha256sum<span class="w"> </span>--check<span class="w"> </span><span class="s2">"</span><span class="nv">$image</span><span class="s2">.sha256"</span>
 </code></pre></div>
 <h2 id="upload-the-first-base-image">Upload the first base image<a class="headerlink" href="#upload-the-first-base-image" title="Permanent link">&para;</a></h2>
 <p>The gateway can start with an empty image library and creates <code>BASE_IMAGE_DIR</code>

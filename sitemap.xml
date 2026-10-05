@@ -2,102 +2,102 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/architecture/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/compliance/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/security/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/vm-images/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/configuration/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/configuration/ldap/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/configuration/storage/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/configuration/tls/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/development/building/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/development/documentation/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/development/repository-layout/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/development/testing/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/deb/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/docker-compose/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/production/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/rpm/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/installation/sauronagent/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/operations/audit-logs/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/operations/guest-events/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/operations/health-checks/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/reference/http-api/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/usage/dashboard/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
     <url>
          <loc>https://define42.github.io/DevBox-Gateway/usage/rdp/</loc>
-         <lastmod>2026-10-04</lastmod>
+         <lastmod>2026-10-05</lastmod>
     </url>
 </urlset>
