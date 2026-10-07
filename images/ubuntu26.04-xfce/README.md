@@ -144,6 +144,19 @@ After changing client settings, log out of XFCE and start a new RDP session.
 Inside that session, use `pactl info`, `pactl list short sinks`, and
 `pactl list short sources` to check the audio server and redirected devices.
 
+## Firefox updates
+
+Firefox is installed as a native package from Mozilla's APT repository. The
+recipe allows unattended updates from that repository and pins Ubuntu's
+Firefox packages to priority -1 to prevent replacement with Snap. Prioritizing
+Mozilla alone is insufficient because unattended upgrades exclude repositories
+outside their allowed origins.
+
+The XRDP startup script exports XAUTHORITY before starting XFCE, preserving
+an existing value or defaulting to the user's .Xauthority file. This also lets
+Firefox installed manually through Snap authenticate to the XRDP display when
+Snap changes its home directory. The setting takes effect in new XRDP sessions.
+
 ## IntelliJ IDEA
 
 IntelliJ IDEA is installed in `/opt/intellij-idea` from JetBrains' Linux x86_64

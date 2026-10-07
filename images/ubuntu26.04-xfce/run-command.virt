@@ -46,11 +46,14 @@ run-command chmod 0644 /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml
 upload 99-disable-apparmor.cfg:/etc/default/grub.d/99-disable-apparmor.cfg
 run-command chmod 0644 /etc/default/grub.d/99-disable-apparmor.cfg
 
-# Add Mozilla APT repository and pin it above Ubuntu archive
+# Keep Firefox on Mozilla's native packages, including unattended upgrades.
+# A positive Mozilla pin alone does not exclude Ubuntu's Snap transition when
+# unattended-upgrades filters out repositories that are not allowed origins.
 run-command install -d -m 0755 /etc/apt/keyrings
 run-command wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O /etc/apt/keyrings/packages.mozilla.org.asc
 run-command printf 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main\n' > /etc/apt/sources.list.d/mozilla.list
-run-command printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /etc/apt/preferences.d/mozilla
+run-command printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n\nPackage: firefox firefox-*\nPin: release o=Ubuntu\nPin-Priority: -1\n' > /etc/apt/preferences.d/mozilla
+run-command printf 'Unattended-Upgrade::Origins-Pattern:: "site=packages.mozilla.org";\n' > /etc/apt/apt.conf.d/52unattended-upgrades-mozilla
 run-command apt-get update
 install firefox
 
