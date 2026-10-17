@@ -8,7 +8,7 @@ require (
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/go-asn1-ber/asn1-ber v1.5.8
 	github.com/go-chi/chi/v5 v5.3.2
-	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/rpmpack v0.7.1
 	github.com/google/uuid v1.6.0
