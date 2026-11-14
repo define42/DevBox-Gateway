@@ -23,7 +23,7 @@ require (
 	github.com/tredoe/osutil v1.5.0
 	golang.org/x/sys v0.48.0
 	gopkg.in/yaml.v3 v3.0.1
-	libvirt.org/go/libvirt v1.12007.0
+	libvirt.org/go/libvirt v1.12009.0
 )
 
 require (
